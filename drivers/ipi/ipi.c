@@ -15,7 +15,13 @@ static const struct ipi_ops *ipi;
 
 void ipi_register(const struct ipi_ops *ops)
 {
-	ipi = ops;
+	if (!ipi || ops->rating > ipi->rating)
+		ipi = ops;
+}
+
+unsigned long ipi_irq(void)
+{
+	return ipi ? ipi->irq : 0;
 }
 
 bool ipi_available(void)
@@ -34,9 +40,11 @@ void ipi_hart_init(void)
 
 	if (!ipi)
 		return;
+	if (ipi->hart_init)
+		ipi->hart_init();
 	ipi->clear(h->hartid);
 	atomic_store_ulong(&h->ipi_pending, 0);
-	csr_set(mie, MIP_MSIP);
+	csr_set(mie, ipi->irq);
 }
 
 void ipi_kick(unsigned long hartid)

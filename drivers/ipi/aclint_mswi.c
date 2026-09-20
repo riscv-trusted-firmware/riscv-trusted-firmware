@@ -8,6 +8,7 @@
  * CLINT): one MSIP register per hart.
  */
 
+#include <arch/csr.h>
 #include <driver.h>
 #include <io.h>
 #include <ipi.h>
@@ -33,6 +34,8 @@ static void aclint_mswi_clear(unsigned long hartid)
 
 static const struct ipi_ops aclint_mswi_ops = {
 	.name = "aclint-mswi",
+	.rating = 100,
+	.irq = MIP_MSIP,
 	.send = aclint_mswi_send,
 	.clear = aclint_mswi_clear,
 };

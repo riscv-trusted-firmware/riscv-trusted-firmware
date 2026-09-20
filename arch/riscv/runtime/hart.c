@@ -17,7 +17,6 @@
 #include <arch/sse.h>
 #include <atomic.h>
 #include <ipi.h>
-#include <irqchip.h>
 #include <log.h>
 #include <memregion.h>
 #include <mpxy.h>
@@ -375,7 +374,6 @@ void hart_runtime_init(void)
 	fwft_hart_init();
 	sse_hart_init();
 	dbtr_hart_init();
-	irqchip_hart_init();
 	mpxy_hart_init();
 
 	/* Nothing stale pending when the next stage (re)starts on this hart. */

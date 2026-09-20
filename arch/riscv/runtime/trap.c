@@ -102,16 +102,18 @@ static void trap_from_below(struct trap_regs *regs)
 	trap_info_read(regs, &info);
 
 	if (info.cause & CAUSE_IRQ_FLAG) {
-		switch (info.cause & ~CAUSE_IRQ_FLAG) {
-		case IRQ_M_TIMER:
+		unsigned long irq = info.cause & ~CAUSE_IRQ_FLAG;
+
+		/*
+		 * The IPI: a software interrupt, or an MSI through the IMSIC.
+		 */
+		if (irq == IRQ_M_TIMER)
 			timer_process();
-			return;
-		case IRQ_M_SOFT:
+		else if (irq < __RISCV_XLEN__ && BIT(irq) == ipi_irq())
 			ipi_process();
-			return;
-		default:
+		else
 			trap_fatal(regs, "unhandled interrupt");
-		}
+		return;
 	}
 
 	switch (info.cause) {

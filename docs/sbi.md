@@ -108,7 +108,10 @@ controllers in a state S-mode can use. The drivers find them in the device
 tree (a driver's `probe()` receives it): a PLIC gets every context quiet; an
 APLIC root domain delegates the sources named by `riscv,delegate` to its
 child domain and, in MSI mode, programs the IMSIC addresses of both levels
-(the S-level domain can only read them); the M-level IMSIC files stay off.
+(the S-level domain can only read them). The M-level IMSIC files carry the
+monitor's IPIs when they exist (one enabled identity per file, claimed
+through `mtopei`), in preference to the ACLINT MSWI: an IPI backend names
+the interrupt it arrives on and a rating.
 The device tree fix-up then disables the machine-level APLIC and IMSIC
 nodes and invalidates the PLIC's M-mode contexts, so that the next stage
 only sees what it may drive. With Smstateen all state enables are opened:
@@ -295,7 +298,7 @@ with `IMAGE_SBITEST` disabled.
    misaligned accesses, atomics, missing counters.
 4. **Device tree driven configuration.** libfdt is only used for the
    fix-up; device addresses and the hart count still come from Kconfig.
-5. More timer / IPI / reset / serial drivers; IPIs through the IMSIC.
+5. More timer / IPI / reset / serial drivers.
 6. **Scalability.** Remote fences are serialised system-wide; harts are
    indexed by hart id (`hartid < CONFIG_PLATFORM_HART_COUNT`).
 

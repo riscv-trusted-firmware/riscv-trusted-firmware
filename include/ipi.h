@@ -25,11 +25,20 @@ enum ipi_event {
 
 struct ipi_ops {
 	const char *name;
+	/* With several backends around, the highest rating wins. */
+	unsigned int rating;
+	/* The mip / mie bit the IPI arrives on: MIP_MSIP, or MIP_MEIP. */
+	unsigned long irq;
+	/* Calling hart: get ready to receive. May be NULL. */
+	void (*hart_init)(void);
 	void (*send)(unsigned long hartid);
+	/* Calling hart only: acknowledge what is pending. */
 	void (*clear)(unsigned long hartid);
 };
 
 void ipi_register(const struct ipi_ops *ops);
+/* The interrupt to enable and to look for in mip; 0 without a backend. */
+unsigned long ipi_irq(void);
 bool ipi_available(void);
 const char *ipi_name(void);
 

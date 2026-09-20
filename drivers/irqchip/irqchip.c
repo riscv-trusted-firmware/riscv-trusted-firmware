@@ -15,19 +15,6 @@
 
 #include "irqchip_internal.h"
 
-static void (*hart_init)(void);
-
-void irqchip_set_hart_init(void (*fn)(void))
-{
-	hart_init = fn;
-}
-
-void irqchip_hart_init(void)
-{
-	if (hart_init)
-		hart_init();
-}
-
 /*
  * A controller is machine-level when it interrupts the harts through their
  * machine external interrupt: directly ("interrupts-extended"), or as MSIs

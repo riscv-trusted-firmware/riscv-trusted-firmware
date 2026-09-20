@@ -48,8 +48,9 @@ static void hsm_wait_loop(void)
 {
 	struct hart *h = this_hart();
 
-	/* Only the M-mode software interrupt wakes a stopped hart. */
-	csr_write(mie, MIP_MSIP);
+	/* Only an IPI wakes a stopped hart. */
+	csr_write(mie, 0);
+	ipi_hart_init();
 	while (atomic_load_ulong(&h->hsm_state) !=
 	       SBI_HSM_STATE_START_PENDING) {
 		wfi();
@@ -113,7 +114,7 @@ static void hsm_wait_for_wakeup(void)
 	for (;;) {
 		unsigned long pending = csr_read(mip) & csr_read(mie);
 
-		if (pending & MIP_MSIP)
+		if (pending & ipi_irq())
 			ipi_process();
 		if (pending & MIP_MTIP)
 			timer_process();
