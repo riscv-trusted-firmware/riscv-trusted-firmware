@@ -289,6 +289,27 @@ void secondary_ipis_set(unsigned long hartid, unsigned long ipis)
 
 /* ---- tests ------------------------------------------------------------ */
 
+/* The vendor's calls: QEMU virt has one, for a vendor id of 0, and no other. */
+static void test_vendor(void)
+{
+	struct sbiret ret = {};
+
+	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION,
+			SBI_EXT_VENDOR_START);
+	CHECK(!ret.error && ret.value == 1, "vendor extension: %ld %ld",
+	      ret.error, ret.value);
+	ret = sbi_call1(SBI_EXT_VENDOR_START, 0, 0x1234);
+	CHECK(!ret.error && ret.value == (0x1234 ^ 0x5a),
+	      "vendor call: %ld %lx", ret.error, ret.value);
+	CHECK_RET(sbi_call1(SBI_EXT_VENDOR_START, 1, 0), SBI_ERR_NOT_SUPPORTED);
+	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION,
+			SBI_EXT_VENDOR_START + 1);
+	CHECK(!ret.error && ret.value == 0, "another vendor's extension: %ld",
+	      ret.value);
+	CHECK_RET(sbi_call1(SBI_EXT_VENDOR_START + 1, 0, 0),
+		  SBI_ERR_NOT_SUPPORTED);
+}
+
 static void test_base(void)
 {
 	static const unsigned long exts[] = {
@@ -521,6 +542,34 @@ static void test_legacy(void)
 		  SBI_ERR_NOT_SUPPORTED);
 }
 #endif
+
+/*
+ * Zkr: a hart with an entropy source has it opened to S-mode (mseccfg.SSEED).
+ */
+static void test_seed(unsigned long fdt_addr, unsigned long hartid)
+{
+	const void *fdt = (const void *)fdt_addr;
+	const char *isa = NULL;
+	int node = 0;
+
+	if (!fdt_addr || fdt_check_header(fdt))
+		return;
+	fdt_for_each_subnode(node, fdt, fdt_path_offset(fdt, "/cpus")) {
+		const fdt32_t *reg = fdt_getprop(fdt, node, "reg", NULL);
+
+		if (reg && fdt32_to_cpu(*reg) == hartid)
+			isa = fdt_getprop(fdt, node, "riscv,isa", NULL);
+	}
+	if (!isa || !strstr(isa, "_zkr"))
+		return;
+	WRITE_ONCE(trap_count, 0);
+	WRITE_ONCE(trap_expected, true);
+	/* The seed register is only ever read with a write. */
+	PROBE_INSN("csrrw t0, 0x015, zero", : : : "t0");
+	WRITE_ONCE(trap_expected, false);
+	CHECK(trap_count == 0, "the seed CSR traps in S-mode (cause %lu)",
+	      trap_cause);
+}
 
 static void test_traps(void)
 {
@@ -1019,6 +1068,17 @@ static void test_fdt(unsigned long addr)
 		return;
 	CHECK(fdt_check_full(fdt, fdt_totalsize(fdt)) == 0,
 	      "fdt_check_full failed");
+
+	/*
+	 * An idle state of a suspend type the monitor would refuse is not
+	 * offered.
+	 */
+	node = fdt_path_offset(fdt, "/cpus/test-idle-ok");
+	CHECK(node >= 0 && !fdt_getprop(fdt, node, "status", NULL),
+	      "the good idle state");
+	node = fdt_path_offset(fdt, "/cpus/test-idle-reserved");
+	CHECK(node >= 0 && fdt_getprop(fdt, node, "status", NULL),
+	      "the idle state nobody can enter");
 
 	parent = fdt_path_offset(fdt, "/reserved-memory");
 	CHECK(parent >= 0, "no /reserved-memory node");
@@ -1536,11 +1596,13 @@ void test_main(unsigned long hartid, unsigned long fdt)
 
 	test_fdt(fdt);
 	test_base();
+	test_vendor();
 	test_dbcn();
 	test_time();
 	test_ipi_self();
 	test_legacy();
 	test_traps();
+	test_seed(fdt, hartid);
 	test_pmu();
 	test_fwft();
 	test_sse(hartid);

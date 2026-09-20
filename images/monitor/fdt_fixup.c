@@ -15,6 +15,7 @@
  */
 
 #include <arch/hart.h>
+#include <arch/hsm.h>
 #include <domain.h>
 #include <driver.h>
 #include <fdt_util.h>
@@ -185,6 +186,34 @@ static int reserve_domain_regions(void *fdt)
 }
 #endif
 
+/*
+ * An idle state is a suspend type ("riscv,sbi-suspend-param") an operating
+ * system will ask for: one the monitor would refuse is better not offered.
+ */
+static int disable_idle_states(void *fdt)
+{
+	const char *compatible = "riscv,idle-state";
+	int node = -1, rc = 0;
+
+	for (;;) {
+		node = fdt_node_offset_by_compatible(fdt, node, compatible);
+		if (node < 0)
+			break;
+		uint32_t type =
+			fdt_prop_u32(fdt, node, "riscv,sbi-suspend-param", 0);
+
+		if (!fdt_node_enabled(fdt, node) ||
+		    !hsm_suspend_type_check(type))
+			continue;
+		pr_info("fdt: idle state %s (suspend type %x) is not supported, disabled\n",
+			fdt_get_name(fdt, node, NULL), type);
+		rc = fdt_node_disable(fdt, node);
+		if (rc)
+			return rc;
+	}
+	return 0;
+}
+
 void fdt_fixup(void *fdt)
 {
 	int rc = reserve(fdt, "monitor", monitor_base(), CONFIG_MONITOR_SIZE);
@@ -197,6 +226,8 @@ void fdt_fixup(void *fdt)
 		rc = drivers_fdt_fixup(fdt);
 	if (!rc)
 		rc = disable_unmanaged_harts(fdt);
+	if (!rc)
+		rc = disable_idle_states(fdt);
 	if (!rc)
 		rc = reserve_domain_regions(fdt);
 	if (rc)

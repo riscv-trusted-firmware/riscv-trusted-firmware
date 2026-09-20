@@ -9,9 +9,10 @@
  */
 
 #include <arch/hart.h>
+#include <arch/image.h>
 #include <arch/dbtr.h>
 #include <arch/fwft.h>
-#include <arch/image.h>
+#include <arch/isa.h>
 #include <arch/pmp.h>
 #include <arch/pmu.h>
 #include <arch/rfence.h>
@@ -170,6 +171,38 @@ static void monitor_regions_init(void)
 		      MEMREGION_MMODE_RW);
 }
 
+/*
+ * Is bit 'bit' of the 64 of menvcfg one that can be set? It is left as it was.
+ */
+static bool envcfg_bit_sticks(unsigned int bit)
+{
+	unsigned long old = 0, mask = 0;
+	bool sticks = false;
+
+#if __RISCV_XLEN__ == 64
+	mask = BIT(bit);
+	old = csr_read(CSR_MENVCFG);
+	csr_set(CSR_MENVCFG, mask);
+	sticks = csr_read(CSR_MENVCFG) & mask;
+	csr_write(CSR_MENVCFG, old);
+#else
+	if (bit < 32) {
+		mask = BIT(bit);
+		old = csr_read(CSR_MENVCFG);
+		csr_set(CSR_MENVCFG, mask);
+		sticks = csr_read(CSR_MENVCFG) & mask;
+		csr_write(CSR_MENVCFG, old);
+	} else {
+		mask = BIT(bit - 32);
+		old = csr_read(CSR_MENVCFGH);
+		csr_set(CSR_MENVCFGH, mask);
+		sticks = csr_read(CSR_MENVCFGH) & mask;
+		csr_write(CSR_MENVCFGH, old);
+	}
+#endif
+	return sticks;
+}
+
 void hart_detect_features(void)
 {
 	unsigned long val = 0;
@@ -208,9 +241,18 @@ void hart_detect_features(void)
 #endif
 	}
 #ifdef CONFIG_RISCV_EXT_SMEPMP
-	/* mseccfg exists when Smepmp does. */
-	features[HART_FEAT_SMEPMP] = features[HART_FEAT_PMP] &&
-				     csr_probe(CSR_MSECCFG, &val);
+	/*
+	 * mseccfg exists with Smepmp, but with Zkr as well: it is the rule
+	 * locking bypass that tells, which can be taken back while no rule is
+	 * locked.
+	 */
+	if (features[HART_FEAT_PMP] && csr_probe(CSR_MSECCFG, &val) &&
+	    isa_allows("smepmp")) {
+		csr_set(CSR_MSECCFG, MSECCFG_RLB);
+		features[HART_FEAT_SMEPMP] = csr_read(CSR_MSECCFG) &
+					     MSECCFG_RLB;
+		csr_write(CSR_MSECCFG, val);
+	}
 #endif
 #ifdef CONFIG_RISCV_EXT_SMSTATEEN
 	features[HART_FEAT_SMSTATEEN] = csr_probe(CSR_MSTATEEN0, &val);
@@ -219,6 +261,21 @@ void hart_detect_features(void)
 	/* scountovf exists when Sscofpmf does. */
 	features[HART_FEAT_SSCOFPMF] = csr_probe(CSR_SCOUNTOVF, &val);
 #endif
+	/*
+	 * Newer ones, which the device tree can keep the monitor away from
+	 * (<arch/isa.h>). The registers first, the tree's word second.
+	 */
+	features[HART_FEAT_SMCNTRPMF] = csr_probe(CSR_MCYCLECFG, &val) &&
+					isa_allows("smcntrpmf");
+	features[HART_FEAT_SMCDELEG] = features[HART_FEAT_MENVCFG] &&
+				       envcfg_bit_sticks(ENVCFG_CDE_BIT) &&
+				       isa_allows("smcdeleg") &&
+				       isa_allows("ssccfg");
+	if (csr_probe(CSR_MSECCFG, &val) && isa_allows("zkr")) {
+		csr_set(CSR_MSECCFG, MSECCFG_SSEED);
+		features[HART_FEAT_ZKR] = csr_read(CSR_MSECCFG) & MSECCFG_SSEED;
+		csr_write(CSR_MSECCFG, val);
+	}
 
 	monitor_regions_init();
 }
@@ -314,14 +371,24 @@ static void envcfg_init(void)
 		csr_write(CSR_STIMECMPH, ~UL(0));
 #endif
 	}
+	/*
+	 * Smcdeleg: the counters mcounteren opens are S-mode's to program
+	 * itself (Ssccfg), without a call for every start and stop. The SBI
+	 * PMU calls stay, for software that does not know, and for the
+	 * firmware counters.
+	 */
 #if __RISCV_XLEN__ == 64
 	csr_set(CSR_MENVCFG, BIT(ENVCFG_PBMTE_BIT));
 	if (hart_has(HART_FEAT_SSTC))
 		csr_set(CSR_MENVCFG, BIT(ENVCFG_STCE_BIT));
+	if (hart_has(HART_FEAT_SMCDELEG))
+		csr_set(CSR_MENVCFG, BIT(ENVCFG_CDE_BIT));
 #else
 	csr_set(CSR_MENVCFGH, BIT(ENVCFG_PBMTE_BIT - 32));
 	if (hart_has(HART_FEAT_SSTC))
 		csr_set(CSR_MENVCFGH, BIT(ENVCFG_STCE_BIT - 32));
+	if (hart_has(HART_FEAT_SMCDELEG))
+		csr_set(CSR_MENVCFGH, BIT(ENVCFG_CDE_BIT - 32));
 #endif
 }
 
@@ -629,6 +696,12 @@ void hart_runtime_init(void)
 	csr_write(scounteren, 0);
 
 	envcfg_init();
+	/*
+	 * Zkr: the seed is S-mode's to read; whether U-mode may is its
+	 * business.
+	 */
+	if (hart_has(HART_FEAT_ZKR))
+		csr_set(CSR_MSECCFG, MSECCFG_SSEED);
 	stateen_init();
 	pmp_hart_init();
 	pmu_hart_init();

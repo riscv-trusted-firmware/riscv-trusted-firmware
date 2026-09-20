@@ -23,6 +23,7 @@ and what is still missing.
 | PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart, `event_get_info`, counter snapshots |
 | DBCN      | `DBCN` | write, read, write_byte (`CONFIG_SBI_DBCN`) |
 | Legacy    | `0x00`-`0x08` | all v0.1 calls (`CONFIG_SBI_LEGACY`) |
+| Vendor    | `0x09000000` + mvendorid | the platform's, if it registers any (`<sbi/vendor.h>`); absent otherwise |
 | Domain control | `0x0A000000` + impl. id | firmware specific: enter, exit, start, stop domains ([domains.md](domains.md)) |
 
 All extensions of SBI v3.0 that are M-mode firmware's to provide are there. NACL and
@@ -92,9 +93,20 @@ CSRs when the H extension is present). A trap taken in M-mode is fatal
 unless the hart announced it (`trap_expected`): that is how optional CSRs
 are probed (`csr_probe()`) and how unprivileged accesses report faults.
 
+What a hart has, the monitor finds out by looking: a CSR is there or
+traps, a WARL bit sticks or does not. The device tree has a veto
+(`<arch/isa.h>`): where the boot hart's cpu node lists extensions
+(`riscv,isa-extensions`, or the `riscv,isa` string), the newer ones
+(Smepmp, Smcntrpmf, Smcdeleg/Ssccfg, Zkr) are only used when listed, which
+is how a platform keeps the monitor off something half implemented. The
+list is in the boot log. Smepmp is told from Zkr, which has mseccfg too,
+by the rule locking bypass bit.
+
 Before entering S-mode a hart delegates the usual exceptions and the S-mode
-interrupts, opens the counters, sets up menvcfg (Sstc, Zicbo*, Svpbmt as
-available) and programs the PMP from the memory region list
+interrupts, opens the counters, sets up menvcfg (Sstc, Zicbo*, Svpbmt, and
+with Smcdeleg the counter delegation that lets S-mode program the counters
+itself through Ssccfg, as available), opens the entropy source to S-mode
+where there is one (Zkr, mseccfg.SSEED) and programs the PMP from the memory region list
 (`include/memregion.h`): the monitor's image, plus what the drivers
 registered at probe time. Machine-only regions (the CLINT, the machine-level
 APLIC and IMSIC files, a protected RPMI transport) are closed to S/U-mode;
@@ -130,7 +142,10 @@ drivers then find it like on real hardware). Before the hand-over
 region that lies in RAM become `no-map` reservations, the nodes of
 `mmode_only` drivers (the RPMI transport and its users) and the
 machine-level interrupt controllers are disabled, and so are the harts the
-monitor does not manage.
+monitor does not manage and the idle states (`riscv,idle-state`) whose
+`riscv,sbi-suspend-param` is a suspend type `sbi_hart_suspend()` would
+refuse here: a reserved one, or one of the platform's without a platform
+backend that has any.
 
 ### Interrupt controllers
 
@@ -196,7 +211,9 @@ comes from the `riscv,pmu` device tree node (`riscv,event-to-mhpmcounters`,
 `riscv,event-to-mhpmevent`, `riscv,raw-event-to-mhpmcounters`); without it
 only cycles and instructions are offered, on their fixed counters. A counter
 is handed out stopped (mcountinhibit); cycle and instret run freely while
-nobody owns them. With Sscofpmf the overflow interrupt is delegated and the
+nobody owns them. With Smcntrpmf cycle and instret take the privilege
+filters of a counter configuration as well, and never count the monitor's
+own time. With Sscofpmf the overflow interrupt is delegated and the
 mode-filter flags of `counter_config_matching` are honoured; M-mode is
 always filtered out. Firmware counters count the events of the SBI
 specification where they happen (`pmu_fw_event()`). Counter snapshots use

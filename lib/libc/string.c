@@ -115,3 +115,13 @@ void *memchr(const void *s, int c, size_t n)
 			return (void *)p;
 	return NULL;
 }
+
+char *strstr(const char *haystack, const char *needle)
+{
+	size_t n = strlen(needle);
+
+	for (; *haystack; haystack++)
+		if (!strncmp(haystack, needle, n))
+			return (char *)haystack;
+	return n ? NULL : (char *)haystack;
+}

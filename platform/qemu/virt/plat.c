@@ -19,9 +19,72 @@ void plat_early_init(const void *fdt)
 	uart8250_console_init(fdt);
 }
 
+#if defined(IMAGE_MONITOR) && defined(CONFIG_IMAGE_SBITEST)
+
+#include <libfdt.h>
+#include <sbi/sbi.h>
+#include <sbi/vendor.h>
+
+/* For the test payload to call: QEMU's harts are no vendor's (mvendorid 0). */
+static struct service_ret test_vendor_ecall(unsigned long fid,
+					    struct trap_regs *regs)
+{
+	if (fid)
+		return (struct service_ret){ .error = SBI_ERR_NOT_SUPPORTED };
+	return (struct service_ret){ .value = (long)(regs->a0 ^ 0x5a) };
+}
+
+static const struct sbi_vendor_ops test_vendor_ops = {
+	.ecall = test_vendor_ecall
+};
+
+void plat_init(void)
+{
+	sbi_vendor_register(&test_vendor_ops);
+}
+
+/*
+ * Idle states for it to look for: one that is fine, one of a reserved suspend
+ * type.
+ */
+static int idle_states_fdt_prepare(void *fdt)
+{
+	static const struct {
+		const char *name;
+		uint32_t param;
+	} states[] = { { "test-idle-ok", 0x80000000 },
+		       { "test-idle-reserved", 0x00000005 } };
+	int rc = 0;
+
+	for (unsigned int i = 0; !rc && i < 2; i++) {
+		int cpus = fdt_path_offset(fdt, "/cpus"), node = 0;
+
+		node = cpus < 0 ? cpus :
+				  fdt_add_subnode(fdt, cpus, states[i].name);
+		if (node < 0)
+			return node;
+		rc = fdt_setprop(fdt, node, "compatible", "riscv,idle-state",
+				 17);
+		if (!rc)
+			rc = fdt_setprop_u32(fdt, node,
+					     "riscv,sbi-suspend-param",
+					     states[i].param);
+	}
+	return rc;
+}
+
+#else
+
 void plat_init(void)
 {
 }
+
+static int idle_states_fdt_prepare(void *fdt)
+{
+	return 0;
+}
+
+#endif
 
 #if defined(IMAGE_MONITOR) && defined(CONFIG_QEMU_VIRT_RPMI)
 
@@ -416,5 +479,7 @@ int plat_fdt_prepare(void *fdt)
 {
 	int rc = rpmi_fdt_prepare(fdt);
 
+	if (!rc)
+		rc = idle_states_fdt_prepare(fdt);
 	return rc ? rc : domains_fdt_prepare(fdt);
 }

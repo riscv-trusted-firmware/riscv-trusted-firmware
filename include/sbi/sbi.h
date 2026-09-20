@@ -175,6 +175,10 @@
 #define SBI_SPEC_VERSION_MAJOR 3
 #define SBI_SPEC_VERSION_MINOR 0
 
+/* Vendor specific extension space: + mvendorid[23:0]. */
+#define SBI_EXT_VENDOR_START 0x09000000
+#define SBI_EXT_VENDOR_END 0x09ffffff
+
 /*
  * Firmware specific extension space: domain control (<domain.h>).
  * (error, value) as everywhere; a domain goes by its index.

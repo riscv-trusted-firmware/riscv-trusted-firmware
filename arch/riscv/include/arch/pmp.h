@@ -15,6 +15,8 @@
 #define MSECCFG_MML 0x1
 #define MSECCFG_MMWP 0x2
 #define MSECCFG_RLB 0x4
+#define MSECCFG_USEED 0x100 /* Zkr: the seed CSR for U-mode, for S-mode */
+#define MSECCFG_SSEED 0x200
 
 /* Raw access to PMP entry 'idx': pmpaddr as the CSR wants it, cfg = PMP_*. */
 void pmp_entry_set(unsigned int idx, unsigned long pmpaddr, unsigned int cfg);

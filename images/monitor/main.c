@@ -13,6 +13,7 @@
 
 #include <arch/hart.h>
 #include <arch/hsm.h>
+#include <arch/isa.h>
 #include <arch/pmu.h>
 #include <boot.h>
 #include <domain.h>
@@ -49,6 +50,9 @@ static void print_features(void)
 		[HART_FEAT_SDTRIG] = "sdtrig",
 		[HART_FEAT_SSDBLTRP] = "ssdbltrp",
 		[HART_FEAT_H] = "h",
+		[HART_FEAT_SMCNTRPMF] = "smcntrpmf",
+		[HART_FEAT_SMCDELEG] = "smcdeleg",
+		[HART_FEAT_ZKR] = "zkr",
 	};
 
 	pr_info("features:");
@@ -126,6 +130,7 @@ void image_main(unsigned long hartid, unsigned long fdt,
 		csr_read(misa), csr_read(mvendorid), csr_read(marchid),
 		csr_read(mimpid));
 
+	isa_init(fdt_valid((const void *)fdt));
 	hart_detect_features();
 	/* From here on the tree is ours to read, complete and cut down. */
 	tree = (void *)fdt_prepare(fdt);
@@ -148,6 +153,8 @@ void image_main(unsigned long hartid, unsigned long fdt,
 	wait_for_secondaries();
 
 	print_features();
+	if (isa_string())
+		pr_info("isa: %s\n", isa_string());
 	pr_info("timer: %s, ipi: %s, reset: %s, harts: %u\n", timer_name(),
 		ipi_name(), reset_name(), hart_count());
 #ifdef CONFIG_RPMI

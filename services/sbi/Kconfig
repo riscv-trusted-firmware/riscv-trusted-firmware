@@ -23,6 +23,14 @@ config SBI_IMPL_VERSION
 	hex "SBI implementation version"
 	default 0x00000100
 
+config SBI_VENDOR
+	bool "Vendor specific extension space"
+	default y
+	help
+	  Routes calls to 0x09000000 + mvendorid to the platform, if it has
+	  registered any (<sbi/vendor.h>). Without one the space probes as
+	  absent, as it does with this option off.
+
 config SBI_FW_DOMAIN
 	bool "Domain control (firmware specific extension)"
 	depends on DOMAINS

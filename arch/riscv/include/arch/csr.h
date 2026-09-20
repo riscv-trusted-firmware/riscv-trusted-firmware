@@ -88,6 +88,7 @@
 #define ENVCFG_CBZE BIT(7)
 #define ENVCFG_PMM_SHIFT 32 /* 2 bits: 0 off, 2 PMLEN 7, 3 PMLEN 16 */
 #define ENVCFG_DTE_BIT 59
+#define ENVCFG_CDE_BIT 60 /* Smcdeleg: counter delegation */
 #define ENVCFG_ADUE_BIT 61
 #define ENVCFG_PBMTE_BIT 62
 #define ENVCFG_STCE_BIT 63
@@ -137,6 +138,10 @@
 #define CSR_PMPCFG0 0x3a0
 #define CSR_PMPADDR0 0x3b0
 #define CSR_MCOUNTINHIBIT 0x320
+#define CSR_MCYCLECFG 0x321 /* Smcntrpmf */
+#define CSR_MINSTRETCFG 0x322
+#define CSR_MCYCLECFGH 0x721
+#define CSR_MINSTRETCFGH 0x722
 #define CSR_MHPMEVENT0 0x320 /* + n, n = 3..31 */
 #define CSR_MHPMEVENT0H 0x720
 #define CSR_MCYCLE 0xb00 /* mhpmcounter n = + n */

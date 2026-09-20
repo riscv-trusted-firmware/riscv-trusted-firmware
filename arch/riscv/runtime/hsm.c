@@ -236,27 +236,34 @@ static void hsm_resume_loop(void)
 }
 
 /* 'tell': a hart suspend of its own, not the last step of a system suspend. */
-static int hart_suspend(unsigned long type, unsigned long resume_addr,
-			unsigned long arg, bool tell)
+/* The default types, the platform's, and what is reserved in between. */
+long hsm_suspend_type_check(unsigned long type)
 {
-	struct hart *h = this_hart();
-	bool retentive = false, platform = false;
-	long rc = 0;
-
-	/*
-	 * The default types, the platform's, and what is reserved in between.
-	 */
 	if (type > UL(0xffffffff) ||
 	    (type > SBI_HSM_SUSPEND_RET_DEFAULT &&
 	     type < SBI_HSM_SUSPEND_RET_PLATFORM) ||
 	    (type > SBI_HSM_SUSPEND_NON_RET_DEFAULT &&
 	     type < SBI_HSM_SUSPEND_NON_RET_PLATFORM))
 		return SBI_ERR_INVALID_PARAM;
+	if (type != SBI_HSM_SUSPEND_RET_DEFAULT &&
+	    type != SBI_HSM_SUSPEND_NON_RET_DEFAULT &&
+	    !(hsm_ops && hsm_ops->hart_suspend))
+		return SBI_ERR_NOT_SUPPORTED;
+	return SBI_SUCCESS;
+}
+
+static int hart_suspend(unsigned long type, unsigned long resume_addr,
+			unsigned long arg, bool tell)
+{
+	struct hart *h = this_hart();
+	long rc = hsm_suspend_type_check(type);
+	bool retentive = false, platform = false;
+
+	if (rc)
+		return (int)rc;
 	retentive = type < SBI_HSM_SUSPEND_NON_RET_DEFAULT;
 	platform = type != SBI_HSM_SUSPEND_RET_DEFAULT &&
 		   type != SBI_HSM_SUSPEND_NON_RET_DEFAULT;
-	if (platform && !(hsm_ops && hsm_ops->hart_suspend))
-		return SBI_ERR_NOT_SUPPORTED;
 
 	if (!retentive && !smode_entry_ok(resume_addr))
 		return SBI_ERR_INVALID_ADDRESS;

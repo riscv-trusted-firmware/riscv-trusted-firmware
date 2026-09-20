@@ -950,9 +950,48 @@ static uint64_t hw_counter_read(unsigned int n)
 #endif
 }
 
+/*
+ * cycle and instret have no event to select, but with Smcntrpmf they have
+ * the privilege filters of an mhpmevent, in mcyclecfg and minstretcfg.
+ */
+#define FILTER_BITS SHIFT_U64(0x1f, HPMEVENT_VUINH_BIT)
+
+static uint64_t fixed_cfg_read(unsigned int n)
+{
+	uint64_t val = n ? csr_read(CSR_MINSTRETCFG) : csr_read(CSR_MCYCLECFG);
+#if __RISCV_XLEN__ == 32
+	unsigned long hi = n ? csr_read(CSR_MINSTRETCFGH) :
+			       csr_read(CSR_MCYCLECFGH);
+
+	val |= SHIFT_U64(hi, 32);
+#endif
+	return val;
+}
+
+static void fixed_cfg_write(unsigned int n, uint64_t val)
+{
+	val &= FILTER_BITS;
+	if (n)
+		csr_write(CSR_MINSTRETCFG, (unsigned long)val);
+	else
+		csr_write(CSR_MCYCLECFG, (unsigned long)val);
+#if __RISCV_XLEN__ == 32
+	if (n)
+		csr_write(CSR_MINSTRETCFGH, (unsigned long)(val >> 32));
+	else
+		csr_write(CSR_MCYCLECFGH, (unsigned long)(val >> 32));
+#endif
+}
+
 static uint64_t hw_event_read(unsigned int n)
 {
-	uint64_t val = mhpmevent_read(n);
+	uint64_t val = 0;
+
+	if (n < 3)
+		return hart_has(HART_FEAT_SMCNTRPMF) && n != 1 ?
+			       fixed_cfg_read(n) :
+			       0;
+	val = mhpmevent_read(n);
 
 #if __RISCV_XLEN__ == 32
 	if (hart_has(HART_FEAT_SSCOFPMF))
@@ -963,8 +1002,11 @@ static uint64_t hw_event_read(unsigned int n)
 
 static void hw_event_write(unsigned int n, uint64_t val)
 {
-	if (n < 3)
+	if (n < 3) {
+		if (hart_has(HART_FEAT_SMCNTRPMF) && n != 1)
+			fixed_cfg_write(n, val);
 		return;
+	}
 	mhpmevent_write(n, (unsigned long)val);
 #if __RISCV_XLEN__ == 32
 	/* The upper half only exists with Sscofpmf. */
@@ -1079,6 +1121,12 @@ void pmu_hart_init(void)
 	for (unsigned int n = 3; n < PMU_HW_COUNTERS; n++)
 		if (hw_counters & BIT(n))
 			hw_event_write(n, 0);
+	/*
+	 * Where they can be told not to, they do not count the monitor's own
+	 * time.
+	 */
+	hw_event_write(0, BIT64(HPMEVENT_MINH_BIT));
+	hw_event_write(2, BIT64(HPMEVENT_MINH_BIT));
 }
 
 /*
@@ -1104,8 +1152,7 @@ void pmu_hart_switch_out(void)
 		if (!(hw_counters & BIT(n)))
 			continue;
 		p->hw.value[n] = hw_counter_read(n);
-		if (n >= 3)
-			p->hw.select[n] = hw_event_read(n);
+		p->hw.select[n] = hw_event_read(n);
 	}
 }
 
@@ -1123,6 +1170,8 @@ void pmu_hart_switch_in(bool fresh)
 			p->hw.value[n] = 0;
 			p->hw.select[n] = 0;
 		}
+		p->hw.select[0] = BIT64(HPMEVENT_MINH_BIT);
+		p->hw.select[2] = BIT64(HPMEVENT_MINH_BIT);
 		pmu_hart_init();
 	}
 	if (have_inhibit) {
@@ -1309,6 +1358,12 @@ long pmu_counter_config(unsigned long base, unsigned long mask,
 		csr_set(CSR_MCOUNTINHIBIT, BIT(c));
 		if (hart_has(HART_FEAT_SSCOFPMF))
 			select |= inhibit_bits(flags) | BIT64(HPMEVENT_OF_BIT);
+		/*
+		 * cycle and instret: no event, no overflow, but maybe the
+		 * filters.
+		 */
+		if (c < 3)
+			select = inhibit_bits(flags);
 		hw_event_write((unsigned int)c, select);
 		if (flags & SBI_PMU_CFG_FLAG_CLEAR_VALUE)
 			hw_counter_write((unsigned int)c, 0);

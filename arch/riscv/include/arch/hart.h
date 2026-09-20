@@ -69,6 +69,12 @@ enum hart_feature {
 	HART_FEAT_SDTRIG,
 	HART_FEAT_SSDBLTRP,
 	HART_FEAT_H,
+	/* mcyclecfg, minstretcfg: privilege filters for cycle and instret */
+	HART_FEAT_SMCNTRPMF,
+	/* menvcfg.CDE: the counters can be S-mode's (Ssccfg) */
+	HART_FEAT_SMCDELEG,
+	/* the entropy source, which S-mode gets (mseccfg.SSEED) */
+	HART_FEAT_ZKR,
 	HART_FEAT_COUNT,
 };
 

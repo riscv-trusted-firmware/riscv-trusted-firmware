@@ -65,6 +65,12 @@ int hsm_hart_stop(void);
 /* The same, not asked for by S-mode and whatever the hart was doing. */
 void __noreturn hsm_hart_force_stop(void);
 /* A non-retentive suspend does not return on success. */
+/*
+ * Is 'type' a suspend type sbi_hart_suspend() takes here? SBI_SUCCESS,
+ * SBI_ERR_INVALID_PARAM for a reserved one, SBI_ERR_NOT_SUPPORTED for one of
+ * the platform's without a platform that has any.
+ */
+long hsm_suspend_type_check(unsigned long type);
 int hsm_hart_suspend(unsigned long type, unsigned long resume_addr,
 		     unsigned long arg);
 /*
