@@ -49,6 +49,14 @@ uint64_t timer_now(void)
 	return timer ? timer->now() : 0;
 }
 
+void timer_udelay(uint64_t us)
+{
+	uint64_t until = timer_now() + timer_usecs_to_ticks(us);
+
+	while (timer && timer_now() < until)
+		cpu_relax();
+}
+
 /* Without Sstc: what S-mode asked for last, for whoever wants it back. */
 static uint64_t deadline[CONFIG_PLATFORM_HART_COUNT];
 

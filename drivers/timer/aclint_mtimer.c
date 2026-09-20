@@ -81,6 +81,9 @@ static int aclint_mtimer_probe(const void *fdt, int node)
 		return 0; /* one time base is all the monitor uses */
 
 	if (node < 0) {
+		/* No address to fall back on: no tree, no timer. */
+		if (!CONFIG_TIMER_ACLINT_MTIMER_MTIME_ADDR)
+			return 0;
 		mtime_addr = CONFIG_TIMER_ACLINT_MTIMER_MTIME_ADDR;
 		cmp_addr = CONFIG_TIMER_ACLINT_MTIMER_MTIMECMP_ADDR;
 		harts = CONFIG_PLATFORM_HART_COUNT;
@@ -93,8 +96,16 @@ static int aclint_mtimer_probe(const void *fdt, int node)
 					CONFIG_TIMER_ACLINT_MTIMER_FIRST_HART;
 		}
 	} else {
-		if (!fdt_node_check_compatible(fdt, node,
-					       "riscv,aclint-mtimer")) {
+		if (!fdt_node_check_compatible(fdt, node, "andestech,plmt0")) {
+			/*
+			 * The Andes machine timer: MTIME, and the MTIMECMPs
+			 * right after it.
+			 */
+			if (fdt_reg(fdt, node, 0, &mtime_addr, NULL))
+				return -1;
+			cmp_addr = mtime_addr + 8;
+		} else if (!fdt_node_check_compatible(fdt, node,
+						      "riscv,aclint-mtimer")) {
 			/* "reg": MTIME, then the MTIMECMP array. */
 			if (fdt_reg(fdt, node, 0, &mtime_addr, NULL) ||
 			    fdt_reg(fdt, node, 1, &cmp_addr, NULL))
@@ -127,6 +138,8 @@ static const char *const aclint_mtimer_compatible[] = {
 	"riscv,aclint-mtimer",
 	"riscv,clint0",
 	"sifive,clint0",
+	"andestech,plmt0",
+	"thead,c900-aclint-mtimer",
 	NULL,
 };
 

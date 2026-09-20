@@ -8,6 +8,7 @@ config RESET_SIFIVE_TEST
 
 config RESET_SIFIVE_TEST_ADDR
 	hex "Register address when the device tree has no node for it"
+	default 0x0
 	depends on RESET_SIFIVE_TEST
 
 config RESET_SYSCON
@@ -15,6 +16,17 @@ config RESET_SYSCON
 	help
 	  A value written to a system controller register, as the device
 	  tree describes it.
+
+config RESET_HTIF
+	bool "HTIF (leaving a simulation)"
+	select SERIAL_HTIF
+
+config RESET_GPIO
+	bool "gpio-poweroff / gpio-restart"
+	depends on GPIO
+
+config RESET_WDT
+	bool "Watchdog reset (Allwinner D1, Andes ATCWDT200)"
 
 config RESET_RPMI
 	bool "RPMI SYSTEM_RESET service group"

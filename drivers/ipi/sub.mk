@@ -3,3 +3,4 @@
 
 srcs-y += ipi.c
 srcs-$(CONFIG_IPI_ACLINT_MSWI) += aclint_mswi.c
+srcs-$(CONFIG_IPI_ANDES_PLICSW) += andes_plicsw.c

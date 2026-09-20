@@ -63,6 +63,8 @@ static int aclint_mswi_probe(const void *fdt, int node)
 		return 0;
 
 	if (node < 0) {
+		if (!CONFIG_IPI_ACLINT_MSWI_ADDR)
+			return 0;
 		base = CONFIG_IPI_ACLINT_MSWI_ADDR;
 		/* Registers in hart id order, from the first hart's on. */
 		for (unsigned int i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++) {
@@ -85,10 +87,8 @@ static int aclint_mswi_probe(const void *fdt, int node)
 }
 
 static const char *const aclint_mswi_compatible[] = {
-	"riscv,aclint-mswi",
-	"riscv,clint0",
-	"sifive,clint0",
-	NULL,
+	"riscv,aclint-mswi",	  "riscv,clint0", "sifive,clint0",
+	"thead,c900-aclint-mswi", NULL,
 };
 
 DRIVER_DEFINE(aclint_mswi) = {

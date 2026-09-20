@@ -13,9 +13,11 @@ if TIMER_ACLINT_MTIMER
 
 config TIMER_ACLINT_MTIMER_MTIME_ADDR
 	hex "MTIME register address"
+	default 0x0
 
 config TIMER_ACLINT_MTIMER_MTIMECMP_ADDR
 	hex "MTIMECMP register array address"
+	default 0x0
 
 config TIMER_ACLINT_MTIMER_FIRST_HART
 	int "Hart id of the first MTIMECMP register"

@@ -13,6 +13,7 @@ if IPI_ACLINT_MSWI
 
 config IPI_ACLINT_MSWI_ADDR
 	hex "MSIP register array address"
+	default 0x0
 
 config IPI_ACLINT_MSWI_SIZE
 	hex "Size of the MSWI register block"
@@ -25,5 +26,8 @@ config IPI_ACLINT_MSWI_FIRST_HART
 	default 0
 
 endif
+
+config IPI_ANDES_PLICSW
+	bool "Andes PLICSW software interrupts"
 
 endmenu

@@ -43,7 +43,7 @@ static int sifive_test_probe(const void *fdt, int node)
 {
 	uint64_t base = CONFIG_RESET_SIFIVE_TEST_ADDR, size = 0x1000;
 
-	if (finisher)
+	if (finisher || (node < 0 && !base))
 		return 0;
 	if (node >= 0 && fdt_reg(fdt, node, 0, &base, &size))
 		return -1;

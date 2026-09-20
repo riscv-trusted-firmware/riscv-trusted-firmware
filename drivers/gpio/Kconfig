@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+menu "GPIO"
+
+config GPIO
+	bool
+	help
+	  Output lines for the monitor's drivers: a board that is reset or
+	  powered off by a GPIO.
+
+config GPIO_SIFIVE
+	bool "SiFive GPIO"
+	select GPIO
+
+endmenu
