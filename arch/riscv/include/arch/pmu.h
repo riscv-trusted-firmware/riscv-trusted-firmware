@@ -42,6 +42,8 @@ long pmu_counter_start(unsigned long base, unsigned long mask,
 long pmu_counter_stop(unsigned long base, unsigned long mask,
 		      unsigned long flags);
 long pmu_counter_fw_read(unsigned long idx, uint64_t *value);
+/* Fill in the 'supported' bit of 'count' event entries at physical 'addr'. */
+long pmu_event_info(unsigned long addr, unsigned long count);
 
 #else
 

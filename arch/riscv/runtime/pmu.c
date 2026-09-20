@@ -1185,3 +1185,37 @@ long pmu_counter_fw_read(unsigned long idx, uint64_t *value)
 	*value = p->fw_value[idx - PMU_FW_FIRST];
 	return SBI_SUCCESS;
 }
+
+/* Shared memory entry of event_get_info (SBI v3.0), little-endian. */
+struct event_info {
+	uint32_t event_idx;
+	uint32_t output; /* bit 0: the event can be counted */
+	uint64_t event_data;
+};
+
+long pmu_event_info(unsigned long addr, unsigned long count)
+{
+	struct event_info *info = (struct event_info *)addr;
+	uint64_t select = 0;
+
+	if (!IS_ALIGNED(addr, sizeof(*info)))
+		return SBI_ERR_INVALID_PARAM;
+	if (count > ~UL(0) / sizeof(*info) ||
+	    !smode_range_ok(addr, count * sizeof(*info)))
+		return SBI_ERR_INVALID_ADDRESS;
+
+	for (unsigned long i = 0; i < count; i++) {
+		uint32_t event = info[i].event_idx;
+		bool ok = false;
+
+		if (EVENT_TYPE(event) == SBI_PMU_EVENT_TYPE_FW)
+			ok = EVENT_CODE(event) < SBI_PMU_FW_MAX;
+		else
+			ok = event <= 0xfffff &&
+			     (hw_event_lookup(event, info[i].event_data,
+					      &select) &
+			      hw_counters);
+		info[i].output = ok;
+	}
+	return SBI_SUCCESS;
+}

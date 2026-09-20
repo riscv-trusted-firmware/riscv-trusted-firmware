@@ -4,8 +4,8 @@
  */
 
 /*
- * SBI performance monitoring unit extension (EID "PMU"). Counter
- * snapshots (shared memory) are not implemented.
+ * SBI performance monitoring unit extension (EID "PMU"), up to the v3.0
+ * event_get_info call. Counter snapshots are not implemented.
  */
 
 #include <arch/pmu.h>
@@ -51,6 +51,12 @@ static struct service_ret sbi_pmu_ecall(unsigned long eid, unsigned long fid,
 	case SBI_PMU_COUNTER_FW_READ_HI:
 		rc = pmu_counter_fw_read(regs->a0, &val);
 		return sbi_ret(rc, (long)(val >> 32 >> (__RISCV_XLEN__ - 32)));
+	case SBI_PMU_EVENT_GET_INFO:
+		/* (shmem_lo, shmem_hi, num_entries, flags) */
+		if (regs->a1 || regs->a3)
+			return sbi_err(regs->a1 ? SBI_ERR_INVALID_ADDRESS :
+				       SBI_ERR_INVALID_PARAM);
+		return sbi_err(pmu_event_info(regs->a0, regs->a2));
 	default:
 		/* Including SBI_PMU_SNAPSHOT_SET_SHMEM. */
 		return sbi_err(SBI_ERR_NOT_SUPPORTED);

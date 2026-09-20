@@ -23,6 +23,13 @@ config SBI_IMPL_VERSION
 	hex "SBI implementation version"
 	default 0x00000100
 
+config SBI_SUSP
+	bool "System suspend extension (SUSP)"
+	help
+	  Suspend to RAM as an M-mode wait for an S-mode interrupt, with all
+	  other harts stopped. For platforms (and simulators) without a
+	  deeper system sleep state of their own.
+
 config SBI_PMU
 	bool "Performance monitoring unit extension (PMU)"
 	default y

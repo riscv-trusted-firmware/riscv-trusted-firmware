@@ -27,6 +27,11 @@ int hsm_hart_stop(void);
 /* A non-retentive suspend does not return on success. */
 int hsm_hart_suspend(unsigned long type, unsigned long resume_addr,
 		     unsigned long arg);
+/*
+ * Non-retentive suspend of the calling hart as the last one running:
+ * SBI_ERR_DENIED unless every other hart is stopped.
+ */
+int hsm_system_suspend(unsigned long resume_addr, unsigned long arg);
 /* SBI_HSM_STATE_* or SBI_ERR_INVALID_PARAM. */
 long hsm_hart_state(unsigned long hartid);
 

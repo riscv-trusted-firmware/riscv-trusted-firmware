@@ -77,9 +77,14 @@
 #define MISA_EXT(c) BIT((c) - 'A')
 
 /* menvcfg (the upper half is menvcfgh on RV32) */
+#define ENVCFG_LPE_BIT 2
+#define ENVCFG_SSE_BIT 3
 #define ENVCFG_CBIE GENMASK_UL(5, 4)
 #define ENVCFG_CBCFE BIT(6)
 #define ENVCFG_CBZE BIT(7)
+#define ENVCFG_PMM_SHIFT 32 /* 2 bits: 0 off, 2 PMLEN 7, 3 PMLEN 16 */
+#define ENVCFG_DTE_BIT 59
+#define ENVCFG_ADUE_BIT 61
 #define ENVCFG_PBMTE_BIT 62
 #define ENVCFG_STCE_BIT 63
 

@@ -173,6 +173,23 @@ int hsm_hart_suspend(unsigned long type, unsigned long resume_addr,
 	return SBI_SUCCESS;
 }
 
+int hsm_system_suspend(unsigned long resume_addr, unsigned long arg)
+{
+	unsigned long self = this_hartid();
+
+	if (!smode_range_ok(resume_addr, 4))
+		return SBI_ERR_INVALID_ADDRESS;
+	/*
+	 * Nobody can start a hart behind our back: we are the only one running.
+	 */
+	for (unsigned long i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++)
+		if (i != self && hart_valid(i) &&
+		    hsm_hart_state(i) != SBI_HSM_STATE_STOPPED)
+			return SBI_ERR_DENIED;
+	return hsm_hart_suspend(SBI_HSM_SUSPEND_NON_RET_DEFAULT, resume_addr,
+				arg);
+}
+
 long hsm_hart_state(unsigned long hartid)
 {
 	if (!hart_valid(hartid))

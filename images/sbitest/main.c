@@ -223,8 +223,12 @@ void secondary_main(unsigned long hartid, unsigned long opaque)
 	secondary_loop(hartid);
 }
 
+static void system_resumed(unsigned long opaque);
+
 void resume_main(unsigned long hartid, unsigned long opaque)
 {
+	if (hartid == boot_hartid)
+		system_resumed(opaque);
 	WRITE_ONCE(mbox[hartid].resumed, opaque);
 	secondary_loop(hartid);
 }
@@ -274,8 +278,10 @@ static void test_base(void)
 	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, BOGUS_EID);
 	CHECK_RET(ret, SBI_SUCCESS);
 	CHECK(ret.value == 0, "bogus extension probed");
-	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_SUSP);
-	CHECK(ret.value == 0, "SUSP probed but not implemented");
+	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_SSE);
+	CHECK(ret.value == 0, "SSE probed but not implemented");
+	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_FWFT);
+	CHECK(ret.value != 0, "FWFT not probed");
 
 	CHECK_RET(sbi_call0(SBI_EXT_BASE, SBI_BASE_GET_MVENDORID), SBI_SUCCESS);
 	CHECK_RET(sbi_call0(SBI_EXT_BASE, SBI_BASE_GET_MARCHID), SBI_SUCCESS);
@@ -988,12 +994,101 @@ static void test_pmu(void)
 		  SBI_ERR_INVALID_PARAM);
 	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_SNAPSHOT_SET_SHMEM, 0, 0, 0),
 		  SBI_ERR_NOT_SUPPORTED);
+
+	/* event_get_info: which of these events can be counted at all? */
+	static struct {
+		uint32_t event_idx, output;
+		uint64_t event_data;
+	} __aligned(16) info[3];
+
+	info[0].event_idx = SBI_PMU_HW_CPU_CYCLES;
+	info[1].event_idx = FW_EVENT(SBI_PMU_FW_IPI_SENT);
+	info[2].event_idx = FW_EVENT(1000);
+	info[0].output = 0;
+	info[1].output = 0;
+	info[2].output = 1;
+	ret = sbi_call(SBI_EXT_PMU, SBI_PMU_EVENT_GET_INFO, (unsigned long)info,
+		       0, 3, 0, 0);
+	CHECK_RET(ret, SBI_SUCCESS);
+	CHECK((info[0].output & 1) == (hw != 0), "cycles: output %x",
+	      info[0].output);
+	CHECK(info[1].output & 1, "firmware event not supported");
+	CHECK(!(info[2].output & 1), "bogus firmware event supported");
+	CHECK_RET(sbi_call(SBI_EXT_PMU, SBI_PMU_EVENT_GET_INFO,
+			   (unsigned long)info + 4, 0, 1, 0, 0),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sbi_call(SBI_EXT_PMU, SBI_PMU_EVENT_GET_INFO,
+			   CONFIG_MONITOR_LOAD_ADDR, 0, 1, 0, 0),
+		  SBI_ERR_INVALID_ADDRESS);
 }
 #else
 static void test_pmu(void)
 {
 }
 #endif
+
+static void test_fwft(void)
+{
+	static const char *const names[] = {
+		"misaligned-deleg", "landing-pad", "shadow-stack",
+		"double-trap",	    "pte-ad-hw",   "pointer-masking",
+	};
+	struct sbiret ret = {};
+
+	printf("fwft\n ");
+	for (unsigned long f = 0; f < ARRAY_SIZE(names); f++) {
+		ret = sbi_call1(SBI_EXT_FWFT, SBI_FWFT_GET, f);
+		CHECK(ret.error == SBI_SUCCESS ||
+		      ret.error == SBI_ERR_NOT_SUPPORTED,
+		      "%s: get error %ld", names[f], ret.error);
+		if (ret.error)
+			continue;
+		printf(" %s=%ld", names[f], ret.value);
+		/* Writing the current value back always works. */
+		CHECK_RET(sbi_call3(SBI_EXT_FWFT, SBI_FWFT_SET, f,
+				    (unsigned long)ret.value, 0),
+			  SBI_SUCCESS);
+		CHECK_RET(sbi_call3(SBI_EXT_FWFT, SBI_FWFT_SET, f, 1000, 0),
+			  SBI_ERR_INVALID_PARAM);
+		CHECK_RET(sbi_call3(SBI_EXT_FWFT, SBI_FWFT_SET, f, 0, 2),
+			  SBI_ERR_INVALID_PARAM);
+	}
+	printf("\n");
+
+	/* Misaligned delegation exists everywhere: toggle it, then lock it. */
+	ret = sbi_call1(SBI_EXT_FWFT, SBI_FWFT_GET,
+			SBI_FWFT_MISALIGNED_EXC_DELEG);
+	CHECK_RET(ret, SBI_SUCCESS);
+	CHECK(ret.value == 0, "misaligned exceptions delegated at entry");
+	CHECK_RET(sbi_call3(SBI_EXT_FWFT, SBI_FWFT_SET,
+			    SBI_FWFT_MISALIGNED_EXC_DELEG, 1, 0),
+		  SBI_SUCCESS);
+	ret = sbi_call1(SBI_EXT_FWFT, SBI_FWFT_GET,
+			SBI_FWFT_MISALIGNED_EXC_DELEG);
+	CHECK(ret.value == 1, "delegation did not stick");
+	CHECK_RET(sbi_call3(SBI_EXT_FWFT, SBI_FWFT_SET,
+			    SBI_FWFT_MISALIGNED_EXC_DELEG, 0,
+			    SBI_FWFT_SET_FLAG_LOCK),
+		  SBI_SUCCESS);
+	CHECK_RET(sbi_call3(SBI_EXT_FWFT, SBI_FWFT_SET,
+			    SBI_FWFT_MISALIGNED_EXC_DELEG, 1, 0),
+		  SBI_ERR_DENIED_LOCKED);
+	ret = sbi_call1(SBI_EXT_FWFT, SBI_FWFT_GET,
+			SBI_FWFT_MISALIGNED_EXC_DELEG);
+	CHECK(ret.error == SBI_SUCCESS && ret.value == 0, "locked value %ld",
+	      ret.value);
+
+	CHECK_RET(sbi_call1(SBI_EXT_FWFT, SBI_FWFT_GET,
+			    SBI_FWFT_LOCAL_RESERVED_START),
+		  SBI_ERR_DENIED);
+	CHECK_RET(sbi_call1(SBI_EXT_FWFT, SBI_FWFT_GET,
+			    SBI_FWFT_GLOBAL_RESERVED_START),
+		  SBI_ERR_DENIED);
+	CHECK_RET(sbi_call1(SBI_EXT_FWFT, SBI_FWFT_GET,
+			    SBI_FWFT_LOCAL_PLATFORM_START),
+		  SBI_ERR_NOT_SUPPORTED);
+	CHECK_RET(sbi_call0(SBI_EXT_FWFT, 2), SBI_ERR_NOT_SUPPORTED);
+}
 
 static void test_srst_errors(void)
 {
@@ -1009,6 +1104,48 @@ static void test_srst_errors(void)
 		  SBI_ERR_NOT_SUPPORTED);
 	CHECK_RET(sbi_call0(SBI_EXT_SRST, 1), SBI_ERR_NOT_SUPPORTED);
 }
+
+static bool system_suspended;
+static void test_finish(void);
+
+#ifdef CONFIG_SBI_SUSP
+/*
+ * Every other hart is stopped by now. The call does not return: the timer
+ * wakes us up in resume_main(), which goes on with test_finish().
+ */
+static void test_susp(void)
+{
+	uint64_t t0 = now();
+
+	printf("susp\n");
+	CHECK_RET(sbi_call3(SBI_EXT_SUSP, SBI_SUSP_SYSTEM_SUSPEND, 1,
+			    (unsigned long)_resume_start, 0),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sbi_call3(SBI_EXT_SUSP, SBI_SUSP_SYSTEM_SUSPEND,
+			    UL(0x80000000), (unsigned long)_resume_start, 0),
+		  SBI_ERR_NOT_SUPPORTED);
+	CHECK_RET(sbi_call3(SBI_EXT_SUSP, SBI_SUSP_SYSTEM_SUSPEND, 0,
+			    CONFIG_MONITOR_LOAD_ADDR, 0),
+		  SBI_ERR_INVALID_ADDRESS);
+
+	csr_write(sie, SIP_STIP);
+	sbi_set_timer(t0 + TICKS_SHORT);
+	system_suspended = true;
+	CHECK_RET(sbi_call3(SBI_EXT_SUSP, SBI_SUSP_SYSTEM_SUSPEND,
+			    SBI_SUSP_SLEEP_TYPE_SUSPEND_TO_RAM,
+			    (unsigned long)_resume_start, MAGIC),
+		  SBI_SUCCESS);
+	/* Only reached when the suspend failed. */
+	system_suspended = false;
+	CHECK(false, "system suspend returned");
+	sbi_set_timer(~ULL(0));
+	csr_write(sie, 0);
+}
+#else
+static void test_susp(void)
+{
+}
+#endif
 
 void test_main(unsigned long hartid, unsigned long fdt)
 {
@@ -1028,7 +1165,27 @@ void test_main(unsigned long hartid, unsigned long fdt)
 	test_legacy();
 	test_traps();
 	test_pmu();
+	test_fwft();
 	test_smp();
+	test_susp();
+	test_finish();
+}
+
+static void system_resumed(unsigned long opaque)
+{
+	CHECK(system_suspended, "boot hart resumed without a system suspend");
+	CHECK(opaque == MAGIC, "opaque %lx after system suspend", opaque);
+	CHECK(csr_read(sip) & SIP_STIP,
+	      "resumed without the wake-up interrupt pending");
+	CHECK(csr_read(satp) == 0 && !(csr_read(sstatus) & SSTATUS_SIE),
+	      "satp/sstatus.SIE not reset on resume");
+	sbi_set_timer(~ULL(0));
+	csr_write(sie, 0);
+	test_finish();
+}
+
+static void test_finish(void)
+{
 	test_srst_errors();
 
 	printf("sbitest: %u checks, %u failed\n", checks, failures);

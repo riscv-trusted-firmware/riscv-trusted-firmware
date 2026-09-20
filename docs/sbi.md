@@ -1,6 +1,6 @@
 # SBI implementation
 
-The monitor implements the RISC-V SBI specification v2.0 for the S-mode
+The monitor implements the RISC-V SBI specification v3.0 for the S-mode
 software it starts. This page says what is there, how it is put together,
 and what is still missing.
 
@@ -14,12 +14,15 @@ and what is still missing.
 | RFENCE    | `RFNC` | all seven calls; the `hfence` ones need the H extension (`NOT_SUPPORTED` otherwise) |
 | HSM       | `HSM`  | start, stop, status, suspend (default retentive and non-retentive types) |
 | SRST      | `SRST` | shutdown, cold and warm reboot through the reset driver |
-| PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart; no snapshot shared memory |
+| SUSP      | `SUSP` | suspend to RAM as an M-mode wait with all other harts stopped (`CONFIG_SBI_SUSP`, on for QEMU virt) |
+| FWFT      | `FWFT` | misaligned exception delegation; landing pad, shadow stack, double trap, PTE A/D updating and pointer masking where the hart has them; lock flag |
+| PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart, `event_get_info`; no snapshot shared memory |
 | DBCN      | `DBCN` | write, read, write_byte (`CONFIG_SBI_DBCN`) |
 | Legacy    | `0x00`-`0x08` | all v0.1 calls (`CONFIG_SBI_LEGACY`) |
 
-Not implemented yet: SUSP (system suspend), CPPC, NACL, STA, SSE,
-FWFT, DBTR, MPXY. They probe as absent.
+Not implemented yet: SSE, DBTR, and the extensions that need a platform
+backend this tree does not have (CPPC, MPXY). They probe as absent. NACL and
+STA are interfaces a hypervisor offers its guests, not M-mode firmware.
 
 An extension whose backend is missing (no timer, IPI or reset driver)
 probes as absent too, and its calls return `SBI_ERR_NOT_SUPPORTED`.
@@ -41,6 +44,7 @@ arch/riscv/runtime/       hart.c    per-hart state, feature probing, S-mode entr
                           illegal_insn.c  time/timeh CSR emulation
                           pmp.c     PMP programming
                           pmu.c     hardware and firmware counters
+                          fwft.c    firmware features (medeleg / menvcfg controls)
 drivers/timer/            timer core + ACLINT MTIMER
 drivers/ipi/              IPI core (event multiplexing) + ACLINT MSWI
 drivers/reset/            reset core + SiFive test finisher
@@ -105,6 +109,14 @@ mode-filter flags of `counter_config_matching` are honoured; M-mode is
 always filtered out. Firmware counters count the events of the SBI
 specification where they happen (`pmu_fw_event()`).
 
+### Firmware features
+
+FWFT features are per hart and start from their reset value whenever a hart
+is started (not when it resumes). Misaligned exception delegation toggles
+medeleg; the others are menvcfg fields, and a feature exists when its field
+can be written, so no extension list is needed. A pointer masking length
+the hart does not implement is `INVALID_PARAM`.
+
 ## Testing
 
 `images/sbitest` (`CONFIG_IMAGE_SBITEST`, on in the defconfigs) is an S-mode
@@ -138,15 +150,16 @@ kernel allocates those pages and faults on the PMP fence. The tree is
 grown in place, or moved to `CONFIG_MONITOR_FDT_ADDR` first. Tested with
 Linux 6.19 and 7.3-rc on 4 harts, with and without Sstc: SMP bring-up, CPU
 hotplug (HSM stop/start), `reboot` and `poweroff` (SRST), `earlycon=sbi`
-(DBCN), and the `riscv-pmu-sbi` driver finding its counters.
+(DBCN), the `riscv-pmu-sbi` driver finding its counters, and on 7.3-rc FWFT
+and suspend to RAM (`echo mem > /sys/power/state`: CPUs offlined, SUSP,
+resume, CPUs back).
 
 Any other payload: `make run QEMU_ARGS="-device loader,file=payload.bin,addr=<MONITOR_NEXT_STAGE_ADDR>"`
 with `IMAGE_SBITEST` disabled.
 
 ## Gaps
 
-1. **SUSP**, **FWFT** and the rest of the list above; PMU counter
-   snapshots.
+1. **SSE** and **DBTR**; PMU counter snapshots.
 2. **Misaligned load/store emulation** (redirected to S-mode today) and the
    other illegal-instruction emulations.
 3. **Device tree driven configuration.** libfdt is only used for the

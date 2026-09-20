@@ -9,6 +9,7 @@
  */
 
 #include <arch/hart.h>
+#include <arch/fwft.h>
 #include <arch/pmp.h>
 #include <arch/pmu.h>
 #include <atomic.h>
@@ -103,7 +104,14 @@ static void envcfg_init(void)
 	if (!hart_has(HART_FEAT_MENVCFG))
 		return;
 
-	/* WARL: bits of extensions the hart lacks stay clear. */
+	/*
+	 * Start from zero (the reset value of what S-mode controls through
+	 * FWFT), then WARL: bits of extensions the hart lacks stay clear.
+	 */
+	csr_write(CSR_MENVCFG, 0);
+#if __RISCV_XLEN__ == 32
+	csr_write(CSR_MENVCFGH, 0);
+#endif
 	csr_set(CSR_MENVCFG, ENVCFG_CBIE | ENVCFG_CBCFE | ENVCFG_CBZE);
 
 	if (hart_has(HART_FEAT_SSTC)) {
@@ -175,6 +183,7 @@ void hart_runtime_init(void)
 	envcfg_init();
 	pmp_init();
 	pmu_hart_init();
+	fwft_hart_init();
 
 	/* Nothing stale pending when the next stage (re)starts on this hart. */
 	csr_clear(mip, MIP_SSIP | MIP_STIP);
