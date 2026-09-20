@@ -92,10 +92,24 @@ struct mpxy_channel {
 	uint32_t sse_event_id;
 	/* whose MSI it is: the SSE event's too */
 	unsigned int msi_domain;
+	/*
+	 * The one domain that sees the channel, or MPXY_OWNER_ANY (0 is not
+	 * set: any).
+	 */
+	unsigned int owner;
 	unsigned long events_due; /* atomic */
 	const struct mpxy_channel_ops *ops;
 	struct mpxy_channel *next;
 };
+
+/*
+ * A channel belongs to the domain its node names with
+ * "riscv,domain" (<domain.h>), and no other domain sees it;
+ * without the property, every domain does. -1: a domain that does not
+ * exist, and the channel is not to exist either.
+ */
+#define MPXY_OWNER_ANY 0
+int mpxy_channel_owner_from_fdt(const void *fdt, int node, unsigned int *owner);
 
 /* Boot time only. SBI_ERR_ALREADY_AVAILABLE when the id is taken. */
 long mpxy_channel_register(struct mpxy_channel *ch);

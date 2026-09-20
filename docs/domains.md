@@ -167,6 +167,35 @@ all of it as a started hart does: nothing registered, every feature off.
 Not switched, and so shared by the domains that share a hart: the H
 extension's CSRs and external interrupt routing.
 
+## Requests between domains
+
+Entering a domain runs it on the caller's hart. Domains with harts of their
+own talk through MPXY instead: RPMI's REQUEST_FORWARD service group, which
+the monitor serves itself (see "RPMI served by the monitor" in
+[sbi.md](sbi.md)). A domain that offers a service owns a
+`riscv,rpmi-mpxy-request-forward` channel and takes requests from it; a
+domain that uses one owns a channel whose requests are forwarded there,
+today `riscv,rpmi-mpxy-mm-domain` for management mode. MPXY channels
+belong to the domain named by `riscv,domain` in their node and
+are invisible to the others.
+
+```dts
+reqfwd-tdom {
+    compatible = "riscv,rpmi-mpxy-request-forward";
+    riscv,sbi-mpxy-channel-id = <0x2000>;
+    riscv,sbi-mpxy-msg-max-len = <256>;
+    riscv,domain = <&tdomain>;
+};
+mm-udom {
+    compatible = "riscv,rpmi-mpxy-mm-domain";
+    riscv,sbi-mpxy-channel-id = <0x1000>;
+    riscv,domain = <&udomain>;
+    riscv,reqfwd-target = <&tdomain>;
+    riscv,mm-memregion = <&mmmem>;       /* RW for both domains */
+    riscv,sbi-mpxy-completion-timeout-us = <200000>;
+};
+```
+
 ## Testing
 
 `CONFIG_QEMU_VIRT_DOMAINS` makes the QEMU virt platform add a configuration
@@ -178,8 +207,11 @@ reset permission, enter / exit with register, FPU, vector and timer state,
 PMU / SSE / DBTR / FWFT state set up on both sides of a shared hart (each
 finds its own again and nothing of the other's, in the hardware as well),
 a second hart visiting (stopped, started by the domain, IPI while away),
-stopping and starting a domain that runs, and a second boot of a stopped
-one.
+stopping and starting a domain that runs, a second boot of a stopped
+one, and management mode: a hart of the payload's goes over to "trusted"
+and serves `MM_COMMUNICATE` requests of "untrusted" from a REQUEST_FORWARD
+channel (told of them by MSI, a 24-byte message through a 20-byte channel),
+one of which it answers too late on purpose.
 
 ```
 make qemu_virt_rv64_defconfig && echo CONFIG_QEMU_VIRT_DOMAINS=y >> build/.config

@@ -40,7 +40,38 @@ struct dom_shared {
 	/* hart id + 1 that started in "trusted" */
 	unsigned long tsec;
 	unsigned long tsec_opaque;
+	unsigned long mm_dropped; /* the late completion's status, + 1 */
 };
+
+/*
+ * Management mode, hosted by "trusted" for "untrusted": the channels of
+ * the platform's device tree, and the shared page for MM shared memory
+ * (the input area, the output area; the rest of the page is taken).
+ * The service: the input bytes in reverse order, each xor MM_XOR. An input
+ * of MM_DROP_SIZE bytes is a request the server sits on until it is too
+ * late, to see its completion refused.
+ */
+#define DOM_CHANNEL_MM UL(0x3000)
+#define DOM_CHANNEL_REQFWD UL(0x3001)
+#define MM_IN_OFFSET U(0x400)
+#define MM_OUT_OFFSET U(0x600)
+#define MM_AREA_SIZE U(0x200)
+#define MM_XOR 0xa5
+#define MM_DROP_SIZE U(1)
+#define MM_TIMEOUT_US U(200000)
+/*
+ * What the server found right, in the value it exits with (served count in bits
+ * 7:0).
+ */
+#define MM_SAW_MSI BIT(8) /* REQFWD_NEW_MESSAGE, signalled by its MSI */
+#define MM_SAW_EVENT \
+	BIT(9) /* ... and fetched, with the message's header in it */
+#define MM_SAW_SSIP BIT(10) /* "riscv,wakeup-ssip" */
+#define MM_SAW_PIECES \
+	BIT(11) /* a message longer than the channel's MSG_MAX_LEN */
+#define MM_SAW_OWN_CHANNELS \
+	BIT(12) /* its REQUEST_FORWARD channel, and not the MM one */
+#define MM_BAD BIT(15) /* something else was not as it should be */
 
 /*
  * "trusted" exits with the verdict of its boot checks (0: all fine, else
@@ -59,6 +90,7 @@ struct dom_shared {
 
 #define TCMD_SERVICES_SET 6 /* services_pristine() | services_mark() << 8 */
 #define TCMD_SERVICES_GET 7 /* services_check() */
+#define TCMD_MM_SERVE 9 /* serve param MM requests: count | MM_SAW_* */
 #define TCMD_INSTRET 8 /* instret_coarse() over there */
 
 #define TCMD(cmd, param) ((cmd) | SHIFT_UL(param, 8))

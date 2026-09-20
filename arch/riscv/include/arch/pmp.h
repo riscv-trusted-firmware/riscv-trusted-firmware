@@ -7,6 +7,7 @@
 #define ARCH_PMP_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <types_ext.h>
 
 /* mseccfg (Smepmp) */
@@ -47,5 +48,7 @@ unsigned int pmp_domain_entries(void);
  */
 void *smode_access_begin(paddr_t addr, paddr_size_t size);
 void smode_access_end(void);
+/* One word written, from inside such an access as well: that one stays open. */
+void smode_poke32(paddr_t addr, uint32_t val);
 
 #endif

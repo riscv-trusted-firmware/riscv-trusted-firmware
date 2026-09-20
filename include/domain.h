@@ -114,6 +114,10 @@ int domains_fdt_fixup(void *fdt);
 
 unsigned int domain_count(void);
 struct domain *domain_by_index(unsigned int index);
+/*
+ * The domain of an instance node, as other nodes refer to it; NULL: none such.
+ */
+struct domain *domain_by_phandle(uint32_t phandle);
 /* The domain the calling hart runs now. */
 struct domain *this_domain(void);
 /* Its index; 0 before there are domains. */

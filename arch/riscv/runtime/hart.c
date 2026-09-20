@@ -18,6 +18,7 @@
 #include <atomic.h>
 #include <boot.h>
 #include <domain.h>
+#include <io.h>
 #include <ipi.h>
 #include <log.h>
 #include <memregion.h>
@@ -496,8 +497,17 @@ void pmp_domain_set(void)
 	__asm__ __volatile__("sfence.vma" ::: "memory");
 }
 
+/*
+ * The window each hart has open, for smode_poke32() to put back; size 0: none.
+ */
+static struct {
+	unsigned long addr, size;
+} windows[CONFIG_PLATFORM_HART_COUNT];
+
 void *smode_access_begin(paddr_t addr, paddr_size_t size)
 {
+	windows[this_hart_index()].addr = addr;
+	windows[this_hart_index()].size = size;
 	if (hart_has(HART_FEAT_SMEPMP) && size) {
 		pmp_entry_set(0, addr >> 2, 0);
 		pmp_entry_set(1, (addr + size + 3) >> 2,
@@ -508,8 +518,20 @@ void *smode_access_begin(paddr_t addr, paddr_size_t size)
 
 void smode_access_end(void)
 {
+	windows[this_hart_index()].size = 0;
 	if (hart_has(HART_FEAT_SMEPMP))
 		pmp_entry_cfg(1, 0);
+}
+
+void smode_poke32(paddr_t addr, uint32_t val)
+{
+	unsigned long outer_addr = windows[this_hart_index()].addr;
+	unsigned long outer_size = windows[this_hart_index()].size;
+
+	io_write32((vaddr_t)smode_access_begin(addr, 4), val);
+	smode_access_end();
+	if (outer_size)
+		smode_access_begin(outer_addr, outer_size);
 }
 
 void hart_services_switch_out(void)

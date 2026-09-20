@@ -16,11 +16,10 @@
 #include <arch/sse.h>
 #include <atomic.h>
 #include <domain.h>
-#include <io.h>
+#include <fdt_util.h>
 #include <mpxy.h>
 #include <sbi/sbi.h>
 #include <string.h>
-#include <types_ext.h>
 #include <util.h>
 
 #define SHMEM_NONE MPXY_SHMEM_NONE
@@ -93,18 +92,16 @@ void mpxy_indicate(void)
 		if (ch->msi_control) {
 			uint64_t addr = reg_pair_to_64(ch->msi_addr_high,
 						       ch->msi_addr_low);
-			vaddr_t msi =
-				(vaddr_t)smode_access_begin((unsigned long)addr,
-							    4);
 
-			io_write32(msi, ch->msi_data);
-			smode_access_end();
+			smode_poke32((unsigned long)addr, ch->msi_data);
 		} else if (ch->capability & MPXY_CAP_SSE) {
 			/*
 			 * Whoever has the event registered: it is per domain.
 			 */
 			for (unsigned int key = 0; key < DOMAIN_KEYS; key++)
-				sse_raise_global(ch->sse_event_id, key);
+				if (ch->owner == MPXY_OWNER_ANY ||
+				    ch->owner == key + 1)
+					sse_raise_global(ch->sse_event_id, key);
 		}
 	}
 }
@@ -114,12 +111,37 @@ unsigned int mpxy_channel_count(void)
 	return nr_channels;
 }
 
+/* Is the channel the calling domain's to see? */
+static bool channel_visible(const struct mpxy_channel *ch)
+{
+	return ch->owner == MPXY_OWNER_ANY ||
+	       ch->owner == this_domain_key() + 1;
+}
+
 static struct mpxy_channel *channel_find(unsigned long id)
 {
 	for (struct mpxy_channel *ch = channels; ch; ch = ch->next)
 		if (ch->id == id)
-			return ch;
+			return channel_visible(ch) ? ch : NULL;
 	return NULL;
+}
+
+int mpxy_channel_owner_from_fdt(const void *fdt, int node, unsigned int *owner)
+{
+	*owner = MPXY_OWNER_ANY;
+#ifdef CONFIG_DOMAINS
+	uint32_t phandle = fdt_prop_u32(fdt, node, "riscv,domain", 0);
+
+	if (phandle) {
+		const struct domain *dom = domain_by_phandle(phandle);
+
+		/* Not the wrong domain's for a typing mistake in the tree. */
+		if (!dom)
+			return -1;
+		*owner = dom->index + 1;
+	}
+#endif
+	return 0;
 }
 
 static uint32_t *this_shmem(void)
@@ -174,18 +196,23 @@ long mpxy_set_shmem(unsigned long lo, unsigned long hi, unsigned long flags)
 long mpxy_get_channel_ids(unsigned long start_index)
 {
 	uint32_t *mem = this_shmem();
-	unsigned long max = MPXY_SHMEM_SIZE / 4 - 2, n = 0, i = 0;
+	unsigned long max = MPXY_SHMEM_SIZE / 4 - 2, n = 0, i = 0, visible = 0;
 
 	if (!mem)
 		return SBI_ERR_NO_SHMEM;
-	if (start_index > nr_channels ||
-	    (start_index && start_index == nr_channels))
+	/* The list is the caller's domain's. */
+	for (struct mpxy_channel *ch = channels; ch; ch = ch->next)
+		visible += channel_visible(ch);
+	if (start_index > visible || (start_index && start_index == visible))
 		return SBI_ERR_INVALID_PARAM;
 
-	for (struct mpxy_channel *ch = channels; ch; ch = ch->next, i++)
-		if (i >= start_index && n < max)
+	for (struct mpxy_channel *ch = channels; ch; ch = ch->next) {
+		if (!channel_visible(ch))
+			continue;
+		if (i++ >= start_index && n < max)
 			mem[2 + n++] = ch->id;
-	mem[0] = (uint32_t)(nr_channels - start_index - n);
+	}
+	mem[0] = (uint32_t)(visible - start_index - n);
 	mem[1] = (uint32_t)n;
 	return SBI_SUCCESS;
 }

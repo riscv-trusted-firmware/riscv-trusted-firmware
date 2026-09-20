@@ -346,6 +346,44 @@ caller's choosing: it must be one the caller's domain can write itself,
 which the monitor's memory and its interrupt files are not
 (`RPMI_ERR_INVALID_ADDR`).
 
+**RPMI served by the monitor** (`services/mpxy/mpxy_rpmi_fw.c`,
+`CONFIG_MPXY_RPMI_FW`). RPMI leaves one job to the SBI implementation
+rather than to a PuC: forwarding requests from one domain
+([domains.md](domains.md)) to another. Such channels have no `mboxes`; the
+bindings are the ones proposed for the same, under `riscv,` names.
+
+* `riscv,rpmi-mpxy-request-forward` is the REQUEST_FORWARD group for the
+  domain that owns the channel: the requests forwarded to that domain
+  queue up (`include/reqfwd.h`), and it retrieves the oldest one,
+  `riscv,sbi-mpxy-msg-max-len` bytes of channel at a time, and completes
+  it with the response. `REQFWD_NEW_MESSAGE` announces a message in an
+  empty queue and is signalled like any notification event, by MSI or SSE,
+  from the producer's hart while it waits; `riscv,wakeup-ssip` adds a
+  supervisor software interrupt for the owner's harts.
+* `riscv,rpmi-mpxy-mm-domain` is the MANAGEMENT_MODE group for one domain,
+  hosted by another (`riscv,reqfwd-target`). `MM_GET_ATTRIBUTES` is
+  answered from the tree: the MM shared memory is a domain memory region
+  both domains have (`riscv,mm-memregion`). `MM_COMMUNICATE` has its
+  offsets checked against that region, which the monitor never touches,
+  and is forwarded as the RPMI message a PuC would have got; the caller
+  waits in the monitor, `riscv,sbi-mpxy-completion-timeout-us` at most. A
+  request that times out leaves the queue, so a late completion is refused
+  (`RPMI_ERR_NO_DATA`) instead of landing in a buffer that is gone, and an
+  answer that claims more output than the caller made room for is
+  `RPMI_ERR_IO`.
+
+Messages and responses are bounced through the monitor's memory (the
+producer's stack), since a hart's M-mode is not at home in another domain's
+memory. A proxied `riscv,rpmi-mpxy-mm` channel, with `mboxes`, still goes
+to the PuC.
+
+**Whose channel.** `riscv,domain` in a channel node, of either
+kind, makes the channel that domain's: no other domain finds it in the
+channel list or can use its id. A phandle that names no domain fails the
+probe rather than widen the audience. Without the property every domain
+sees the channel, as before. The channels the
+monitor serves must have an owner.
+
 **RPMI in M-mode.** The service groups the specification keeps for M-mode
 back the monitor's own services: SYSTEM_RESET is a reset backend (the best
 rated one that supports a reset type is used, so the PuC comes before a
@@ -428,9 +466,10 @@ with `IMAGE_SBITEST` disabled.
 
 1. SSE RAS events (no source yet); DBTR trigger types other than address /
    data match.
-2. **RPMI**: service groups implemented by the firmware itself behind the
-   same MPXY channels; a wired P2A doorbell interrupt (an MSI one is
-   there).
+2. **RPMI**: a wired P2A doorbell interrupt (an MSI one is there). Of the
+   groups a firmware can serve itself, request forwarding between domains
+   and the management mode built on it are there; the TEE group waits for
+   its ratification.
 3. The maximum number of harts and domains and the monitor's size are
    build-time constants.
 4. More timer / IPI / reset / serial drivers.

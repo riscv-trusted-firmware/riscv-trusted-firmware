@@ -35,6 +35,14 @@ struct domain *domain_by_index(unsigned int index)
 	return index < nr_domains ? &domains[index] : NULL;
 }
 
+struct domain *domain_by_phandle(uint32_t phandle)
+{
+	for (unsigned int d = 1; phandle && d < nr_domains; d++)
+		if (domains[d].phandle == phandle)
+			return &domains[d];
+	return NULL;
+}
+
 struct domain *this_domain(void)
 {
 	return this_hart()->domain;

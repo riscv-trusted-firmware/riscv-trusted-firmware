@@ -27,10 +27,6 @@
 
 #include "mpxy_rpmi.h"
 
-#define MPXY_RPMI_ATTR_SERVICEGROUP_ID U(0x80000000)
-#define MPXY_RPMI_ATTR_SERVICEGROUP_VERSION U(0x80000001)
-#define MPXY_RPMI_ATTR_IMPL_ID U(0x80000002)
-#define MPXY_RPMI_ATTR_IMPL_VERSION U(0x80000003)
 #define EVENT_BUF_SIZE CONFIG_MPXY_RPMI_EVENT_BUF_SIZE
 
 struct mpxy_rpmi {
@@ -252,7 +248,7 @@ static const struct mpxy_channel_ops mpxy_rpmi_ops = {
 };
 
 static long mpxy_rpmi_channel_add(struct rpmi_context *puc, uint32_t channel_id,
-				  uint16_t group)
+				  uint16_t group, unsigned int owner)
 {
 	struct mpxy_rpmi *r = NULL;
 	long rc = 0;
@@ -280,6 +276,7 @@ static long mpxy_rpmi_channel_add(struct rpmi_context *puc, uint32_t channel_id,
 		.capability =
 			MPXY_CAP_SEND_WITH_RESP | MPXY_CAP_SEND_WITHOUT_RESP |
 			MPXY_CAP_GET_NOTIFICATIONS | MPXY_CAP_EVENTS_STATE,
+		.owner = owner,
 		.ops = &mpxy_rpmi_ops,
 	};
 
@@ -303,16 +300,22 @@ static long mpxy_rpmi_channel_add(struct rpmi_context *puc, uint32_t channel_id,
 static int mpxy_rpmi_probe(const void *fdt, int node)
 {
 	struct rpmi_context *puc = NULL;
+	unsigned int owner = 0;
 	uint16_t group = 0;
 	int len = 0;
 	const fdt32_t *id = NULL;
 
-	if (node < 0)
+	/*
+	 * A group without a PuC behind it is one the monitor serves
+	 * (mpxy_rpmi_fw.c).
+	 */
+	if (node < 0 || !fdt_getprop(fdt, node, "mboxes", NULL))
 		return 0;
 	id = fdt_getprop(fdt, node, "riscv,sbi-mpxy-channel-id", &len);
-	if (!id || len < 4 || rpmi_client_from_fdt(fdt, node, &puc, &group))
+	if (!id || len < 4 || rpmi_client_from_fdt(fdt, node, &puc, &group) ||
+	    mpxy_channel_owner_from_fdt(fdt, node, &owner))
 		return -1;
-	return (int)mpxy_rpmi_channel_add(puc, fdt32_to_cpu(*id), group);
+	return (int)mpxy_rpmi_channel_add(puc, fdt32_to_cpu(*id), group, owner);
 }
 
 static const char *const mpxy_rpmi_compatible[] = {

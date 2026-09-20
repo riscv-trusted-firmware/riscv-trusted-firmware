@@ -37,6 +37,25 @@ config MPXY_RPMI
 	  is a well-formed one of the group. The channels are the
 	  "riscv,rpmi-mpxy-*" nodes of the device tree.
 
+config MPXY_RPMI_FW
+	bool "RPMI service groups served by the monitor"
+	depends on DOMAINS
+	default y
+	help
+	  RPMI over MPXY without a platform microcontroller behind it, for
+	  what is the SBI implementation's to do: forwarding requests from
+	  one domain to another. "riscv,rpmi-mpxy-request-forward" nodes
+	  without "mboxes" are the REQUEST_FORWARD channels through which a
+	  domain takes the requests forwarded to it and answers them;
+	  "riscv,rpmi-mpxy-mm-domain" nodes are MANAGEMENT_MODE channels
+	  whose MM_COMMUNICATE requests are forwarded to the domain that
+	  hosts the management mode.
+
+config MPXY_RPMI_FW_MAX_CHANNELS
+	int "Maximum number of channels served by the monitor"
+	depends on MPXY_RPMI_FW
+	default 4
+
 config MPXY_RPMI_MAX_CHANNELS
 	int "Maximum number of RPMI channels"
 	depends on MPXY_RPMI

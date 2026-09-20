@@ -18,6 +18,13 @@
 #include <rpmi.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <util.h>
+
+/* The RPMI message protocol attributes of a channel. */
+#define MPXY_RPMI_ATTR_SERVICEGROUP_ID U(0x80000000)
+#define MPXY_RPMI_ATTR_SERVICEGROUP_VERSION U(0x80000001)
+#define MPXY_RPMI_ATTR_IMPL_ID U(0x80000002)
+#define MPXY_RPMI_ATTR_IMPL_VERSION U(0x80000003)
 
 /* Request data of any length the transport takes. */
 #define RPMI_RULE_ANY_LEN 0xffff

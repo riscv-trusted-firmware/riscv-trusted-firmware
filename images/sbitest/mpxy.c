@@ -104,22 +104,33 @@ static void test_shmem(void)
 	CHECK_RET(set_shmem(&page_a, 0), SBI_SUCCESS);
 }
 
+/*
+ * The PuC's four, and with domains the one of ours the monitor serves
+ * (domain.c).
+ */
+#ifdef CONFIG_QEMU_VIRT_DOMAINS
+#define NR_CHANNELS 5
+#else
+#define NR_CHANNELS 4
+#endif
+
 static void test_channels(void)
 {
 	struct sbiret ret = {};
 
 	ret = sbi_call1(SBI_EXT_MPXY, FID_GET_CHANNEL_IDS, 0);
 	CHECK_RET(ret, SBI_SUCCESS);
-	CHECK(page_a.w[0] == 0 && page_a.w[1] == 4, "remaining %u returned %u",
-	      page_a.w[0], page_a.w[1]);
+	CHECK(page_a.w[0] == 0 && page_a.w[1] == NR_CHANNELS,
+	      "remaining %u returned %u", page_a.w[0], page_a.w[1]);
 	CHECK(page_a.w[2] == CH_CLOCK && page_a.w[3] == CH_VOLTAGE &&
 	      page_a.w[4] == CH_SYSMSI && page_a.w[5] == CH_TEST,
 	      "channel ids %x %x %x %x", page_a.w[2], page_a.w[3], page_a.w[4],
 	      page_a.w[5]);
 	CHECK_RET(sbi_call1(SBI_EXT_MPXY, FID_GET_CHANNEL_IDS, 3), SBI_SUCCESS);
-	CHECK(page_a.w[0] == 0 && page_a.w[1] == 1 && page_a.w[2] == CH_TEST,
+	CHECK(page_a.w[0] == 0 && page_a.w[1] == NR_CHANNELS - 3 &&
+	      page_a.w[2] == CH_TEST,
 	      "from index 3: %u %u %x", page_a.w[0], page_a.w[1], page_a.w[2]);
-	CHECK_RET(sbi_call1(SBI_EXT_MPXY, FID_GET_CHANNEL_IDS, 4),
+	CHECK_RET(sbi_call1(SBI_EXT_MPXY, FID_GET_CHANNEL_IDS, NR_CHANNELS),
 		  SBI_ERR_INVALID_PARAM);
 }
 

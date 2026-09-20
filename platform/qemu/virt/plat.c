@@ -267,6 +267,49 @@ static int assign_cpu(void *fdt, unsigned long hartid, uint32_t domain)
 	return -FDT_ERR_NOTFOUND;
 }
 
+#define DOM_CHANNEL_MM 0x3000
+#define DOM_CHANNEL_REQFWD 0x3001
+
+static int add_channel(void *fdt, const char *name, const char *compatible,
+		       uint32_t id, uint32_t owner, uint32_t target,
+		       uint32_t memregion)
+{
+	int soc = fdt_path_offset(fdt, "/soc"), node = 0, rc = 0;
+
+	node = fdt_add_subnode(fdt, soc < 0 ? 0 : soc, name);
+	if (node < 0)
+		return node;
+	rc = set_string(fdt, node, "compatible", compatible);
+	if (!rc)
+		rc = fdt_setprop_u32(fdt, node, "riscv,sbi-mpxy-channel-id",
+				     id);
+	if (!rc)
+		rc = fdt_setprop_u32(fdt, node, "riscv,domain", owner);
+	if (!rc && target)
+		rc = fdt_setprop_u32(fdt, node, "riscv,reqfwd-target", target);
+	if (!rc && target)
+		rc = fdt_setprop_u32(fdt, node, "riscv,mm-memregion",
+				     memregion);
+	if (!rc && target)
+		rc = fdt_setprop_u32(fdt, node,
+				     "riscv,sbi-mpxy-completion-timeout-us",
+				     200000);
+	if (!rc && !target)
+		rc = fdt_setprop_u32(fdt, node, "riscv,sbi-mpxy-msg-max-len",
+				     20);
+	if (!rc && !target)
+		rc = fdt_setprop_empty(fdt, node, "riscv,wakeup-ssip");
+	return rc;
+}
+
+/* Entry 'i' of a "regions" list: a memregion's phandle and the permissions. */
+static void region_set(fdt32_t *regions, unsigned int i, uint32_t phandle,
+		       uint32_t perm)
+{
+	regions[2 * i] = cpu_to_fdt32(phandle);
+	regions[2 * i + 1] = cpu_to_fdt32(perm);
+}
+
 static int domains_fdt_prepare(void *fdt)
 {
 	enum { IMAGE, TMEM, IMEM, SHARED, NR_MEM };
@@ -342,6 +385,21 @@ static int domains_fdt_prepare(void *fdt)
 	for (unsigned int i = 0; !rc && i < n; i++)
 		rc = assign_cpu(fdt, hart_id_of(i),
 				dom[island && i == island ? 2 : 1]);
+
+	/*
+	 * Management mode for "untrusted", hosted by "trusted": an MM channel
+	 * for the one, the REQUEST_FORWARD channel its requests arrive through
+	 * for the other (in pieces: a forwarded MM_COMMUNICATE is 24 bytes),
+	 * the shared page for MM shared memory.
+	 */
+	if (!rc)
+		rc = add_channel(fdt, "mm-untrusted",
+				 "riscv,rpmi-mpxy-mm-domain", DOM_CHANNEL_MM,
+				 dom[1], dom[0], mem[SHARED]);
+	if (!rc)
+		rc = add_channel(fdt, "reqfwd-trusted",
+				 "riscv,rpmi-mpxy-request-forward",
+				 DOM_CHANNEL_REQFWD, dom[0], 0, 0);
 	return rc;
 }
 

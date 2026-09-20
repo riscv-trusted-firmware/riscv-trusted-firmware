@@ -14,6 +14,8 @@
 #include <atomic.h>
 #include <io.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <types_ext.h>
 #include <util.h>
 
 #include "sbicall.h"
@@ -233,6 +235,177 @@ void services_clean(unsigned long *mem)
 	}
 }
 
+/* ---- management mode, served through REQUEST_FORWARD ------------------- */
+
+#define MPXY_SET_SHMEM 1
+#define MPXY_READ_ATTRS 3
+#define MPXY_WRITE_ATTRS 4
+#define MPXY_SEND_WITH_RESP 5
+#define MPXY_GET_NOTIFICATIONS 7
+#define MPXY_ATTR_MSI_CONTROL 7
+#define RPMI_GROUP_MM 0x000b
+#define REQFWD_ENABLE_NOTIFICATION 1
+#define REQFWD_RETRIEVE 2
+#define REQFWD_COMPLETE 3
+#define RPMI_ERR_NO_DATA (-14)
+#define MM_MSI_DATA U(0xfeed)
+
+static long reqfwd_call(uint32_t *page, unsigned long service,
+			unsigned long len)
+{
+	struct sbiret ret = sbi_call3(SBI_EXT_MPXY, MPXY_SEND_WITH_RESP,
+				      DOM_CHANNEL_REQFWD, service, len);
+
+	return ret.error ? ret.error : (long)(int32_t)page[0];
+}
+
+static uint64_t time_now(void)
+{
+#if __RISCV_XLEN__ == 32
+	return reg_pair_to_64(csr_read(timeh), csr_read(time));
+#else
+	return csr_read(time);
+#endif
+}
+
+/*
+ * One forwarded MM_COMMUNICATE, already retrieved into 'msg' (header, then
+ * data).
+ */
+static void mm_communicate(uint32_t *page, const uint32_t *msg,
+			   unsigned long *flags)
+{
+	vaddr_t in = (vaddr_t)DOM_SHARED + msg[2];
+	vaddr_t out = (vaddr_t)DOM_SHARED + msg[4];
+	uint32_t size = msg[3];
+
+	if (size == MM_DROP_SIZE) {
+		/*
+		 * Too late on purpose: the producer has given up, and this is
+		 * refused.
+		 */
+		uint64_t until = time_now() + 3 * (MM_TIMEOUT_US * ULL(10));
+
+		while (time_now() < until)
+			;
+		page[0] = 0;
+		page[1] = 0;
+		DOM_SHARED->mm_dropped =
+			(unsigned long)(reqfwd_call(page, REQFWD_COMPLETE, 8) +
+					1);
+		return;
+	}
+	if (size > msg[5])
+		*flags |= MM_BAD;
+	for (uint32_t i = 0; i < size && size <= msg[5]; i++)
+		io_write8(out + i, io_read8(in + size - 1 - i) ^ MM_XOR);
+	page[0] = 0;
+	page[1] = size;
+	if (reqfwd_call(page, REQFWD_COMPLETE, 8))
+		*flags |= MM_BAD;
+}
+
+static unsigned long mm_serve(unsigned long hartid, unsigned long count)
+{
+	/*
+	 * Pages of this hart's in the domain's memory: MPXY's, and a word for
+	 * the MSI.
+	 */
+	uint32_t *page = (uint32_t *)(DOM_TMEM + 0x40000 + 0x1000 * hartid);
+	vaddr_t msi = DOM_TMEM + 0x80 + 4 * hartid;
+	unsigned long flags = 0, served = 0;
+	uint32_t msg[8] = {};
+
+	if (sbi_call3(SBI_EXT_MPXY, MPXY_SET_SHMEM, (unsigned long)page, 0, 0)
+	    .error)
+		return MM_BAD;
+	/* A channel is its owner's to see, and nobody else's. */
+	if (!sbi_call3(SBI_EXT_MPXY, MPXY_READ_ATTRS, DOM_CHANNEL_REQFWD, 0, 1)
+	    .error &&
+	    sbi_call3(SBI_EXT_MPXY, MPXY_READ_ATTRS, DOM_CHANNEL_MM, 0, 1)
+			    .error == SBI_ERR_NOT_SUPPORTED)
+		flags |= MM_SAW_OWN_CHANNELS;
+
+	/* To be told of a message: the group's one event, and an MSI for it. */
+	page[0] = 1;
+	page[1] = 1;
+	if (reqfwd_call(page, REQFWD_ENABLE_NOTIFICATION, 8))
+		flags |= MM_BAD;
+	io_write32(msi, 0);
+	page[0] = 1;
+	page[1] = (uint32_t)(unsigned long)msi;
+	page[2] = (uint32_t)((uint64_t)(unsigned long)msi >> 32);
+	page[3] = MM_MSI_DATA;
+	if (sbi_call3(SBI_EXT_MPXY, MPXY_WRITE_ATTRS, DOM_CHANNEL_REQFWD,
+		      MPXY_ATTR_MSI_CONTROL, 4)
+		    .error)
+		flags |= MM_BAD;
+	csr_clear(sip, BIT(IRQ_S_SOFT));
+
+	/*
+	 * A message may have been there before anybody asked to be told: look
+	 * once.
+	 */
+	for (bool told = true;
+	     served < count && !READ_ONCE(DOM_SHARED->release); told = false) {
+		unsigned long got = 0, pieces = 0;
+		long rc = 0;
+
+		/* From then on nothing happens until the MSI says so. */
+		while (!told && io_read32(msi) != MM_MSI_DATA &&
+		       !READ_ONCE(DOM_SHARED->release))
+			;
+		if (io_read32(msi) == MM_MSI_DATA) {
+			io_write32(msi, 0);
+			flags |= MM_SAW_MSI;
+			if (csr_read(sip) & BIT(IRQ_S_SOFT))
+				flags |= MM_SAW_SSIP;
+			csr_clear(sip, BIT(IRQ_S_SOFT));
+			/*
+			 * Past the events state: the event, its data the
+			 * message's header.
+			 */
+			if (sbi_call1(SBI_EXT_MPXY, MPXY_GET_NOTIFICATIONS,
+				      DOM_CHANNEL_REQFWD)
+					    .value >= 12 &&
+			    (page[4] >> 16) == 1 &&
+			    (page[5] & 0xffff) == RPMI_GROUP_MM)
+				flags |= MM_SAW_EVENT;
+		}
+
+		/*
+		 * Every message there is: only the first one of a burst is
+		 * announced.
+		 */
+		for (;;) {
+			do {
+				page[0] = (uint32_t)got;
+				rc = reqfwd_call(page, REQFWD_RETRIEVE, 4);
+				if (rc || got + page[2] > sizeof(msg))
+					break;
+				for (uint32_t i = 0; i < page[2]; i += 4)
+					msg[(got + i) / 4] = page[3 + i / 4];
+				got += page[2];
+				pieces++;
+			} while (page[1]);
+			if (rc == RPMI_ERR_NO_DATA)
+				break;
+			if (rc || got != 24 ||
+			    (msg[0] & 0xffff) != RPMI_GROUP_MM) {
+				flags |= MM_BAD;
+				break;
+			}
+			if (pieces > 1)
+				flags |= MM_SAW_PIECES;
+			mm_communicate(page, msg, &flags);
+			served++;
+			got = 0;
+			pieces = 0;
+		}
+	}
+	return served | flags;
+}
+
 unsigned long instret_coarse(void)
 {
 	return (csr_read(instret) >> 16) & INSTRET_COARSE_MASK;
@@ -285,6 +458,9 @@ static void __noreturn trusted_serve(unsigned long hartid, unsigned long value)
 			break;
 		case TCMD_SERVICES_GET:
 			value = services_check(SERVICES_TRUSTED, scratch);
+			break;
+		case TCMD_MM_SERVE:
+			value = mm_serve(hartid, param);
 			break;
 		case TCMD_INSTRET:
 			value = instret_coarse();

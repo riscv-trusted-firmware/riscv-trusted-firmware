@@ -12,6 +12,7 @@
 #include <arch/csr.h>
 #include <atomic.h>
 #include <io.h>
+#include <types_ext.h>
 #include <util.h>
 
 #include "sbicall.h"
@@ -220,6 +221,136 @@ static void test_trusted_smp(unsigned long other)
 	WRITE_ONCE(DOM_SHARED->release, 0);
 }
 
+/* ---- management mode, hosted by the trusted domain ----------------------- */
+
+#define MPXY_SET_SHMEM 1
+#define MPXY_READ_ATTRS 3
+#define MPXY_SEND_WITH_RESP 5
+#define RPMI_MM_GET_ATTRIBUTES 2
+#define RPMI_MM_COMMUNICATE 3
+
+static uint32_t mm_page[1024] __aligned(4096);
+
+/*
+ * MM_COMMUNICATE of 'size' input bytes: the STATUS, the returned size in *out.
+ */
+static long mm_communicate(uint32_t in_off, uint32_t size, uint32_t out_off,
+			   uint32_t out_size, uint32_t *out)
+{
+	struct sbiret ret = {};
+
+	mm_page[0] = in_off;
+	mm_page[1] = size;
+	mm_page[2] = out_off;
+	mm_page[3] = out_size;
+	ret = sbi_call3(SBI_EXT_MPXY, MPXY_SEND_WITH_RESP, DOM_CHANNEL_MM,
+			RPMI_MM_COMMUNICATE, 16);
+	if (ret.error || ret.value != 8)
+		return ret.error ? ret.error : -100;
+	*out = mm_page[1];
+	return (long)(int32_t)mm_page[0];
+}
+
+static void mm_round_trip(uint32_t size, unsigned char seed)
+{
+	vaddr_t in = (vaddr_t)DOM_SHARED + MM_IN_OFFSET;
+	vaddr_t out = (vaddr_t)DOM_SHARED + MM_OUT_OFFSET;
+	uint32_t got = 0, bad = 0;
+	long rc = 0;
+
+	for (uint32_t i = 0; i < size; i++) {
+		io_write8(in + i, (uint8_t)(seed + 3 * i));
+		io_write8(out + i, 0);
+	}
+	rc = mm_communicate(MM_IN_OFFSET, size, MM_OUT_OFFSET, MM_AREA_SIZE,
+			    &got);
+	for (uint32_t i = 0; i < size; i++)
+		bad += io_read8(out + i) !=
+		       (uint8_t)(io_read8(in + size - 1 - i) ^ MM_XOR);
+	CHECK(rc == 0 && got == size && !bad,
+	      "MM_COMMUNICATE of %u bytes: status %ld, %u back, %u wrong", size,
+	      rc, got, bad);
+}
+
+static void test_mm(unsigned long other)
+{
+	unsigned long flags = 0;
+	long error = 0, value = 0;
+	uint32_t got = 0;
+	uint64_t start = 0;
+	struct sbiret ret = {};
+
+	CHECK_RET(sbi_call3(SBI_EXT_MPXY, MPXY_SET_SHMEM,
+			    (unsigned long)mm_page, 0, 0),
+		  SBI_SUCCESS);
+	/*
+	 * The channel is this domain's; the one the requests arrive through is
+	 * not.
+	 */
+	CHECK_RET(sbi_call3(SBI_EXT_MPXY, MPXY_READ_ATTRS, DOM_CHANNEL_REQFWD,
+			    0, 1),
+		  SBI_ERR_NOT_SUPPORTED);
+	ret = sbi_call3(SBI_EXT_MPXY, MPXY_READ_ATTRS, DOM_CHANNEL_MM,
+			UL(0x80000000), 2);
+	CHECK(!ret.error && mm_page[0] == 0xb && mm_page[1] == 0x10000,
+	      "MM channel: %ld, group %x %x", ret.error, mm_page[0],
+	      mm_page[1]);
+
+	ret = sbi_call3(SBI_EXT_MPXY, MPXY_SEND_WITH_RESP, DOM_CHANNEL_MM,
+			RPMI_MM_GET_ATTRIBUTES, 0);
+	CHECK(!ret.error && ret.value == 20 && mm_page[0] == 0 &&
+	      mm_page[1] == 0x10000 &&
+	      mm_page[2] == (uint32_t)(unsigned long)DOM_SHARED &&
+	      mm_page[4] == 4096,
+	      "MM attributes: %ld, %x at %x+%x", ret.error, mm_page[1],
+	      mm_page[2], mm_page[4]);
+	CHECK(mm_communicate(MM_IN_OFFSET, 4096, MM_OUT_OFFSET, 4, &got) ==
+	      -5 &&
+	      mm_communicate(4096, 1, MM_OUT_OFFSET, 4, &got) == -5 &&
+	      mm_communicate(MM_IN_OFFSET, 4, 4092, 8, &got) == -5,
+	      "MM_COMMUNICATE outside the MM shared memory");
+
+	/* Nobody home: the request waits its time and comes back. */
+	start = now();
+	CHECK(mm_communicate(MM_IN_OFFSET, 4, MM_OUT_OFFSET, 4, &got) == -12,
+	      "MM_COMMUNICATE without a server");
+	CHECK(now() - start >= MM_TIMEOUT_US * ULL(10) / 2 &&
+	      now() - start < MM_TIMEOUT_US * ULL(10) * 4,
+	      "timed out after %lu ticks", (unsigned long)(now() - start));
+	if (other == ~UL(0))
+		return;
+
+	/* Another hart of ours goes over to be the server: four requests. */
+	WRITE_ONCE(DOM_SHARED->mm_dropped, 0);
+	secondary_domain_enter(other, TCMD(TCMD_MM_SERVE, 4));
+	mm_round_trip(16, 1);
+	mm_round_trip(MM_AREA_SIZE, 2);
+	/* One it sits on: we give up, and its answer is turned away. */
+	CHECK(mm_communicate(MM_IN_OFFSET, MM_DROP_SIZE, MM_OUT_OFFSET, 4,
+			     &got) == -12,
+	      "a request the server sat on");
+	CHECK(WAIT_FOR(READ_ONCE(DOM_SHARED->mm_dropped)) &&
+	      (long)READ_ONCE(DOM_SHARED->mm_dropped) - 1 == -14,
+	      "the late completion: %ld",
+	      (long)READ_ONCE(DOM_SHARED->mm_dropped) - 1);
+	mm_round_trip(64, 3);
+	CHECK(WAIT_FOR(secondary_domain_returned(other, &error, &value)) &&
+	      !error,
+	      "the server did not come back: %ld", error);
+	flags = (unsigned long)value;
+	CHECK((flags & 0xff) == 4 && !(flags & MM_BAD), "the server: %lx",
+	      flags);
+	CHECK((flags & MM_SAW_MSI) && (flags & MM_SAW_EVENT),
+	      "REQFWD_NEW_MESSAGE: %lx", flags);
+	CHECK(flags & MM_SAW_SSIP,
+	      "no software interrupt for the owner of the queue");
+	CHECK(flags & MM_SAW_PIECES,
+	      "a 24-byte message in one piece through a 20-byte channel");
+	CHECK(flags & MM_SAW_OWN_CHANNELS,
+	      "the trusted domain's view of the channels");
+	sbi_call3(SBI_EXT_MPXY, MPXY_SET_SHMEM, ~UL(0), ~UL(0), 0);
+}
+
 static void test_island(unsigned long boot)
 {
 	unsigned long island = 0;
@@ -303,6 +434,9 @@ void test_domains(unsigned long boot, unsigned long other)
 	test_services();
 	if (other != ~UL(0))
 		test_trusted_smp(other);
+	if (sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_MPXY)
+	    .value)
+		test_mm(other);
 	if (count == 4)
 		test_island(boot);
 
