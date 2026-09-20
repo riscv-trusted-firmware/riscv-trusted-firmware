@@ -133,7 +133,7 @@ static void test_attrs_and_states(struct sse_ctx *ctx)
 			   (unsigned long)buf + 1, 0),
 		  SBI_ERR_INVALID_ADDRESS);
 	CHECK_RET(sbi_call(SBI_EXT_SSE, FID_READ_ATTRS, LOCAL, 0, 1,
-			   CONFIG_MONITOR_LOAD_ADDR, 0),
+			   monitor_addr, 0),
 		  SBI_ERR_INVALID_ADDRESS);
 	/*
 	 * Reserved event ids are invalid; standard ones without a source are

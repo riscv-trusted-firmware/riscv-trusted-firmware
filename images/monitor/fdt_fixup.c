@@ -144,8 +144,8 @@ static int reserve_memregions(void *fdt)
 
 	for (unsigned int i = 0; memregion_get(i, &base, &size, &kind); i++) {
 		/* The image is reserved as a whole, W^X split or not. */
-		if (base >= CONFIG_MONITOR_LOAD_ADDR &&
-		    base < CONFIG_MONITOR_LOAD_ADDR + CONFIG_MONITOR_SIZE)
+		if (base >= monitor_base() &&
+		    base < monitor_base() + CONFIG_MONITOR_SIZE)
 			continue;
 		if (!fdt_range_is_memory(fdt, base, size))
 			continue;
@@ -158,8 +158,7 @@ static int reserve_memregions(void *fdt)
 
 void fdt_fixup(void *fdt)
 {
-	int rc = reserve(fdt, "monitor", CONFIG_MONITOR_LOAD_ADDR,
-			 CONFIG_MONITOR_SIZE);
+	int rc = reserve(fdt, "monitor", monitor_base(), CONFIG_MONITOR_SIZE);
 
 	if (!rc)
 		rc = reserve_memregions(fdt);

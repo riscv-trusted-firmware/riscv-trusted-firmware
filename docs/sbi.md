@@ -367,8 +367,8 @@ with `IMAGE_SBITEST` disabled.
    same MPXY channels; MSI / SSE indication of notifications; the P2A
    doorbell and the SYSTEM_MSI group; CPPC fast channels and the PuC's HSM
    suspend types.
-3. The maximum number of harts is a build-time constant, and the monitor's
-   own load address and size are link-time values.
+3. The maximum number of harts and the monitor's size are build-time
+   constants.
 4. More timer / IPI / reset / serial drivers.
 5. **Scalability.** Remote fences are serialised system-wide.
 

@@ -17,6 +17,8 @@
 
 #include <arch/csr.h>
 
+#define R_RISCV_RELATIVE	3
+
 	.section .text.entry, "ax", %progbits
 	.globl _start
 _start:
@@ -50,6 +52,35 @@ _start:
 	bnez	t2, _secondary
 #else
 	bnez	a0, _secondary
+#endif
+
+#ifdef IMAGE_PIE
+	/*
+	 * Boot hart: the image may run somewhere else than it was linked for.
+	 * Everything the code does is PC-relative; what needs fixing are the
+	 * addresses stored in data (tables of pointers), which the linker left
+	 * as R_RISCV_RELATIVE relocations: *(offset + delta) = addend + delta.
+	 * The words start out as zero, so this runs even when delta is 0, and
+	 * doing it again (a warm restart) changes nothing.
+	 */
+	la	t0, _start
+	/* _start is the first thing in the image */
+	li	t1, IMAGE_LINK_ADDR
+	sub	t0, t0, t1			/* delta */
+	la	t1, __rela_start
+	la	t2, __rela_end
+1:	bgeu	t1, t2, 3f
+	REG_L	t3, REGBYTES(t1)		/* r_info */
+	li	t4, R_RISCV_RELATIVE
+	bne	t3, t4, 2f
+	REG_L	t3, 0(t1)			/* r_offset */
+	REG_L	t4, (2 * REGBYTES)(t1)		/* r_addend */
+	add	t3, t3, t0
+	add	t4, t4, t0
+	REG_S	t4, 0(t3)
+2:	addi	t1, t1, 3 * REGBYTES
+	j	1b
+3:
 #endif
 
 	/* Boot hart: clear .bss before touching any C state. */

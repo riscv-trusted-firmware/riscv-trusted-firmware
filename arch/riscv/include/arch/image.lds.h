@@ -30,6 +30,8 @@ SECTIONS {
 	.rodata : {
 		*(.rodata .rodata.*)
 		*(.srodata .srodata.*)
+		/* Constants that hold addresses, in a position-independent image. */
+		*(.data.rel.ro .data.rel.ro.*)
 
 		. = ALIGN(8);
 		__service_table_start = .;
@@ -41,6 +43,19 @@ SECTIONS {
 		KEEP(*(.driver_table))
 		__driver_table_end = .;
 	} > image
+
+#ifdef IMAGE_PIE
+	/*
+	 * A position-independent image carries its R_RISCV_RELATIVE
+	 * relocations and applies them itself (entry.S). Part of the loaded
+	 * image, read-only once that is done.
+	 */
+	.rela.dyn : ALIGN(8) {
+		__rela_start = .;
+		*(.rela .rela.*)
+		__rela_end = .;
+	} > image
+#endif
 
 	/* A protection boundary (Smepmp: R-X before, RW after). */
 	.data : ALIGN(4096) {
@@ -74,11 +89,13 @@ SECTIONS {
 
 	__image_end = .;
 
+#ifndef IMAGE_PIE
 	/*
 	 * GNU ld on RISC-V routes input .rela.* sections here even for a
 	 * static link; the output must stay empty (checked below).
 	 */
 	.rela.dyn : { *(.rela .rela.*) }
+#endif
 
 	/* Non-allocated metadata, listed so --orphan-handling stays quiet. */
 	.riscv.attributes 0 : { *(.riscv.attributes) }
@@ -110,9 +127,12 @@ SECTIONS {
 		*(.eh_frame .eh_frame_hdr)
 		*(.note .note.*)
 		*(.interp .dynamic .dynsym .dynstr .hash .gnu.hash)
+		*(.gnu.version .gnu.version_d .gnu.version_r .plt .got.plt .dynbss)
 	}
 }
 
 ASSERT(__image_end - __image_start <= IMAGE_SIZE, "image exceeds IMAGE_SIZE")
 ASSERT(__bss_start % 16 == 0, ".bss is not 16-byte aligned")
+#ifndef IMAGE_PIE
 ASSERT(SIZEOF(.rela.dyn) == 0, "unexpected dynamic relocations")
+#endif

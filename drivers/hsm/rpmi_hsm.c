@@ -15,6 +15,7 @@
  * that says no is an error.
  */
 
+#include <arch/hart.h>
 #include <arch/hsm.h>
 #include <driver.h>
 #include <log.h>
@@ -34,7 +35,7 @@ static bool silent(int rc)
 
 static long rpmi_hsm_hart_start(unsigned long hartid)
 {
-	uint64_t entry = CONFIG_MONITOR_LOAD_ADDR;
+	uint64_t entry = monitor_base();
 	uint32_t req[3] = { (uint32_t)hartid, (uint32_t)entry,
 			    high32_from_64(entry) };
 	uint32_t resp[1] = {};

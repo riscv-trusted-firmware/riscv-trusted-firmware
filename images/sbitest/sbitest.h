@@ -24,6 +24,12 @@
  */
 #define SBITEST_MAX_HARTS 16
 
+/*
+ * Where the monitor is: what it says in the device tree it hands us (the
+ * "monitor@..." reservation), since it may not run where it was linked.
+ */
+extern unsigned long monitor_addr;
+
 extern unsigned int checks, failures;
 
 #define CHECK(cond, fmt, ...)                                                 \

@@ -98,8 +98,7 @@ void test_dbtr(void)
 	CHECK_RET(sbi_call3(SBI_EXT_DBTR, FID_SET_SHMEM, (unsigned long)shmem,
 			    0, 1),
 		  SBI_ERR_INVALID_PARAM);
-	CHECK_RET(sbi_call3(SBI_EXT_DBTR, FID_SET_SHMEM,
-			    CONFIG_MONITOR_LOAD_ADDR, 0, 0),
+	CHECK_RET(sbi_call3(SBI_EXT_DBTR, FID_SET_SHMEM, monitor_addr, 0, 0),
 		  SBI_ERR_INVALID_ADDRESS);
 	CHECK_RET(sbi_call3(SBI_EXT_DBTR, FID_SET_SHMEM, (unsigned long)shmem,
 			    0, 0),

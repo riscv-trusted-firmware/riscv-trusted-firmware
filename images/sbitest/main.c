@@ -38,6 +38,7 @@ char _sbitest_stacks[SBITEST_MAX_HARTS][CONFIG_STACK_SIZE] __aligned(16);
 /* ---- bookkeeping ------------------------------------------------------ */
 
 unsigned int checks, failures;
+unsigned long monitor_addr = CONFIG_MONITOR_LOAD_ADDR;
 
 uint64_t now(void)
 {
@@ -295,14 +296,14 @@ static void test_dbcn(void)
 
 	/* The monitor must not print (or fill) its own memory for us. */
 	CHECK_RET(sbi_call3(SBI_EXT_DBCN, SBI_DBCN_CONSOLE_WRITE, 16,
-			    CONFIG_MONITOR_LOAD_ADDR, 0),
+			    monitor_addr, 0),
 		  SBI_ERR_INVALID_PARAM);
 	CHECK_RET(sbi_call3(SBI_EXT_DBCN, SBI_DBCN_CONSOLE_READ, 16,
-			    CONFIG_MONITOR_LOAD_ADDR + 0x1000, 0),
+			    monitor_addr + 0x1000, 0),
 		  SBI_ERR_INVALID_PARAM);
 	/* A buffer that starts below the monitor and runs into it. */
 	CHECK_RET(sbi_call3(SBI_EXT_DBCN, SBI_DBCN_CONSOLE_WRITE, 32,
-			    CONFIG_MONITOR_LOAD_ADDR - 16, 0),
+			    monitor_addr - 16, 0),
 		  SBI_ERR_INVALID_PARAM);
 	CHECK_RET(sbi_call3(SBI_EXT_DBCN, SBI_DBCN_CONSOLE_WRITE, 16,
 			    (unsigned long)msg, 1),
@@ -423,7 +424,7 @@ static void test_legacy(void)
 	 */
 	WRITE_ONCE(trap_expected, true);
 	WRITE_ONCE(trap_count, 0);
-	sbi_call1(SBI_EXT_LEGACY_SEND_IPI, 0, CONFIG_MONITOR_LOAD_ADDR);
+	sbi_call1(SBI_EXT_LEGACY_SEND_IPI, 0, monitor_addr);
 	WRITE_ONCE(trap_expected, false);
 	CHECK(trap_count == 1 && trap_cause == CAUSE_LOAD_ACCESS,
 	      "bad hart mask pointer: %lu traps, cause %lu", trap_count,
@@ -469,20 +470,15 @@ static void test_traps(void)
 	 * Monitor memory is fenced off by PMP, for reads, writes and fetches.
 	 */
 	WRITE_ONCE(trap_count, 0);
-	PROBE_INSN("lbu %0, 0(%1)",
-		   : "=r"(val)
-		   : "r"((unsigned long)CONFIG_MONITOR_LOAD_ADDR)
-		   : "memory");
+	addr = monitor_addr;
+	PROBE_INSN("lbu %0, 0(%1)", : "=r"(val) : "r"(addr) : "memory");
 	CHECK(trap_count == 1 && trap_cause == CAUSE_LOAD_ACCESS,
 	      "monitor read: %lu traps, cause %lu", trap_count, trap_cause);
-	CHECK(trap_tval == CONFIG_MONITOR_LOAD_ADDR, "stval %lx", trap_tval);
+	CHECK(trap_tval == monitor_addr, "stval %lx", trap_tval);
 
 	WRITE_ONCE(trap_count, 0);
-	PROBE_INSN("sb zero, 0(%0)",
-		   :
-		   : "r"((unsigned long)(CONFIG_MONITOR_LOAD_ADDR +
-					 CONFIG_MONITOR_SIZE - 1))
-		   : "memory");
+	addr = monitor_addr + CONFIG_MONITOR_SIZE - 1;
+	PROBE_INSN("sb zero, 0(%0)", : : "r"(addr) : "memory");
 	CHECK(trap_count == 1 && trap_cause == CAUSE_STORE_ACCESS,
 	      "monitor write: %lu traps, cause %lu", trap_count, trap_cause);
 
@@ -499,11 +495,8 @@ static void test_traps(void)
 
 	/* ... and the memory right after it is ours. */
 	WRITE_ONCE(trap_count, 0);
-	PROBE_INSN("lbu %0, 0(%1)",
-		   : "=r"(val)
-		   : "r"((unsigned long)(CONFIG_MONITOR_LOAD_ADDR +
-					 CONFIG_MONITOR_SIZE))
-		   : "memory");
+	addr = monitor_addr + CONFIG_MONITOR_SIZE;
+	PROBE_INSN("lbu %0, 0(%1)", : "=r"(val) : "r"(addr) : "memory");
 	CHECK(trap_count == 0, "read past the monitor trapped, cause %lu",
 	      trap_cause);
 
@@ -596,8 +589,7 @@ static void test_hsm_errors(unsigned long other)
 			SBI_HSM_SUSPEND_RET_PLATFORM, 0, 0);
 	CHECK_RET(ret, SBI_ERR_NOT_SUPPORTED);
 	ret = sbi_call3(SBI_EXT_HSM, SBI_HSM_HART_SUSPEND,
-			SBI_HSM_SUSPEND_NON_RET_DEFAULT,
-			CONFIG_MONITOR_LOAD_ADDR, 0);
+			SBI_HSM_SUSPEND_NON_RET_DEFAULT, monitor_addr, 0);
 	CHECK_RET(ret, SBI_ERR_INVALID_ADDRESS);
 	CHECK(hart_status(boot_hartid) == SBI_HSM_STATE_STARTED,
 	      "failed suspend changed the hart state");
@@ -672,7 +664,7 @@ static void test_hsm_platform(unsigned long puc)
 	/* The PuC is given the monitor's entry point, not ours. */
 	CHECK(READ_ONCE(puc_hsm_starts) == starts + 1 &&
 	      READ_ONCE(puc_hsm_last_hart) == other &&
-	      puc_hsm_last_addr == CONFIG_MONITOR_LOAD_ADDR,
+	      puc_hsm_last_addr == monitor_addr,
 	      "PuC saw %u starts, hart %u, address %llx",
 	      READ_ONCE(puc_hsm_starts) - starts, READ_ONCE(puc_hsm_last_hart),
 	      (unsigned long long)puc_hsm_last_addr);
@@ -700,7 +692,7 @@ static void test_smp(void)
 	test_hsm_errors(first);
 	if (first != ~UL(0))
 		CHECK_RET(sbi_call3(SBI_EXT_HSM, SBI_HSM_HART_START, first,
-				    CONFIG_MONITOR_LOAD_ADDR, 0),
+				    monitor_addr, 0),
 			  SBI_ERR_INVALID_ADDRESS);
 
 	printf("hsm suspend (self)\n");
@@ -879,10 +871,11 @@ static void test_fdt(unsigned long addr)
 			base = (base << 32) | fdt32_to_cpu(reg[i]);
 		for (int i = 0; i < sc; i++)
 			size = (size << 32) | fdt32_to_cpu(reg[ac + i]);
-		if (base != CONFIG_MONITOR_LOAD_ADDR ||
+		if (strncmp(fdt_get_name(fdt, node, NULL), "monitor@", 8) ||
 		    size != CONFIG_MONITOR_SIZE)
 			continue;
 		found++;
+		monitor_addr = (unsigned long)base;
 		CHECK(fdt_getprop(fdt, node, "no-map", NULL),
 		      "monitor memory is not no-map");
 	}
@@ -1015,7 +1008,7 @@ static void test_pmu_snapshot(unsigned long fw_first, unsigned long fw_mask,
 			    (unsigned long)&snap, 0, 1),
 		  SBI_ERR_INVALID_PARAM);
 	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_SNAPSHOT_SET_SHMEM,
-			    CONFIG_MONITOR_LOAD_ADDR, 0, 0),
+			    monitor_addr, 0, 0),
 		  SBI_ERR_INVALID_ADDRESS);
 	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_SNAPSHOT_SET_SHMEM,
 			    (unsigned long)&snap, 0, 0),
@@ -1231,8 +1224,8 @@ static void test_pmu(void)
 	CHECK_RET(sbi_call(SBI_EXT_PMU, SBI_PMU_EVENT_GET_INFO,
 			   (unsigned long)info + 4, 0, 1, 0, 0),
 		  SBI_ERR_INVALID_PARAM);
-	CHECK_RET(sbi_call(SBI_EXT_PMU, SBI_PMU_EVENT_GET_INFO,
-			   CONFIG_MONITOR_LOAD_ADDR, 0, 1, 0, 0),
+	CHECK_RET(sbi_call(SBI_EXT_PMU, SBI_PMU_EVENT_GET_INFO, monitor_addr, 0,
+			   1, 0, 0),
 		  SBI_ERR_INVALID_ADDRESS);
 }
 #else
@@ -1339,7 +1332,7 @@ static void test_susp(void)
 			    UL(0x80000000), (unsigned long)_resume_start, 0),
 		  SBI_ERR_NOT_SUPPORTED);
 	CHECK_RET(sbi_call3(SBI_EXT_SUSP, SBI_SUSP_SYSTEM_SUSPEND, 0,
-			    CONFIG_MONITOR_LOAD_ADDR, 0),
+			    monitor_addr, 0),
 		  SBI_ERR_INVALID_ADDRESS);
 
 	csr_write(sie, SIP_STIP);

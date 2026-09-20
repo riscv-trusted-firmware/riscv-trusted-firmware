@@ -7,3 +7,12 @@ monitor-dirs     := arch/riscv arch/riscv/runtime lib drivers services \
 		    platform/$(CONFIG_PLATFORM_DIR) images/monitor
 monitor-ldscript := $(SRCTREE)/images/monitor/monitor.ld.S
 monitor-cppflags := -DIMAGE_MONITOR
+
+# Position-independent: linked for MONITOR_LOAD_ADDR, runs wherever it is put.
+ifneq ($(CONFIG_MONITOR_PIE),)
+monitor-cppflags += -DIMAGE_PIE -DIMAGE_LINK_ADDR=CONFIG_MONITOR_LOAD_ADDR
+# C only: in assembly 'la' must stay PC-relative, the GOT is not usable
+# before the relocations are applied.
+monitor-cflags   := -fpie
+monitor-ldflags  := -pie --no-dynamic-linker -z notext
+endif

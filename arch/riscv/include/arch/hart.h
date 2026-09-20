@@ -132,6 +132,9 @@ void hart_runtime_init(void);
 /* Ssdbltrp, and S-mode has turned it on (FWFT DOUBLE_TRAP: menvcfg.DTE). */
 bool hart_smode_double_trap_enabled(void);
 
+/* Where the monitor runs: its link address unless it relocated itself. */
+vaddr_t monitor_base(void);
+
 /* Is [addr, addr + size) memory the next stage may be given or may name? */
 bool smode_range_ok(paddr_t addr, paddr_size_t size);
 

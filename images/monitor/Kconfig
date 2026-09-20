@@ -15,6 +15,15 @@ config MONITOR_LOAD_ADDR
 	default LOADER_NEXT_STAGE_ADDR if IMAGE_LOADER
 	default PLATFORM_FW_START
 
+config MONITOR_PIE
+	bool "Position-independent monitor"
+	default y
+	help
+	  MONITOR_LOAD_ADDR is then only where the monitor is linked for: it
+	  relocates itself to wherever the previous stage put it (and tells
+	  where that is in the device tree it passes on). Costs the
+	  relocation table in the image.
+
 config MONITOR_SIZE
 	hex "Memory reserved for the monitor"
 	default PLATFORM_FW_SIZE

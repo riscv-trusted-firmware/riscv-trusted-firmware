@@ -142,6 +142,14 @@ data, bss, per-hart stacks); an image only defines `IMAGE_BASE` and
 `IMAGE_SIZE`. `--orphan-handling=warn` and `--gc-sections` are on; the script
 asserts the image fits and that no dynamic relocations survive.
 
+The monitor is position-independent by default (`CONFIG_MONITOR_PIE`): C is
+built `-fpie`, the link is `-pie`, the `R_RISCV_RELATIVE` relocations stay
+in the image (`.rela.dyn`, in its read-only part) and `entry.S` applies them
+on the boot hart before anything else runs, so `MONITOR_LOAD_ADDR` is only
+where it is linked for. Assembly stays non-PIC: `la` must not go through a
+GOT that is not relocated yet. Objects depend on their `image.mk`, where
+such flags live.
+
 Outputs: `<name>.elf`, `<name>.bin`, `<name>.map`, `<name>.ld`, and
 `<name>.dump` with `make dump`. `$(O)/include/generated/version.h` carries
 `PROJECT_NAME`, `PROJECT_VERSION` (with `git describe`) and `BUILD_TARGET`.

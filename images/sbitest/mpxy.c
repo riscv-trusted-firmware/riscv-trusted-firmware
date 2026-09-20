@@ -77,8 +77,7 @@ static void test_shmem(void)
 
 	CHECK_RET(set_shmem((char *)&page_a + 64, 0), SBI_ERR_INVALID_PARAM);
 	CHECK_RET(set_shmem(&page_a, 2), SBI_ERR_INVALID_PARAM);
-	CHECK_RET(set_shmem((void *)CONFIG_MONITOR_LOAD_ADDR, 0),
-		  SBI_ERR_INVALID_ADDRESS);
+	CHECK_RET(set_shmem((void *)monitor_addr, 0), SBI_ERR_INVALID_ADDRESS);
 	CHECK_RET(sbi_call3(SBI_EXT_MPXY, FID_SET_SHMEM, (unsigned long)&page_a,
 			    1, 0),
 		  SBI_ERR_INVALID_ADDRESS);

@@ -50,13 +50,13 @@ $(1)-dump := $$($(1)-out)/$(1).dump
 images-targets += $$($(1)-elf) $$($(1)-bin)
 images-dumps += $$($(1)-dump)
 
-$$($(1)-out)/obj/%.o: $(SRCTREE)/%.c $$($(1)-sub-mk) | $(VERSION_H)
+$$($(1)-out)/obj/%.o: $(SRCTREE)/%.c $$($(1)-sub-mk) $(SRCTREE)/images/$(1)/image.mk | $(VERSION_H)
 	$(q)mkdir -p $$(@D)
 	$$(call cmd,CC,$$<) $$(CC) $$(CPPFLAGS) $$($(1)-global-incdirs) $$($(1)-cppflags) \
 		$$(obj-cppflags) $$(CFLAGS) $$($(1)-cflags) $$(obj-cflags) \
 		-MMD -MP -MF $$@.d -c $$< -o $$@
 
-$$($(1)-out)/obj/%.o: $(SRCTREE)/%.S $$($(1)-sub-mk) | $(VERSION_H)
+$$($(1)-out)/obj/%.o: $(SRCTREE)/%.S $$($(1)-sub-mk) $(SRCTREE)/images/$(1)/image.mk | $(VERSION_H)
 	$(q)mkdir -p $$(@D)
 	$$(call cmd,AS,$$<) $$(CC) $$(CPPFLAGS) $$($(1)-global-incdirs) $$($(1)-cppflags) \
 		$$(obj-cppflags) $$(ASFLAGS) $$($(1)-asflags) $$(obj-asflags) \

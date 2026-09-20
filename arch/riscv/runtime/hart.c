@@ -129,10 +129,15 @@ bool hart_has(enum hart_feature feat)
 	return features[feat];
 }
 
+vaddr_t monitor_base(void)
+{
+	return (unsigned long)__image_start;
+}
+
 /* Boot hart: the monitor's own image. */
 static void monitor_regions_init(void)
 {
-	unsigned long start = CONFIG_MONITOR_LOAD_ADDR;
+	unsigned long start = monitor_base();
 	unsigned long split = (unsigned long)__text_rodata_end;
 
 	/* One entry keeps S-mode out; confining M-mode takes the W^X split. */
