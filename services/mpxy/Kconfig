@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+config MPXY
+	bool "Message proxy channels (SBI MPXY extension)"
+	depends on SBI
+	help
+	  Lets S-mode exchange messages with a message protocol implementation
+	  through the monitor: per-hart shared memory, channels with
+	  attributes, messages with and without response, notification
+	  events. Channels come from the message protocols below.
+
+if MPXY
+
+config MPXY_RPMI
+	bool "RPMI service groups as MPXY channels"
+	depends on RPMI
+	default y
+	help
+	  One channel per RPMI service group the platform opens to S-mode
+	  (clock, voltage, device power, ...), forwarded to the platform
+	  microcontroller. The platform code says which, and under which
+	  channel ids: mpxy_rpmi_channel_add().
+
+config MPXY_RPMI_MAX_CHANNELS
+	int "Maximum number of RPMI channels"
+	depends on MPXY_RPMI
+	default 8
+
+config MPXY_RPMI_EVENT_BUF_SIZE
+	int "Notification event buffer per RPMI channel (bytes)"
+	depends on MPXY_RPMI
+	default 512
+	help
+	  Events the PuC sent and S-mode has not fetched yet. When it is
+	  full, further events are counted as lost. A multiple of 4.
+
+endif

@@ -19,6 +19,7 @@
 #include <generated/version.h>
 #include <ipi.h>
 #include <log.h>
+#include <mpxy.h>
 #include <platform.h>
 #include <reset.h>
 #include <rpmi.h>
@@ -90,6 +91,9 @@ void image_main(unsigned long hartid, unsigned long fdt)
 		ipi_name(), reset_name(), hart_count());
 #ifdef CONFIG_RPMI
 	pr_info("rpmi: %s\n", rpmi_transport_name());
+#endif
+#ifdef CONFIG_MPXY
+	pr_info("mpxy: %u channel(s)\n", mpxy_channel_count());
 #endif
 	print_services();
 	pmu_init((const void *)fdt);

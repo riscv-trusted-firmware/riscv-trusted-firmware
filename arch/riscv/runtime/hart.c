@@ -15,6 +15,7 @@
 #include <atomic.h>
 #include <ipi.h>
 #include <log.h>
+#include <mpxy.h>
 #include <sbi/sbi.h>
 #include <timer.h>
 #include <types_ext.h>
@@ -201,6 +202,7 @@ void hart_runtime_init(void)
 	pmp_init();
 	pmu_hart_init();
 	fwft_hart_init();
+	mpxy_hart_init();
 
 	/* Nothing stale pending when the next stage (re)starts on this hart. */
 	csr_clear(mip, MIP_SSIP | MIP_STIP);
