@@ -10,9 +10,10 @@
  * privilege and translation of the trapping context; a fault on the way
  * goes to S-mode as the fault it is.
  *
- * Covered: the integer and floating-point loads and stores of the base ISA,
- * of the C extension and of Zcb. Not covered (redirected to S-mode): vector
- * accesses, and LR/SC, which cannot be split.
+ * Covered here: the integer and floating-point loads and stores of the base
+ * ISA, of the C extension and of Zcb; vector accesses are in
+ * misaligned_vector.c. Not covered (redirected to S-mode): LR/SC, which
+ * cannot be split.
  */
 
 #include <arch/hart.h>
@@ -195,6 +196,14 @@ void trap_misaligned(struct trap_regs *regs, const struct trap_info *info)
 		trap_redirect(regs, &fault);
 		return;
 	}
+	/*
+	 * The vector loads and stores share their opcodes with the scalar FP
+	 * ones.
+	 */
+	if ((insn & 3) == 3 &&
+	    ((insn & 0x7f) == 0x07 || (insn & 0x7f) == 0x27) &&
+	    trap_misaligned_vector(regs, insn))
+		return;
 	ok = (insn & 3) == 3 ? decode32(insn, &a) : decode16(insn, &a);
 	/*
 	 * Not an access we know, or not the kind that trapped: S-mode's

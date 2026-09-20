@@ -87,6 +87,8 @@ void trap_redirect(struct trap_regs *regs, const struct trap_info *info);
 void trap_illegal_insn(struct trap_regs *regs, const struct trap_info *info);
 /* Emulate a misaligned load or store, or hand it to S-mode. */
 void trap_misaligned(struct trap_regs *regs, const struct trap_info *info);
+/* Its vector half: false when 'insn' is not a vector access it emulates. */
+bool trap_misaligned_vector(struct trap_regs *regs, unsigned long insn);
 
 #endif /* !__ASSEMBLY__ */
 

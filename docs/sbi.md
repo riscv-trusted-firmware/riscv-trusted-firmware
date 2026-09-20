@@ -45,7 +45,7 @@ arch/riscv/runtime/       hart.c    per-hart state, feature probing, S-mode entr
                           rfence.c  remote fence requests
                           unpriv.c  memory access as the trapping context (MPRV)
                           illegal_insn.c  counter CSR and AMO emulation
-                          misaligned.c    misaligned load / store emulation
+                          misaligned.c, misaligned_vector.c  misaligned load / store emulation
                           pmp.c     PMP programming
                           pmu.c     hardware and firmware counters
                           fwft.c    firmware features (medeleg / menvcfg controls)
@@ -77,8 +77,9 @@ emulated: reads of the counter CSRs the hart lacks (`time` from the platform
 timer, `cycle`, `instret` and `hpmcounterN` from the machine counters,
 honouring scounteren for U-mode), and the AMO instructions on a hart that
 only has LR/SC, as an LR/SC pair under `mstatus.MPRV`. A misaligned load or
-store (integer or floating-point, 32-bit, compressed or Zcb encoding) is
-redone byte by
+store (integer or floating-point, 32-bit, compressed or Zcb encoding; vector
+unit-stride, strided and indexed accesses with masks, segments,
+whole-register and fault-only-first forms and any LMUL) is redone byte by
 byte with the privilege and translation of the trapping context, unless
 S-mode has taken misaligned exceptions for itself through FWFT. Everything else, and whatever the emulator does not handle, is
 redirected to S-mode (`trap_redirect()`, which also fills in the hypervisor
@@ -333,12 +334,11 @@ with `IMAGE_SBITEST` disabled.
    doorbell and the SYSTEM_MSI group; CPPC fast channels and the PuC's HSM
    suspend types; transport and channel discovery from the device tree
    (`riscv,rpmi-shmem-mbox`, `riscv,rpmi-mpxy-*`).
-3. Misaligned vector loads and stores are not emulated (redirected to
-   S-mode).
-4. **Device tree driven configuration.** libfdt is only used for the
-   fix-up; device addresses and the hart count still come from Kconfig.
-5. More timer / IPI / reset / serial drivers.
-6. **Scalability.** Remote fences are serialised system-wide; harts are
+3. **Device tree driven configuration.** The interrupt controllers and the
+   PMU event map come from the device tree; the other device addresses and
+   the hart count still come from Kconfig.
+4. More timer / IPI / reset / serial drivers.
+5. **Scalability.** Remote fences are serialised system-wide; harts are
    indexed by hart id (`hartid < CONFIG_PLATFORM_HART_COUNT`).
 
 The H-extension paths (trap redirection from VS/VU-mode, `hfence` on a real
