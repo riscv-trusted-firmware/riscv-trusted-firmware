@@ -31,6 +31,14 @@ void pmp_all_set(unsigned int idx, unsigned int perm);
 
 /* Program the calling hart's PMP from the memory regions (hart.c). */
 void pmp_hart_init(void);
+/*
+ * What comes after the monitor's own entries: the regions of the domain the
+ * calling hart runs, smallest first (<domain.h>). Again whenever the hart
+ * changes domain.
+ */
+void pmp_domain_set(void);
+/* Entries left for a domain's regions. */
+unsigned int pmp_domain_entries(void);
 
 /*
  * M-mode is about to touch S-mode memory directly (a buffer S-mode named

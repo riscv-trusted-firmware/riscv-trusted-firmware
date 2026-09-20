@@ -7,6 +7,7 @@
  * SBI system reset extension (EID "SRST").
  */
 
+#include <domain.h>
 #include <log.h>
 #include <reset.h>
 #include <util.h>
@@ -53,6 +54,9 @@ static struct service_ret sbi_srst_ecall(unsigned long eid, unsigned long fid,
 	}
 	if (!reset_supported(rt))
 		return sbi_err(SBI_ERR_NOT_SUPPORTED);
+	/* The system is not this domain's to take down. */
+	if (!domain_reset_allowed(this_domain()))
+		return sbi_err(SBI_ERR_DENIED);
 
 	pr_dbg("sbi-srst: type %lu reason %lu\n", type, reason);
 	system_reset(rt);

@@ -245,7 +245,12 @@ void sse_process(struct trap_regs *regs)
 	if (!next)
 		atomic_store_ulong(&kick[self], 0);
 	running = top_event(self, SSE_STATE_RUNNING);
-	if (next && unmasked[self] && (!running || outranks(next, running)))
+	/*
+	 * Not into a domain that did not ask for it: the hart may have changed
+	 * hands.
+	 */
+	if (next && unmasked[self] && (!running || outranks(next, running)) &&
+	    smode_entry_ok(next->attr[SSE_ATTR_ENTRY_PC]))
 		inject(next, regs);
 	spin_unlock(&sse_lock);
 }
@@ -429,7 +434,7 @@ long sse_register(unsigned long event_id, unsigned long entry_pc,
 
 	if (rc)
 		return rc;
-	if ((entry_pc & 1) || !smode_range_ok(entry_pc, 4))
+	if ((entry_pc & 1) || !smode_entry_ok(entry_pc))
 		return SBI_ERR_INVALID_PARAM;
 
 	spin_lock(&sse_lock);

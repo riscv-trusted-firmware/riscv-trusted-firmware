@@ -219,7 +219,9 @@ static unsigned long state_of(unsigned int idx, unsigned long tdata1)
 static long entries_get(struct dbtr_hart *d, unsigned long count,
 			struct dbtr_entry **entries)
 {
-	if (d->shmem == SHMEM_NONE)
+	/* Set, and still this domain's: the hart may have changed hands. */
+	if (d->shmem == SHMEM_NONE ||
+	    !smode_range_ok(d->shmem, d->count * sizeof(struct dbtr_entry)))
 		return SBI_ERR_NO_SHMEM;
 	if (count > d->count)
 		return SBI_ERR_BAD_RANGE;

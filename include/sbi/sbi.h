@@ -175,4 +175,17 @@
 #define SBI_SPEC_VERSION_MAJOR 3
 #define SBI_SPEC_VERSION_MINOR 0
 
+/*
+ * Firmware specific extension space: domain control (<domain.h>).
+ * (error, value) as everywhere; a domain goes by its index.
+ */
+#define SBI_EXT_FW_DOMAIN (0x0A000000 + CONFIG_SBI_IMPL_ID)
+#define SBI_FW_DOMAIN_COUNT 0 /* () -> number of domains */
+#define SBI_FW_DOMAIN_SELF 1 /* () -> the caller's domain */
+#define SBI_FW_DOMAIN_ENTER 2 /* (domain, arg) -> what its exit passed */
+#define SBI_FW_DOMAIN_EXIT 3 /* (value) -> what the next enter passed */
+#define SBI_FW_DOMAIN_START 4 /* (domain) */
+#define SBI_FW_DOMAIN_STOP 5 /* (domain) */
+#define SBI_FW_DOMAIN_STATE 6 /* (domain) -> 1: runs, 0: stopped */
+
 #endif

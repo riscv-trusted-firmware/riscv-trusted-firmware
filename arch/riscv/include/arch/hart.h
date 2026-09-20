@@ -28,12 +28,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct domain;
+
 struct hart {
 	unsigned long m_sp; /* top of the M-mode stack */
 	unsigned long tmp; /* trap entry scratch slot */
 	unsigned long hartid;
 	/* position in the hart table, see <boot.h> */
 	unsigned int index;
+	/* the domain it runs now, see <domain.h> */
+	struct domain *domain;
 	unsigned long present; /* reached the monitor */
 
 	/*
@@ -48,6 +52,8 @@ struct hart {
 	unsigned long hsm_state; /* atomic, SBI_HSM_STATE_* */
 	unsigned long start_addr;
 	unsigned long start_arg;
+	/* PRV_S, or PRV_U for a domain that asks for it */
+	unsigned long start_mode;
 
 	unsigned long ipi_pending; /* atomic, BIT(IPI_EVENT_*) */
 };
@@ -135,12 +141,25 @@ bool hart_smode_double_trap_enabled(void);
 /* Where the monitor runs: its link address unless it relocated itself. */
 vaddr_t monitor_base(void);
 
-/* Is [addr, addr + size) memory the next stage may be given or may name? */
+/*
+ * Is [addr, addr + size) memory the next stage may be given or may name?
+ * Not the monitor's, and with domains (<domain.h>) memory the calling
+ * hart's domain can read and write.
+ */
 bool smode_range_ok(paddr_t addr, paddr_size_t size);
+/* The same for memory the monitor only reads. */
+bool smode_range_readable(paddr_t addr, paddr_size_t size);
+/* The same for an address S-mode is to run from. */
+bool smode_entry_ok(paddr_t addr);
+/* Does the range keep clear of what is the monitor's alone? */
+bool monitor_range_clear(paddr_t addr, paddr_size_t size);
 
-/* Reset S-mode CSR state and mret to 'entry' with (a0, a1) = (arg0, arg1). */
+/*
+ * Reset S-mode CSR state and mret to 'entry' in 'mode' (PRV_S or PRV_U) with
+ * (a0, a1) = (arg0, arg1).
+ */
 void __noreturn hart_enter_smode(unsigned long entry, unsigned long arg0,
-				 unsigned long arg1);
+				 unsigned long arg1, unsigned long mode);
 /* Drop the current M-mode stack contents and continue in fn(). */
 void __noreturn hart_restart_stack(void (*fn)(void));
 void __noreturn hart_halt(void);

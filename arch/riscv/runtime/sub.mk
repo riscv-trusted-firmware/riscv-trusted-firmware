@@ -6,6 +6,9 @@
 # trap policy, PMP, hart state management, remote fences. Listed by the
 # image (images/monitor/image.mk), not pulled in by arch/riscv/sub.mk.
 srcs-$(CONFIG_SBI_DBTR) += dbtr.c
+srcs-$(CONFIG_DOMAINS) += domain.c
+srcs-$(CONFIG_DOMAINS) += domain_context.c
+srcs-$(CONFIG_DOMAINS) += domain_state.S
 srcs-y += fwft.c
 srcs-y += hart.c
 srcs-y += hsm.c

@@ -5,6 +5,7 @@
 
 #include <arch/hart.h>
 #include <arch/hsm.h>
+#include <domain.h>
 #include <util.h>
 
 #include "sbi_internal.h"
@@ -26,7 +27,9 @@ long sbi_hartmask(unsigned long hmask, unsigned long hbase,
 
 		if (!(hmask & BIT(i)))
 			continue;
-		if (hartid < hbase || !hart_valid(hartid))
+		if (hartid < hbase || !hart_valid(hartid) ||
+		    !domain_hart_member(this_domain(),
+					(unsigned int)hart_index(hartid)))
 			return SBI_ERR_INVALID_PARAM;
 		/* S-mode names harts by id, the monitor keeps them by index. */
 		if (hartmask_test(&running, (unsigned int)hart_index(hartid)))

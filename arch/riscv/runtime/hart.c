@@ -17,6 +17,7 @@
 #include <arch/sse.h>
 #include <atomic.h>
 #include <boot.h>
+#include <domain.h>
 #include <ipi.h>
 #include <log.h>
 #include <memregion.h>
@@ -214,7 +215,7 @@ bool memregion_get(unsigned int i, paddr_t *base, paddr_size_t *size,
 	return true;
 }
 
-bool smode_range_ok(paddr_t addr, paddr_size_t size)
+bool monitor_range_clear(paddr_t addr, paddr_size_t size)
 {
 	unsigned long end = addr + size;
 
@@ -227,6 +228,39 @@ bool smode_range_ok(paddr_t addr, paddr_size_t size)
 			return false;
 	return true;
 }
+
+#ifdef CONFIG_DOMAINS
+bool smode_range_ok(paddr_t addr, paddr_size_t size)
+{
+	return domain_range_ok(this_domain(), addr, size,
+			       DOMAIN_PERM_SU_R | DOMAIN_PERM_SU_W);
+}
+
+bool smode_range_readable(paddr_t addr, paddr_size_t size)
+{
+	return domain_range_ok(this_domain(), addr, size, DOMAIN_PERM_SU_R);
+}
+
+bool smode_entry_ok(paddr_t addr)
+{
+	return domain_range_ok(this_domain(), addr, 4, DOMAIN_PERM_SU_X);
+}
+#else
+bool smode_range_readable(paddr_t addr, paddr_size_t size)
+{
+	return monitor_range_clear(addr, size);
+}
+
+bool smode_range_ok(paddr_t addr, paddr_size_t size)
+{
+	return monitor_range_clear(addr, size);
+}
+
+bool smode_entry_ok(paddr_t addr)
+{
+	return monitor_range_clear(addr, 4);
+}
+#endif
 
 bool hart_smode_double_trap_enabled(void)
 {
@@ -298,7 +332,8 @@ static void stateen_init(void)
  *
  *   0, 1     Smepmp only: the window M-mode opens on S-mode memory
  *   ...      the memory regions, a NAPOT entry or an OFF + TOR pair each
- *   last     everything else: S/U-mode RWX
+ *   ...      what S/U-mode gets: everything else RWX, or with domains the
+ *            regions of the domain the hart runs, smallest first
  *
  * Without Smepmp an M-mode region is an entry without permissions: S/U-mode
  * is kept out and M-mode is not bound by it. With Smepmp (mseccfg.MML)
@@ -308,6 +343,24 @@ static void stateen_init(void)
  * else is out of its reach, S-mode memory included.
  */
 #define SMEPMP_WINDOW_ENTRIES 2
+
+static bool region_is_napot(const struct memregion *r)
+{
+	return r->size >= 8 && IS_POWER_OF_TWO(r->size) &&
+	       IS_ALIGNED(r->base, r->size);
+}
+
+/* The first entry past the monitor's own. */
+static unsigned int pmp_monitor_entries(void)
+{
+	unsigned int n = hart_has(HART_FEAT_SMEPMP) ? SMEPMP_WINDOW_ENTRIES : 0;
+
+	for (unsigned int i = 0; i < nr_memregions; i++)
+		if (memregions[i].kind != MEMREGION_SHARED_RW ||
+		    hart_has(HART_FEAT_SMEPMP))
+			n += region_is_napot(&memregions[i]) ? 1 : 2;
+	return n;
+}
 
 static unsigned int region_cfg(enum memregion_kind kind)
 {
@@ -338,8 +391,11 @@ void pmp_hart_init(void)
 	 * A hart that is started again already lives by these rules, and
 	 * rewriting the one it executes from would pull it away under its feet.
 	 */
-	if (hart_has(HART_FEAT_SMEPMP) && (csr_read(CSR_MSECCFG) & MSECCFG_MML))
+	if (hart_has(HART_FEAT_SMEPMP) &&
+	    (csr_read(CSR_MSECCFG) & MSECCFG_MML)) {
+		pmp_domain_set();
 		return;
+	}
 
 	if (hart_has(HART_FEAT_SMEPMP)) {
 		/*
@@ -364,8 +420,7 @@ void pmp_hart_init(void)
 		for (unsigned int i = 0; i < nr_memregions; i++) {
 			const struct memregion *r = &memregions[i];
 			bool is_shared = r->kind == MEMREGION_SHARED_RW;
-			bool napot = r->size >= 8 && IS_POWER_OF_TWO(r->size) &&
-				     IS_ALIGNED(r->base, r->size);
+			bool napot = region_is_napot(r);
 
 			if (r->kind == MEMREGION_SHARED_RW &&
 			    !hart_has(HART_FEAT_SMEPMP))
@@ -378,15 +433,61 @@ void pmp_hart_init(void)
 					      region_cfg(r->kind));
 			at += napot ? 1 : 2;
 		}
-		if (!shared) {
-			/* Sticky until reset. */
-			if (hart_has(HART_FEAT_SMEPMP))
-				csr_set(CSR_MSECCFG,
-					MSECCFG_MML | MSECCFG_MMWP);
-			continue;
-		}
-		pmp_all_set(at, PMP_R | PMP_W | PMP_X);
+		/* Sticky until reset. */
+		if (!shared && hart_has(HART_FEAT_SMEPMP))
+			csr_set(CSR_MSECCFG, MSECCFG_MML | MSECCFG_MMWP);
 	}
+	pmp_domain_set();
+}
+
+unsigned int pmp_domain_entries(void)
+{
+	unsigned int used = pmp_monitor_entries();
+
+	return used < CONFIG_RISCV_PMP_COUNT ? CONFIG_RISCV_PMP_COUNT - used :
+					       0;
+}
+
+void pmp_domain_set(void)
+{
+	unsigned int at = pmp_monitor_entries();
+#ifdef CONFIG_DOMAINS
+	const struct domain *dom = this_domain();
+#endif
+
+	if (!hart_has(HART_FEAT_PMP))
+		return;
+#ifdef CONFIG_DOMAINS
+	/*
+	 * S/U-mode permissions only, which is what an unlocked rule is about
+	 * with Smepmp and without: the monitor reaches S-mode memory through
+	 * its window, or is not bound by these at all.
+	 */
+	for (unsigned int i = 0; i < dom->nr_regions; i++) {
+		const struct domain_region *r = &dom->regions[i];
+		unsigned int su = r->perm >> DOMAIN_PERM_SU_SHIFT;
+		unsigned int cfg = (su & 1 ? PMP_R : 0) | (su & 2 ? PMP_W : 0) |
+				   (su & 4 ? PMP_X : 0);
+
+		/* domains_start() has checked that every domain fits. */
+		if (at == CONFIG_RISCV_PMP_COUNT)
+			break;
+		/*
+		 * W without R is reserved, or another thing altogether (MML).
+		 */
+		if ((cfg & PMP_W) && !(cfg & PMP_R))
+			cfg &= ~(unsigned int)PMP_W;
+		if (r->order >= __RISCV_XLEN__)
+			pmp_all_set(at++, cfg);
+		else
+			at += pmp_range_set(at, r->base, BIT(r->order), cfg);
+	}
+#else
+	pmp_all_set(at++, PMP_R | PMP_W | PMP_X);
+#endif
+	/* What a domain with more regions left behind. */
+	while (at < CONFIG_RISCV_PMP_COUNT)
+		pmp_entry_set(at++, 0, 0);
 	__asm__ __volatile__("sfence.vma" ::: "memory");
 }
 
@@ -454,14 +555,14 @@ void hart_runtime_init(void)
 }
 
 void __noreturn hart_enter_smode(unsigned long entry, unsigned long arg0,
-				 unsigned long arg1)
+				 unsigned long arg1, unsigned long mode)
 {
 	unsigned long mstatus = csr_read(mstatus);
 
 	/* Whatever ran in S-mode on this hart before is gone. */
 	mstatus &= ~(MSTATUS_MPP | MSTATUS_MPIE | MSTATUS_MPRV | MSTATUS_SIE |
 		     MSTATUS_SPIE | MSTATUS_SPP);
-	mstatus |= SHIFT_UL(PRV_S, MSTATUS_MPP_SHIFT);
+	mstatus |= mode << MSTATUS_MPP_SHIFT;
 #if __RISCV_XLEN__ == 64
 	mstatus &= ~MSTATUS_MPV;
 #else

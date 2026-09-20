@@ -77,6 +77,11 @@ struct trap_info {
 };
 
 void trap_handler(struct trap_regs *regs);
+/*
+ * Leave M-mode as the return from a trap with register file 'frame' would,
+ * without having taken one. 'frame' is not on the M-mode stack.
+ */
+void __noreturn _trap_frame_return(const struct trap_regs *frame);
 
 /* Print the register file and panic. */
 void __noreturn trap_fatal(const struct trap_regs *regs, const char *what);

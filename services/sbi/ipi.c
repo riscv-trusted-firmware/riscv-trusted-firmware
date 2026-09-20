@@ -7,7 +7,10 @@
  * SBI IPI extension (EID "sPI").
  */
 
+#include <arch/hart.h>
+#include <domain.h>
 #include <ipi.h>
+#include <util.h>
 
 #include "sbi_internal.h"
 
@@ -15,6 +18,33 @@ static long sbi_ipi_probe(unsigned long eid)
 {
 	return ipi_available();
 }
+
+#ifdef CONFIG_DOMAINS
+/*
+ * A hart of the domain that is away in another one is no target for an
+ * interrupt now, and losing it is not an option: it finds it when it is back.
+ */
+static void ipi_parked_harts(unsigned long hmask, unsigned long hbase)
+{
+	const struct domain *dom = this_domain();
+	unsigned int i = 0;
+
+	if (!domain_has_parked(dom))
+		return;
+	for_each_hart_in_mask(i, &dom->parked) {
+		unsigned long id = hart_id_of(i);
+
+		if (hbase == ~UL(0) ||
+		    (id >= hbase && id - hbase < BITS_PER_LONG &&
+		     ((hmask >> (id - hbase)) & 1)))
+			domain_ipi_parked(i);
+	}
+}
+#else
+static void ipi_parked_harts(unsigned long hmask, unsigned long hbase)
+{
+}
+#endif
 
 static struct service_ret sbi_ipi_ecall(unsigned long eid, unsigned long fid,
 					struct trap_regs *regs)
@@ -29,6 +59,7 @@ static struct service_ret sbi_ipi_ecall(unsigned long eid, unsigned long fid,
 	if (rc)
 		return sbi_err(rc);
 	ipi_send_mask(&targets, IPI_EVENT_SMODE);
+	ipi_parked_harts(regs->a0, regs->a1);
 	return sbi_ok(0);
 }
 

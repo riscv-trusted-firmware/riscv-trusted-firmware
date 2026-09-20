@@ -23,9 +23,14 @@ and what is still missing.
 | PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart, `event_get_info`, counter snapshots |
 | DBCN      | `DBCN` | write, read, write_byte (`CONFIG_SBI_DBCN`) |
 | Legacy    | `0x00`-`0x08` | all v0.1 calls (`CONFIG_SBI_LEGACY`) |
+| Domain control | `0x0A000000` + impl. id | firmware specific: enter, exit, start, stop domains ([domains.md](domains.md)) |
 
 All extensions of SBI v3.0 that are M-mode firmware's to provide are there. NACL and
 STA are interfaces a hypervisor offers its guests, not M-mode firmware.
+
+With domains ([domains.md](domains.md)) the
+calls go by the caller's domain: its harts, its memory, its permission to
+reset and suspend.
 
 An extension whose backend is missing (no timer, IPI or reset driver)
 probes as absent too, and its calls return `SBI_ERR_NOT_SUPPORTED`.
@@ -367,8 +372,9 @@ with `IMAGE_SBITEST` disabled.
    same MPXY channels; MSI / SSE indication of notifications; the P2A
    doorbell and the SYSTEM_MSI group; CPPC fast channels and the PuC's HSM
    suspend types.
-3. The maximum number of harts and the monitor's size are build-time
-   constants.
+3. The maximum number of harts and domains and the monitor's size are
+   build-time constants. Domains that share a hart share its PMU, SSE,
+   debug trigger and FWFT state.
 4. More timer / IPI / reset / serial drivers.
 5. **Scalability.** Remote fences are serialised system-wide.
 

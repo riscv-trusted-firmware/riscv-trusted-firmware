@@ -44,6 +44,11 @@ static inline bool hartmask_test(const struct hartmask *m, unsigned int index)
 }
 
 /* Atomic variants, for a mask shared between harts. */
+static inline void hartmask_set_atomic(struct hartmask *m, unsigned int index)
+{
+	atomic_or_ulong(&m->bits[_bit_word(index)], _bit_mask(index));
+}
+
 static inline void hartmask_clear_atomic(struct hartmask *m, unsigned int index)
 {
 	atomic_and_ulong(&m->bits[_bit_word(index)], ~_bit_mask(index));

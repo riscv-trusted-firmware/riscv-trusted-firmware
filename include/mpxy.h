@@ -108,11 +108,24 @@ long mpxy_send_message(unsigned long channel_id, unsigned long msg_id,
 long mpxy_get_notifications(unsigned long channel_id, unsigned long *bytes);
 
 /* Calling hart (re)enters the next stage: no shared memory. */
+/* No shared memory set. */
+#define MPXY_SHMEM_NONE (~UL(0))
+
 #ifdef CONFIG_MPXY
 void mpxy_hart_init(void);
+/*
+ * The calling hart's shared memory goes with what runs on the hart: a domain
+ * context switch takes the address out and puts the other one in.
+ */
+unsigned long mpxy_hart_shmem_swap(unsigned long addr);
 #else
 static inline void mpxy_hart_init(void)
 {
+}
+
+static inline unsigned long mpxy_hart_shmem_swap(unsigned long addr)
+{
+	return MPXY_SHMEM_NONE;
 }
 #endif
 

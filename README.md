@@ -10,7 +10,9 @@ brings up every hart and starts an S-mode next stage behind a PMP fence. It
 implements SBI v3.0 (Base, TIME, IPI, RFENCE, HSM, SRST, SUSP, CPPC, FWFT,
 PMU, SSE, DBTR, MPXY, DBCN and the legacy calls) with time CSR emulation and trap
 redirection, and proxies the RPMI service groups of a platform
-microcontroller to S-mode over MPXY channels. An S-mode test payload checks
+microcontroller to S-mode over MPXY channels. The machine can be partitioned
+into domains described in the device tree, and harts can
+move between them ([docs/domains.md](docs/domains.md)). An S-mode test payload checks
 all of it on every build. Linux boots on it (SMP, CPU hotplug, suspend to
 RAM, reboot/poweroff): `make run QEMU_KERNEL=<Image>`.
 What is implemented and what is next: [docs/sbi.md](docs/sbi.md).

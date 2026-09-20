@@ -13,6 +13,25 @@
 #include <stdio.h>
 #include <util.h>
 
+#include "sbicall.h"
+
+/*
+ * The entry points start.S and the monitor call, and what the tests reach
+ * across files.
+ */
+void test_main(unsigned long hartid, unsigned long fdt);
+void secondary_main(unsigned long hartid, unsigned long opaque);
+void resume_main(unsigned long hartid, unsigned long opaque);
+unsigned long strap_handler(unsigned long scause, unsigned long sepc,
+			    unsigned long stval);
+void _secondary_start(void);
+void _resume_start(void);
+struct sse_ctx;
+void _sse_entry(void);
+void sse_handler(struct sse_ctx *ctx, unsigned long hartid);
+void dbtr_target(void);
+long dbtr_icount_run(unsigned long ext, unsigned long fid);
+
 /* QEMU's mtime ticks at 10 MHz; only the order of magnitude matters. */
 #define TICKS_SHORT ULL(20000)
 #define TICKS_TIMEOUT ULL(20000000)
@@ -47,6 +66,7 @@ extern unsigned int checks, failures;
 void check_ret(const char *func, int line, long error, long expected);
 
 uint64_t now(void);
+struct sbiret sbi_set_timer(uint64_t when);
 
 /* Poll until cond or the timeout; evaluates to the final cond. */
 #define WAIT_FOR(cond)                                  \
@@ -115,9 +135,15 @@ extern unsigned long trap_cause, trap_tval, trap_count;
 				     "\n.option pop" __VA_ARGS__);        \
 	})
 
+/* domain.c, and what it needs of the secondary harts (main.c) */
+void test_domains(unsigned long boot, unsigned long other);
+void secondary_domain_enter(unsigned long hartid, unsigned long arg);
+bool secondary_domain_returned(unsigned long hartid, long *error, long *value);
+unsigned long secondary_ipis(unsigned long hartid);
+void secondary_ipis_set(unsigned long hartid, unsigned long ipis);
+
 /* dbtr.c */
 void test_dbtr(void);
-void dbtr_target(void);
 
 /* sse.c */
 void test_sse(unsigned long self);
@@ -127,16 +153,5 @@ void sse_secondary_setup(unsigned long hartid);
 /* mpxy.c, rpmi.c: need another hart running puc_poll(). */
 void test_mpxy(void);
 void test_cppc(void);
-
-struct sse_ctx;
-unsigned long strap_handler(unsigned long scause, unsigned long sepc,
-			    unsigned long stval);
-void secondary_main(unsigned long hartid, unsigned long opaque);
-void resume_main(unsigned long hartid, unsigned long opaque);
-void test_main(unsigned long hartid, unsigned long fdt);
-void sse_handler(struct sse_ctx *ctx, unsigned long hartid);
-void _resume_start(void);
-void _secondary_start(void);
-void _sse_entry(void);
 
 #endif

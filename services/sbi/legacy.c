@@ -10,6 +10,7 @@
  * of an unsigned long, read here the way the caller would (NULL = all).
  */
 
+#include <domain.h>
 #include <arch/hart.h>
 #include <arch/hsm.h>
 #include <arch/rfence.h>
@@ -95,6 +96,8 @@ static struct service_ret sbi_legacy_ecall(unsigned long eid, unsigned long fid,
 		req.asid = regs->a3;
 		return sbi_err(rfence_request(&targets, &req));
 	case SBI_EXT_LEGACY_SHUTDOWN:
+		if (!domain_reset_allowed(this_domain()))
+			return sbi_err(SBI_ERR_DENIED);
 		system_reset(RESET_SHUTDOWN);
 	default:
 		return sbi_err(SBI_ERR_NOT_SUPPORTED);

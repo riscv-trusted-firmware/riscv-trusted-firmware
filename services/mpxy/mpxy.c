@@ -18,7 +18,7 @@
 #include <string.h>
 #include <util.h>
 
-#define SHMEM_NONE (~UL(0))
+#define SHMEM_NONE MPXY_SHMEM_NONE
 
 static struct mpxy_channel *channels;
 static unsigned int nr_channels;
@@ -28,6 +28,14 @@ static unsigned long shmem[CONFIG_PLATFORM_HART_COUNT];
 void mpxy_hart_init(void)
 {
 	shmem[this_hart_index()] = SHMEM_NONE;
+}
+
+unsigned long mpxy_hart_shmem_swap(unsigned long addr)
+{
+	unsigned long old = shmem[this_hart_index()];
+
+	shmem[this_hart_index()] = addr;
+	return old;
 }
 
 long mpxy_channel_register(struct mpxy_channel *ch)

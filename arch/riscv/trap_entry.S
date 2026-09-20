@@ -100,6 +100,7 @@ _trap_entry:
 	mv	a0, sp
 	call	trap_handler
 
+_trap_return:
 	/* Returning below M-mode: park the hart pointer in mscratch. */
 	REG_L	t0, TRAP_REGS_mstatus(sp)
 	csrw	mstatus, t0
@@ -143,3 +144,22 @@ _trap_entry:
 	REG_L	t6, TRAP_REGS_t6(sp)
 	REG_L	sp, TRAP_REGS_sp(sp)
 	mret
+
+	/*
+	 * _trap_frame_return(frame): leave M-mode the way a trap handler
+	 * returns, with 'frame' for a register file, from anywhere. The frame
+	 * goes where a trap would have put it; nothing else of the M-mode
+	 * stack survives, so 'frame' is not to live there.
+	 */
+	.globl _trap_frame_return
+_trap_frame_return:
+	REG_L	sp, HART_M_SP(tp)
+	addi	sp, sp, -TRAP_REGS_SIZE
+	mv	t0, sp
+	addi	t1, a0, TRAP_REGS_SIZE
+1:	REG_L	t2, 0(a0)
+	REG_S	t2, 0(t0)
+	addi	a0, a0, REGBYTES
+	addi	t0, t0, REGBYTES
+	bne	a0, t1, 1b
+	j	_trap_return

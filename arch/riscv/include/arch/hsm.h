@@ -33,16 +33,27 @@ struct hsm_ops {
 void hsm_register(const struct hsm_ops *ops);
 const char *hsm_name(void);
 
-/* Boot hart: becomes STARTED and enters the next stage at 'entry'. */
-void __noreturn hsm_boot_hart_start(unsigned long entry, unsigned long arg);
+/* Boot hart: becomes STARTED and enters the next stage at 'entry' in 'mode'. */
+void __noreturn hsm_boot_hart_start(unsigned long entry, unsigned long arg,
+				    unsigned long mode);
 
 /* Calling hart is STOPPED: wait in M-mode until another hart starts it. */
 void __noreturn hsm_hart_wait(void);
 
+/*
+ * On behalf of S-mode: a hart of the caller's domain, at an address of its own.
+ */
 int hsm_hart_start(unsigned long hartid, unsigned long entry,
 		   unsigned long arg);
+/* The monitor's own: any stopped hart, PRV_S or PRV_U, no questions asked. */
+int hsm_hart_boot(unsigned int index, unsigned long entry, unsigned long arg,
+		  unsigned long mode);
+/* No hsm_hart_boot() that began before this returns is still under way. */
+void hsm_start_barrier(void);
 /* Does not return on success. */
 int hsm_hart_stop(void);
+/* The same, not asked for by S-mode and whatever the hart was doing. */
+void __noreturn hsm_hart_force_stop(void);
 /* A non-retentive suspend does not return on success. */
 int hsm_hart_suspend(unsigned long type, unsigned long resume_addr,
 		     unsigned long arg);
@@ -56,7 +67,8 @@ int hsm_system_suspend(uint32_t sleep_type, unsigned long resume_addr,
 long hsm_hart_state(unsigned long hartid);
 
 /*
- * Harts that can take an interrupt from the next stage: STARTED or SUSPENDED.
+ * Harts that can take an interrupt from the next stage: STARTED or SUSPENDED,
+ * and of the caller's domain.
  */
 void hsm_interruptible_mask(struct hartmask *mask);
 

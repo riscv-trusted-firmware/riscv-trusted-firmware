@@ -15,6 +15,7 @@
 #include <arch/pmu.h>
 #include <arch/sse.h>
 #include <arch/trap.h>
+#include <domain.h>
 #include <ipi.h>
 #include <log.h>
 #include <sbi/sbi.h>
@@ -189,6 +190,9 @@ void trap_handler(struct trap_regs *regs)
 	}
 
 	trap_from_below(regs);
+	/* Its domain is being stopped: this is as far as S-mode got. */
+	if (domain_stop_pending())
+		domain_stop_self(regs);
 	/*
 	 * Whatever the return to S-mode looks like now, an event goes on top.
 	 */

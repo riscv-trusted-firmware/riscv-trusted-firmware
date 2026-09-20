@@ -8,4 +8,7 @@ srcs-y += mpxy.c
 srcs-y += puc.c
 srcs-y += sse.c
 srcs-y += dbtr.c
+srcs-y += domain.c
+srcs-$(CONFIG_QEMU_VIRT_DOMAINS) += tdomain.c
+srcs-$(CONFIG_QEMU_VIRT_DOMAINS) += tdomain_entry.S
 srcs-y += rpmi.c

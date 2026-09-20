@@ -9,6 +9,8 @@
  * satp = 0, interrupts off.
  *
  *   _start            boot hart, from the monitor
+ * _start + 4, 8, 12 the other domains of a build that has them
+ * (tdomain_entry.S)
  *   _secondary_start  sbi_hart_start() target
  *   _resume_start     non-retentive sbi_hart_suspend() resume address
  */
@@ -21,6 +23,17 @@
 	.section .text.entry, "ax", %progbits
 	.globl _start
 _start:
+#ifdef CONFIG_QEMU_VIRT_DOMAINS
+	/* Where the platform's device tree says the domains begin. */
+.option push
+.option norvc
+	j	1f
+	j	_trusted_start
+	j	_island_start
+	j	_trusted_secondary_start
+.option pop
+1:
+#endif
 	call	_setup
 	la	t0, __bss_start
 	la	t1, __bss_end

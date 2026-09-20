@@ -17,3 +17,4 @@ srcs-$(CONFIG_MPXY) += mpxy.c
 srcs-$(CONFIG_SBI_PMU) += pmu.c
 srcs-$(CONFIG_SBI_DBCN) += dbcn.c
 srcs-$(CONFIG_SBI_LEGACY) += legacy.c
+srcs-$(CONFIG_SBI_FW_DOMAIN) += domain.c

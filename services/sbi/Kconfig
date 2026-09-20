@@ -23,6 +23,15 @@ config SBI_IMPL_VERSION
 	hex "SBI implementation version"
 	default 0x00000100
 
+config SBI_FW_DOMAIN
+	bool "Domain control (firmware specific extension)"
+	depends on DOMAINS
+	default y
+	help
+	  Lets S-mode enter and exit domains on the calling hart, and start and
+	  stop them: extension 0x0A000000 + SBI_IMPL_ID, as the SBI
+	  specification sets aside for an implementation's own calls.
+
 config SBI_SSE
 	bool "Supervisor software events extension (SSE)"
 	default y

@@ -7,6 +7,7 @@
 #include <arch/hsm.h>
 #include <arch/sse.h>
 #include <atomic.h>
+#include <domain.h>
 #include <ipi.h>
 #include <sbi/sbi.h>
 #include <spinlock.h>
@@ -43,16 +44,20 @@ static void __noreturn hsm_hart_enter(bool resume)
 	 */
 	if (!resume)
 		hart_runtime_init();
+	/* The domain's context on this hart is this, from here on. */
+	domain_context_started();
 	atomic_store_ulong(&h->hsm_state, SBI_HSM_STATE_STARTED);
-	hart_enter_smode(h->start_addr, h->hartid, h->start_arg);
+	hart_enter_smode(h->start_addr, h->hartid, h->start_arg, h->start_mode);
 }
 
-void __noreturn hsm_boot_hart_start(unsigned long entry, unsigned long arg)
+void __noreturn hsm_boot_hart_start(unsigned long entry, unsigned long arg,
+				    unsigned long mode)
 {
 	struct hart *h = this_hart();
 
 	h->start_addr = entry;
 	h->start_arg = arg;
+	h->start_mode = mode;
 	atomic_store_ulong(&h->hsm_state, SBI_HSM_STATE_START_PENDING);
 	hsm_hart_enter(false);
 }
@@ -89,21 +94,41 @@ static void __noreturn hsm_hart_stopped(void)
 int hsm_hart_start(unsigned long hartid, unsigned long entry, unsigned long arg)
 {
 	struct hart *h = hart_get(hartid);
+
+	/* A domain sees its own harts and no others. */
+	if (!hart_valid(hartid) || !domain_hart_member(this_domain(), h->index))
+		return SBI_ERR_INVALID_PARAM;
+	/* One that is away in another domain runs, as far as this one goes. */
+	if (!domain_hart_assigned(this_domain(), h->index))
+		return SBI_ERR_ALREADY_AVAILABLE;
+	if (!smode_entry_ok(entry))
+		return SBI_ERR_INVALID_ADDRESS;
+	return hsm_hart_boot(h->index, entry, arg, PRV_S);
+}
+
+int hsm_hart_boot(unsigned int index, unsigned long entry, unsigned long arg,
+		  unsigned long mode)
+{
+	struct hart *h = hart_by_index(index);
+	unsigned long hartid = hart_id_of(index);
 	unsigned long state = 0;
 
-	if (!hart_valid(hartid))
+	if (!hart_index_valid(index))
 		return SBI_ERR_INVALID_PARAM;
-	if (!smode_range_ok(entry, 4))
-		return SBI_ERR_INVALID_ADDRESS;
 	if (!ipi_available())
 		return SBI_ERR_FAILED;
 
 	/* The target reads the arguments once it sees START_PENDING. */
 	spin_lock(&hsm_start_lock);
 	state = atomic_load_ulong(&h->hsm_state);
+	if (domain_stop_pending_on(index)) {
+		spin_unlock(&hsm_start_lock);
+		return SBI_ERR_DENIED;
+	}
 	if (state == SBI_HSM_STATE_STOPPED) {
 		h->start_addr = entry;
 		h->start_arg = arg;
+		h->start_mode = mode;
 		atomic_store_ulong(&h->hsm_state, SBI_HSM_STATE_START_PENDING);
 	}
 	spin_unlock(&hsm_start_lock);
@@ -124,6 +149,12 @@ int hsm_hart_start(unsigned long hartid, unsigned long entry, unsigned long arg)
 	return SBI_SUCCESS;
 }
 
+void hsm_start_barrier(void)
+{
+	spin_lock(&hsm_start_lock);
+	spin_unlock(&hsm_start_lock);
+}
+
 int hsm_hart_stop(void)
 {
 	struct hart *h = this_hart();
@@ -132,6 +163,13 @@ int hsm_hart_stop(void)
 			    SBI_HSM_STATE_STOP_PENDING))
 		return SBI_ERR_FAILED;
 
+	timer_hart_init();
+	hsm_hart_stopped();
+}
+
+void __noreturn hsm_hart_force_stop(void)
+{
+	atomic_store_ulong(&this_hart()->hsm_state, SBI_HSM_STATE_STOP_PENDING);
 	timer_hart_init();
 	hsm_hart_stopped();
 }
@@ -150,6 +188,9 @@ static void hsm_wait_for_wakeup(void)
 		if ((csr_read(mip) & csr_read(mie) & csr_read(mideleg)) ||
 		    sse_pending())
 			break;
+		/* The domain is being stopped: that happens on the way out. */
+		if (domain_stop_pending())
+			break;
 		wfi();
 	}
 }
@@ -160,6 +201,12 @@ static void hsm_resume_loop(void)
 
 	atomic_store_ulong(&h->hsm_state, SBI_HSM_STATE_SUSPENDED);
 	hsm_wait_for_wakeup();
+	/*
+	 * Nothing of S-mode is left to resume: stopping takes no more than
+	 * this.
+	 */
+	if (domain_stop_pending())
+		domain_stop_self(NULL);
 	atomic_store_ulong(&h->hsm_state, SBI_HSM_STATE_RESUME_PENDING);
 	hsm_hart_enter(true);
 }
@@ -186,7 +233,7 @@ int hsm_hart_suspend(unsigned long type, unsigned long resume_addr,
 		return SBI_ERR_INVALID_PARAM;
 	}
 
-	if (!retentive && !smode_range_ok(resume_addr, 4))
+	if (!retentive && !smode_entry_ok(resume_addr))
 		return SBI_ERR_INVALID_ADDRESS;
 	if (!hsm_transition(h, SBI_HSM_STATE_STARTED,
 			    SBI_HSM_STATE_SUSPEND_PENDING))
@@ -195,6 +242,7 @@ int hsm_hart_suspend(unsigned long type, unsigned long resume_addr,
 	if (!retentive) {
 		h->start_addr = resume_addr;
 		h->start_arg = arg;
+		h->start_mode = PRV_S;
 		hart_restart_stack(hsm_resume_loop);
 	}
 
@@ -209,21 +257,32 @@ int hsm_system_suspend(uint32_t sleep_type, unsigned long resume_addr,
 		       unsigned long arg)
 {
 	unsigned int self = this_hart_index();
+	bool alone = true;
 	long rc = 0;
 
-	if (!smode_range_ok(resume_addr, 4))
+	if (!domain_suspend_allowed(this_domain()))
+		return SBI_ERR_DENIED;
+	if (!smode_entry_ok(resume_addr))
 		return SBI_ERR_INVALID_ADDRESS;
 	/*
-	 * Nobody can start a hart behind our back: we are the only one running.
+	 * Nobody can start a hart behind our back: we are the only one running,
+	 * of the domain that is. What other domains do is not its business,
+	 * but then the platform stays up.
 	 */
-	for (unsigned int i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++)
-		if (i != self && hart_index_valid(i) &&
-		    atomic_load_ulong(&hart_by_index(i)->hsm_state) !=
+	for (unsigned int i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++) {
+		if (i == self || !hart_index_valid(i) ||
+		    atomic_load_ulong(&hart_by_index(i)->hsm_state) ==
 			    SBI_HSM_STATE_STOPPED)
+			continue;
+		if (domain_hart_assigned(this_domain(), i))
 			return SBI_ERR_DENIED;
+		alone = false;
+	}
+	if (domain_has_parked(this_domain()))
+		return SBI_ERR_DENIED;
 
 	/* A platform that knows how to sleep is told; the rest is the same. */
-	if (suspend_supported(sleep_type)) {
+	if (alone && suspend_supported(sleep_type)) {
 		rc = suspend_prepare(sleep_type, resume_addr);
 		if (rc)
 			return (int)rc;
@@ -234,9 +293,14 @@ int hsm_system_suspend(uint32_t sleep_type, unsigned long resume_addr,
 
 long hsm_hart_state(unsigned long hartid)
 {
-	if (!hart_valid(hartid))
+	struct hart *h = hart_get(hartid);
+
+	if (!hart_valid(hartid) || !domain_hart_member(this_domain(), h->index))
 		return SBI_ERR_INVALID_PARAM;
-	return (long)atomic_load_ulong(&hart_get(hartid)->hsm_state);
+	/* Away in another domain, to come back: it runs. */
+	if (!domain_hart_assigned(this_domain(), h->index))
+		return SBI_HSM_STATE_STARTED;
+	return (long)atomic_load_ulong(&h->hsm_state);
 }
 
 void hsm_interruptible_mask(struct hartmask *mask)
@@ -245,7 +309,8 @@ void hsm_interruptible_mask(struct hartmask *mask)
 	for (unsigned int i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++) {
 		unsigned long state = 0;
 
-		if (!hart_index_valid(i))
+		if (!hart_index_valid(i) ||
+		    !domain_hart_assigned(this_domain(), i))
 			continue;
 		state = atomic_load_ulong(&hart_by_index(i)->hsm_state);
 		if (state == SBI_HSM_STATE_STARTED ||

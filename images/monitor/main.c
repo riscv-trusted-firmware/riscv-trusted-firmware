@@ -15,6 +15,7 @@
 #include <arch/hsm.h>
 #include <arch/pmu.h>
 #include <boot.h>
+#include <domain.h>
 #include <driver.h>
 #include <fdt_util.h>
 #include <generated/version.h>
@@ -96,6 +97,9 @@ void image_main(unsigned long hartid, unsigned long fdt)
 	tree = (void *)fdt_prepare(fdt);
 	if (tree && plat_fdt_prepare(tree))
 		pr_warn("platform: could not complete the device tree\n");
+#ifdef CONFIG_DOMAINS
+	domains_init(tree, next);
+#endif
 	drivers_init(tree);
 	services_init();
 	plat_init();
@@ -126,8 +130,12 @@ void image_main(unsigned long hartid, unsigned long fdt)
 		fdt_fixup(tree);
 		fdt = (unsigned long)tree;
 	}
+#ifdef CONFIG_DOMAINS
+	domains_start(fdt);
+#else
 	pr_info("monitor: next stage at %lx (S-mode), fdt: %lx\n", next, fdt);
-	hsm_boot_hart_start(next, fdt);
+	hsm_boot_hart_start(next, fdt, PRV_S);
+#endif
 }
 
 void image_secondary_main(unsigned long hartid)

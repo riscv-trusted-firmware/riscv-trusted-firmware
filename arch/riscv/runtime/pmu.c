@@ -1252,7 +1252,12 @@ long pmu_counter_start(unsigned long base, unsigned long mask,
 	    (flags & SBI_PMU_START_FLAG_INIT_SNAPSHOT))
 		return SBI_ERR_INVALID_PARAM;
 	if (flags & SBI_PMU_START_FLAG_INIT_SNAPSHOT) {
-		if (p->snapshot == SNAPSHOT_NONE)
+		/*
+		 * Set, and still this domain's: the hart may have changed
+		 * hands.
+		 */
+		if (p->snapshot == SNAPSHOT_NONE ||
+		    !smode_range_ok(p->snapshot, SNAPSHOT_SIZE))
 			return SBI_ERR_NO_SHMEM;
 		snap = smode_access_begin(p->snapshot, SNAPSHOT_SIZE);
 	}
@@ -1301,7 +1306,12 @@ long pmu_counter_stop(unsigned long base, unsigned long mask,
 	if (!counter_set_ok(base, mask))
 		return SBI_ERR_INVALID_PARAM;
 	if (flags & SBI_PMU_STOP_FLAG_TAKE_SNAPSHOT) {
-		if (p->snapshot == SNAPSHOT_NONE)
+		/*
+		 * Set, and still this domain's: the hart may have changed
+		 * hands.
+		 */
+		if (p->snapshot == SNAPSHOT_NONE ||
+		    !smode_range_ok(p->snapshot, SNAPSHOT_SIZE))
 			return SBI_ERR_NO_SHMEM;
 		snap = smode_access_begin(p->snapshot, SNAPSHOT_SIZE);
 	}

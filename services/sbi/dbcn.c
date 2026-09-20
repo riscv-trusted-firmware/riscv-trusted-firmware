@@ -29,7 +29,8 @@ static struct service_ret sbi_dbcn_ecall(unsigned long eid, unsigned long fid,
 
 	switch (fid) {
 	case SBI_DBCN_CONSOLE_WRITE:
-		if (!dbcn_buffer_ok(len, regs->a1, regs->a2))
+		/* Read-only memory will do for what is only read. */
+		if (regs->a2 || !smode_range_readable(regs->a1, len))
 			return sbi_err(SBI_ERR_INVALID_PARAM);
 		console_write(smode_access_begin(regs->a1, len), len);
 		smode_access_end();

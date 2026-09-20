@@ -37,3 +37,11 @@ jobs:
           xlen=$(sed -n 's/^CONFIG_RISCV_XLEN=//p' build/.config)
           QEMU_EXTRA_ARGS="-cpu rv$xlen,sstc=off" \
           MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+      - name: Boot test, domains (the payload next to two other domains; vector state switching)
+        run: |
+          xlen=$(sed -n 's/^CONFIG_RISCV_XLEN=//p' build/.config)
+          echo CONFIG_QEMU_VIRT_DOMAINS=y >> build/.config
+          make olddefconfig
+          MAKEARGS="W=1 ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+          QEMU_EXTRA_ARGS="-cpu rv$xlen,smepmp=on,v=true" \
+          MAKEARGS="W=1 ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build

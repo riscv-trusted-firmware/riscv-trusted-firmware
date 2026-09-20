@@ -57,6 +57,20 @@ config RESET_SIFIVE_TEST_ADDR
 config SBI_SUSP
 	default y
 
+config QEMU_VIRT_DOMAINS
+	bool "Describe domains, for the SBI test payload"
+	depends on DOMAINS && IMAGE_SBITEST
+	help
+	  Adds a domain configuration to the device tree: the test payload
+	  runs in a domain without access to the memory of two others, one
+	  it enters on its own harts and one that has the last hart to
+	  itself. All three run parts of the test payload's image.
+
+config QEMU_VIRT_DOMAINS_MEM
+	hex "Memory for the test domains (2 MiB and a page)"
+	depends on QEMU_VIRT_DOMAINS
+	default 0x80a00000
+
 config QEMU_VIRT_RPMI
 	bool "Describe an RPMI transport in RAM, for a PuC model"
 	default y if IMAGE_SBITEST

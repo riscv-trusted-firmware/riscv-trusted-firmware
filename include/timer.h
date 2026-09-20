@@ -44,6 +44,12 @@ static inline uint64_t timer_usecs_to_ticks(uint64_t us)
 void timer_hart_init(void);
 /* Calling hart: (re)program the S-mode timer event, SBI set_timer semantics. */
 void timer_smode_set(uint64_t when);
+/*
+ * The S-mode timer of the calling hart as a value, and back: what a domain
+ * context switch does with it. All ones is no deadline.
+ */
+uint64_t timer_smode_get(void);
+void timer_smode_restore(uint64_t when);
 /* M-mode timer interrupt: turn it into a pending S-mode timer interrupt. */
 void timer_process(void);
 

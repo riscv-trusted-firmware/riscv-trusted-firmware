@@ -49,4 +49,42 @@ config MONITOR_FDT_ADDR
 	  the memory right after the tree (4 KiB) must be free; otherwise
 	  name an address the next stage leaves alone until it has read it.
 
+config DOMAINS
+	bool "Domains"
+	default y
+	help
+	  Partition the machine among several pieces of S-mode software, the
+	  way the device tree says with the domain binding
+	  ("riscv,domain,config" under /chosen): harts, memory regions with
+	  permissions, a next stage, and the right to reset or suspend the
+	  system, per domain. A hart can move between domains and back. A
+	  tree without any of it gives the one root domain, which is what
+	  the monitor does without this option.
+
+if DOMAINS
+
+config DOMAIN_MAX
+	int "Most domains, the root domain included"
+	range 1 32
+	default 4
+
+config DOMAIN_MAX_REGIONS
+	int "Most memory regions of a domain"
+	range 1 32
+	default 8
+	help
+	  Each takes a PMP entry, after the ones the monitor needs for itself
+	  and its devices.
+
+config DOMAIN_CONTEXT_VLEN
+	int "Largest vector register a domain context holds (bits, 0: none)"
+	default 256
+	help
+	  A hart that moves between domains takes its vector registers
+	  along, 32 of them of VLEN bits for every domain and hart. On a
+	  hart with a larger VLEN the vector registers are cleared instead:
+	  nothing leaks, and nothing survives a call into another domain.
+
+endif
+
 endif

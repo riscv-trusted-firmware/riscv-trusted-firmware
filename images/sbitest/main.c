@@ -55,7 +55,7 @@ uint64_t now(void)
 #endif
 }
 
-static struct sbiret sbi_set_timer(uint64_t when)
+struct sbiret sbi_set_timer(uint64_t when)
 {
 #if __RISCV_XLEN__ == 32
 	return sbi_call2(SBI_EXT_TIME, SBI_TIME_SET_TIMER, (unsigned long)when,
@@ -133,6 +133,8 @@ enum cmd {
 	CMD_PUC, /* serve the RPMI PuC model from now on */
 	/* register, enable and unmask the local SSE event */
 	CMD_SSE,
+	/* enter the trusted domain with mailbox.domain_arg */
+	CMD_DOMAIN,
 };
 
 struct mailbox {
@@ -143,6 +145,8 @@ struct mailbox {
 	unsigned long suspend_ret; /* retentive suspend returned */
 	long suspend_error;
 	unsigned long puc; /* serving the PuC model */
+	unsigned long domain_arg, domain_done;
+	long domain_error, domain_value;
 };
 
 static struct mailbox mbox[MAX_HARTS];
@@ -170,6 +174,14 @@ static void __noreturn secondary_loop(unsigned long hartid)
 		case CMD_SSE:
 			WRITE_ONCE(m->cmd, CMD_NONE);
 			sse_secondary_setup(hartid);
+			break;
+		case CMD_DOMAIN:
+			WRITE_ONCE(m->cmd, CMD_NONE);
+			ret = sbi_call2(SBI_EXT_FW_DOMAIN, SBI_FW_DOMAIN_ENTER,
+					1, READ_ONCE(m->domain_arg));
+			WRITE_ONCE(m->domain_error, ret.error);
+			WRITE_ONCE(m->domain_value, ret.value);
+			WRITE_ONCE(m->domain_done, 1);
 			break;
 		case CMD_STOP:
 			WRITE_ONCE(m->cmd, CMD_NONE);
@@ -216,6 +228,33 @@ void resume_main(unsigned long hartid, unsigned long opaque)
 		system_resumed(opaque);
 	WRITE_ONCE(mbox[hartid].resumed, opaque);
 	secondary_loop(hartid);
+}
+
+void secondary_domain_enter(unsigned long hartid, unsigned long arg)
+{
+	WRITE_ONCE(mbox[hartid].domain_done, 0);
+	WRITE_ONCE(mbox[hartid].domain_arg, arg);
+	WRITE_ONCE(mbox[hartid].cmd, CMD_DOMAIN);
+}
+
+bool secondary_domain_returned(unsigned long hartid, long *error, long *value)
+{
+	/* The answer is there once done says so, not before. */
+	if (!READ_ONCE(mbox[hartid].domain_done))
+		return false;
+	*error = READ_ONCE(mbox[hartid].domain_error);
+	*value = READ_ONCE(mbox[hartid].domain_value);
+	return true;
+}
+
+unsigned long secondary_ipis(unsigned long hartid)
+{
+	return READ_ONCE(mbox[hartid].ipis);
+}
+
+void secondary_ipis_set(unsigned long hartid, unsigned long ipis)
+{
+	WRITE_ONCE(mbox[hartid].ipis, ipis);
 }
 
 /* ---- tests ------------------------------------------------------------ */
@@ -678,7 +717,7 @@ static void test_hsm_platform(unsigned long puc)
 static void test_smp(void)
 {
 	unsigned int secondaries = 0;
-	unsigned long h = 0, first = ~UL(0), all = 0;
+	unsigned long h = 0, first = ~UL(0), other = ~UL(0), all = 0;
 	struct sbiret ret = {};
 
 	printf("hsm start\n");
@@ -729,6 +768,15 @@ static void test_smp(void)
 		test_sse_remote(first);
 	}
 
+	/*
+	 * With the PuC up: harts get stopped and started there, which it is
+	 * asked about.
+	 */
+	for (h = next_secondary(0); h < MAX_HARTS; h = next_secondary(h + 1))
+		if (h != first)
+			other = h;
+	test_domains(boot_hartid, other);
+
 	printf("rfence\n");
 	for (unsigned long fid = SBI_RFENCE_FENCE_I;
 	     fid <= SBI_RFENCE_HFENCE_VVMA; fid++) {
@@ -759,7 +807,8 @@ static void test_smp(void)
 	CHECK_RET(sbi_call0(SBI_EXT_RFENCE, 7), SBI_ERR_NOT_SUPPORTED);
 	/* The fences went through M-mode IPIs: none may leak into S-mode. */
 	for (h = next_secondary(0); h < MAX_HARTS; h = next_secondary(h + 1))
-		CHECK(mbox[h].ipis == 2, "hart %lu: fence seen as IPI", h);
+		CHECK(READ_ONCE(mbox[h].ipis) == 2,
+		      "hart %lu: fence seen as IPI", h);
 
 	printf("hsm suspend (retentive)\n");
 	secondaries_cmd(CMD_SUSPEND_RETENTIVE);

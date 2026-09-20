@@ -49,17 +49,36 @@ uint64_t timer_now(void)
 	return timer ? timer->now() : 0;
 }
 
+/* Without Sstc: what S-mode asked for last, for whoever wants it back. */
+static uint64_t deadline[CONFIG_PLATFORM_HART_COUNT];
+
 void timer_hart_init(void)
 {
+	deadline[this_hart_index()] = ~ULL(0);
 	csr_clear(mie, MIP_MTIP);
 	if (timer)
 		timer->stop_event();
 }
 
+uint64_t timer_smode_get(void)
+{
+	if (!hart_has(HART_FEAT_SSTC))
+		return deadline[this_hart_index()];
+#if __RISCV_XLEN__ == 32
+	return reg_pair_to_64(csr_read(CSR_STIMECMPH), csr_read(CSR_STIMECMP));
+#else
+	return csr_read(CSR_STIMECMP);
+#endif
+}
+
 void timer_smode_set(uint64_t when)
 {
 	pmu_fw_event(SBI_PMU_FW_SET_TIMER);
+	timer_smode_restore(when);
+}
 
+void timer_smode_restore(uint64_t when)
+{
 	if (hart_has(HART_FEAT_SSTC)) {
 #if __RISCV_XLEN__ == 32
 		/* No spurious match while the two halves are inconsistent. */
@@ -72,6 +91,7 @@ void timer_smode_set(uint64_t when)
 
 	if (!timer)
 		return;
+	deadline[this_hart_index()] = when;
 	/* A new deadline retires the pending interrupt of the previous one. */
 	csr_clear(mip, MIP_STIP);
 	timer->set_event(when);

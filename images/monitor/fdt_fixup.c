@@ -15,6 +15,7 @@
  */
 
 #include <arch/hart.h>
+#include <domain.h>
 #include <driver.h>
 #include <fdt_util.h>
 #include <irqchip.h>
@@ -23,6 +24,7 @@
 #include <memregion.h>
 #include <stdio.h>
 #include <string.h>
+#include <util.h>
 
 #include "fdt_fixup.h"
 
@@ -156,6 +158,33 @@ static int reserve_memregions(void *fdt)
 	return 0;
 }
 
+#ifdef CONFIG_DOMAINS
+/* Memory the boot hart's domain is kept out of: another domain's, mostly. */
+static int reserve_domain_regions(void *fdt)
+{
+	const struct domain *dom = this_domain();
+	int rc = 0;
+
+	for (unsigned int i = 0; i < dom->nr_regions; i++) {
+		const struct domain_region *r = &dom->regions[i];
+
+		if ((r->perm & DOMAIN_PERM_SU_RWX) || r->mmio ||
+		    r->order >= __RISCV_XLEN__ ||
+		    !fdt_range_is_memory(fdt, r->base, BIT64(r->order)))
+			continue;
+		rc = reserve(fdt, "domain", r->base, BIT64(r->order));
+		if (rc)
+			return rc;
+	}
+	return domains_fdt_fixup(fdt);
+}
+#else
+static int reserve_domain_regions(void *fdt)
+{
+	return 0;
+}
+#endif
+
 void fdt_fixup(void *fdt)
 {
 	int rc = reserve(fdt, "monitor", monitor_base(), CONFIG_MONITOR_SIZE);
@@ -168,6 +197,8 @@ void fdt_fixup(void *fdt)
 		rc = drivers_fdt_fixup(fdt);
 	if (!rc)
 		rc = disable_unmanaged_harts(fdt);
+	if (!rc)
+		rc = reserve_domain_regions(fdt);
 	if (rc)
 		pr_warn("fdt: fix-up failed: %s\n", fdt_strerror(rc));
 	fdt_pack(fdt);

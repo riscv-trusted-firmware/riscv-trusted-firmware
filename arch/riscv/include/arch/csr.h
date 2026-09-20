@@ -119,6 +119,7 @@
 #define CSR_STIMECMP 0x14d
 #define CSR_STIMECMPH 0x15d
 #define CSR_MENVCFG 0x30a
+#define CSR_SENVCFG 0x10a
 #define CSR_MSTATEEN0 0x30c /* + n, n = 0..3 */
 #define CSR_MSTATEEN0H 0x31c
 #define CSR_MENVCFGH 0x31a
