@@ -9,6 +9,7 @@
  */
 
 #include <boot.h>
+#include <fdt_util.h>
 #include <generated/version.h>
 #include <log.h>
 #include <platform.h>
@@ -32,6 +33,7 @@ void image_main(unsigned long hartid, unsigned long fdt)
 		(unsigned long)CONFIG_LOADER_NEXT_STAGE_ADDR);
 
 	saved_fdt = fdt;
+	boot_harts_init(fdt_valid((const void *)fdt), hartid);
 	boot_release_secondaries();
 	jump_next(hartid);
 }

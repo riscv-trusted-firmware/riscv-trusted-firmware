@@ -35,7 +35,7 @@
 #define IMSIC_SETEIPNUM_LE 0x00
 #define IMSIC_IPI_ID 1
 
-/* Address of each hart's M-level interrupt file, 0: none. */
+/* Address of each hart's M-level interrupt file (by hart index), 0: none. */
 static uintptr_t files[CONFIG_PLATFORM_HART_COUNT];
 
 static void imsic_hart_init(void)
@@ -49,14 +49,14 @@ static void imsic_hart_init(void)
 	csr_write(CSR_MIREG, 1);
 }
 
-static void imsic_ipi_send(unsigned long hartid)
+static void imsic_ipi_send(unsigned int index)
 {
-	if (hartid < CONFIG_PLATFORM_HART_COUNT && files[hartid])
-		io_write32(files[hartid] + IMSIC_SETEIPNUM_LE, IMSIC_IPI_ID);
+	if (index < CONFIG_PLATFORM_HART_COUNT && files[index])
+		io_write32(files[index] + IMSIC_SETEIPNUM_LE, IMSIC_IPI_ID);
 }
 
 /* Claiming the top interrupt clears its pending bit; until none is left. */
-static void imsic_ipi_clear(unsigned long hartid)
+static void imsic_ipi_clear(unsigned int index)
 {
 	while (csr_swap(CSR_MTOPEI, 0))
 		;
@@ -91,8 +91,9 @@ static unsigned int imsic_map_files(const void *fdt, int node)
 
 			if (fdt_hart_irq(fdt, node, hart_idx, &hartid, &irq))
 				break;
-			if (hartid < CONFIG_PLATFORM_HART_COUNT) {
-				files[hartid] = (uintptr_t)(base + off);
+			if (hart_index(hartid) >= 0) {
+				files[hart_index(hartid)] =
+					(uintptr_t)(base + off);
 				mapped++;
 			}
 		}

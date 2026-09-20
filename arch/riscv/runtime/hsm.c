@@ -120,7 +120,7 @@ int hsm_hart_start(unsigned long hartid, unsigned long entry, unsigned long arg)
 			       SBI_HSM_STATE_STOPPED);
 		return SBI_ERR_FAILED;
 	}
-	ipi_kick(hartid);
+	ipi_kick(h->index);
 	return SBI_SUCCESS;
 }
 
@@ -208,7 +208,7 @@ int hsm_hart_suspend(unsigned long type, unsigned long resume_addr,
 int hsm_system_suspend(uint32_t sleep_type, unsigned long resume_addr,
 		       unsigned long arg)
 {
-	unsigned long self = this_hartid();
+	unsigned int self = this_hart_index();
 	long rc = 0;
 
 	if (!smode_range_ok(resume_addr, 4))
@@ -216,9 +216,10 @@ int hsm_system_suspend(uint32_t sleep_type, unsigned long resume_addr,
 	/*
 	 * Nobody can start a hart behind our back: we are the only one running.
 	 */
-	for (unsigned long i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++)
-		if (i != self && hart_valid(i) &&
-		    hsm_hart_state(i) != SBI_HSM_STATE_STOPPED)
+	for (unsigned int i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++)
+		if (i != self && hart_index_valid(i) &&
+		    atomic_load_ulong(&hart_by_index(i)->hsm_state) !=
+			    SBI_HSM_STATE_STOPPED)
 			return SBI_ERR_DENIED;
 
 	/* A platform that knows how to sleep is told; the rest is the same. */
@@ -241,9 +242,12 @@ long hsm_hart_state(unsigned long hartid)
 void hsm_interruptible_mask(struct hartmask *mask)
 {
 	hartmask_clear_all(mask);
-	for (unsigned long i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++) {
-		long state = hsm_hart_state(i);
+	for (unsigned int i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++) {
+		unsigned long state = 0;
 
+		if (!hart_index_valid(i))
+			continue;
+		state = atomic_load_ulong(&hart_by_index(i)->hsm_state);
 		if (state == SBI_HSM_STATE_STARTED ||
 		    state == SBI_HSM_STATE_SUSPENDED)
 			hartmask_set(mask, i);

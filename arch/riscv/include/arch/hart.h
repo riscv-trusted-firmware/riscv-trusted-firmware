@@ -32,6 +32,8 @@ struct hart {
 	unsigned long m_sp; /* top of the M-mode stack */
 	unsigned long tmp; /* trap entry scratch slot */
 	unsigned long hartid;
+	/* position in the hart table, see <boot.h> */
+	unsigned int index;
 	unsigned long present; /* reached the monitor */
 
 	/*
@@ -76,10 +78,28 @@ static inline unsigned long this_hartid(void)
 	return this_hart()->hartid;
 }
 
-/* NULL when hartid is out of range. */
+/*
+ * Hart ids are what the hardware and S-mode use, and can be anything. Inside
+ * the monitor a hart goes by its index: per-hart storage, hart masks, IPI
+ * targets. Ids are translated where they come in (the SBI calls, the
+ * device tree) and go out (a6 of an SSE handler, RPMI messages).
+ */
+static inline unsigned int this_hart_index(void)
+{
+	return this_hart()->index;
+}
+
+/* By id: NULL when the monitor does not manage such a hart. */
 struct hart *hart_get(unsigned long hartid);
-/* In range and running the monitor. */
+/* By index: NULL beyond the last managed hart. */
+struct hart *hart_by_index(unsigned int index);
+/* -1 when the monitor does not manage such a hart. */
+int hart_index(unsigned long hartid);
+/* The id of hart 'index', known before that hart shows up. */
+unsigned long hart_id_of(unsigned int index);
+/* Managed, and it has reached the monitor. */
 bool hart_valid(unsigned long hartid);
+bool hart_index_valid(unsigned int index);
 unsigned int hart_count(void);
 
 /* First C call on every hart: binds tp and the M-mode stack. */

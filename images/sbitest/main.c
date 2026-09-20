@@ -28,9 +28,12 @@
 #define SIP_STIP BIT(IRQ_S_TIMER)
 #define SSTATUS_SIE BIT(1)
 
-#define MAX_HARTS CONFIG_PLATFORM_HART_COUNT
+#define MAX_HARTS SBITEST_MAX_HARTS
 #define BOGUS_EID UL(0x0badc0de)
 #define MAGIC UL(0x5b17e57)
+
+/* One stack per possible hart id, handed out by start.S. */
+char _sbitest_stacks[SBITEST_MAX_HARTS][CONFIG_STACK_SIZE] __aligned(16);
 
 /* ---- bookkeeping ------------------------------------------------------ */
 

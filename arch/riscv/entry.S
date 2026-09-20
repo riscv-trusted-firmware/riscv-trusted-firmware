@@ -10,7 +10,9 @@
  * Boot hart: first hart to win the lottery. It zeroes .bss, sets up its
  * stack and calls image_main(hartid, fdt). Other harts wait for the boot hart
  * to release them, then call image_secondary_main(hartid) on their own stack.
- * _boot_hart_count is the number of harts that entered the image.
+ * _boot_hart_count is the number of harts that entered the image,
+ * _boot_hart_parked how many of them the image does not manage (they are
+ * not in the hart table of <boot.h>).
  */
 
 #include <arch/csr.h>
@@ -37,10 +39,6 @@ _start:
 	la	t0, _trap_entry
 	csrw	mtvec, t0
 
-	/* Harts beyond the configured maximum have no stack: park them. */
-	li	t0, CONFIG_PLATFORM_HART_COUNT
-	bgeu	a0, t0, _park
-
 #ifdef CONFIG_RISCV_ISA_A
 	/* Count the harts that showed up, then draw the boot hart. */
 	la	t0, _boot_hart_count
@@ -62,6 +60,8 @@ _start:
 	addi	t0, t0, REGBYTES
 	j	1b
 2:
+	/* Whatever its id, the boot hart is hart index 0. */
+	mv	a2, zero
 	call	_setup_stack
 	fence	rw, rw
 	call	image_main
@@ -73,16 +73,40 @@ _secondary:
 1:	lw	t1, 0(t0)
 	fence	r, rw
 	beqz	t1, 1b
-	call	_setup_stack
+
+	/*
+	 * The boot hart has filled _boot_hart_ids[] by now: a hart's index is
+	 * its id's position there. Hart ids can be anything; an index is
+	 * below CONFIG_PLATFORM_HART_COUNT and has a stack.
+	 */
+	la	t0, _boot_hart_ids
+	la	t1, _boot_hart_nr
+	lw	t1, 0(t1)
+	mv	a2, zero
+1:	bgeu	a2, t1, 3f
+	REG_L	t2, 0(t0)
+	beq	t2, a0, 2f
+	addi	t0, t0, REGBYTES
+	addi	a2, a2, 1
+	j	1b
+2:	call	_setup_stack
 	call	image_secondary_main
 	j	_park
 
-	/* sp = top of this hart's stack (a0 = hart id). Clobbers t0-t2. */
+3:	/* Not a hart the image manages: say so, and stay out of the way. */
+#ifdef CONFIG_RISCV_ISA_A
+	la	t0, _boot_hart_parked
+	li	t1, 1
+	amoadd.w t2, t1, (t0)
+#endif
+	j	_park
+
+	/* sp = top of the stack of hart index a2. Clobbers t0-t2. */
 _setup_stack:
 	li	t0, CONFIG_STACK_SIZE
 	mv	t1, zero
-	mv	t2, a0
-1:	beqz	t2, 2f		/* t1 = hartid * STACK_SIZE without M */
+	mv	t2, a2
+1:	beqz	t2, 2f		/* t1 = index * STACK_SIZE without M */
 	add	t1, t1, t0
 	addi	t2, t2, -1
 	j	1b
@@ -104,4 +128,7 @@ _boot_release:
 	.word	0
 	.globl _boot_hart_count
 _boot_hart_count:
+	.word	0
+	.globl _boot_hart_parked
+_boot_hart_parked:
 	.word	0

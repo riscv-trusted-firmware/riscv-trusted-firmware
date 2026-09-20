@@ -10,6 +10,7 @@
  * of an unsigned long, read here the way the caller would (NULL = all).
  */
 
+#include <arch/hart.h>
 #include <arch/hsm.h>
 #include <arch/rfence.h>
 #include <arch/unpriv.h>
@@ -38,11 +39,16 @@ static bool legacy_hartmask(struct trap_regs *regs, unsigned long va,
 		trap_redirect(regs, &fault);
 		return false;
 	}
-	/* v0.1 has no error for unknown harts: ignore them. */
+	/*
+	 * Bit n is hart id n. v0.1 has no error for unknown harts: ignore them.
+	 */
 	hsm_interruptible_mask(out);
-	for (unsigned long i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++)
-		if (i >= BITS_PER_LONG || !(hmask & BIT(i)))
+	for (unsigned int i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++) {
+		unsigned long hartid = hart_id_of(i);
+
+		if (hartid >= BITS_PER_LONG || !(hmask & BIT(hartid)))
 			hartmask_clear(out, i);
+	}
 	return true;
 }
 

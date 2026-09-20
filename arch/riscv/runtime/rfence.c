@@ -153,7 +153,7 @@ static void fence_local(const struct rfence_req *req)
 
 void rfence_process(void)
 {
-	unsigned long self = this_hartid();
+	unsigned int self = this_hart_index();
 
 	if (!hartmask_test(&rfence_pending, self))
 		return;
@@ -165,8 +165,8 @@ void rfence_process(void)
 
 int rfence_request(const struct hartmask *targets, const struct rfence_req *req)
 {
-	unsigned long self = this_hartid();
-	unsigned long hartid = 0;
+	unsigned int self = this_hart_index();
+	unsigned int index = 0;
 	bool local = hartmask_test(targets, self);
 
 	if (req->type >= RFENCE_HFENCE_GVMA && !hart_has(HART_FEAT_H))
@@ -176,17 +176,17 @@ int rfence_request(const struct hartmask *targets, const struct rfence_req *req)
 		ipi_process();
 
 	rfence_cur = *req;
-	for_each_hart_in_mask(hartid, targets) {
-		if (hartid == self)
+	for_each_hart_in_mask(index, targets) {
+		if (index == self)
 			continue;
-		atomic_or_ulong(&rfence_pending.bits[hartid / BITS_PER_LONG],
-				BIT(hartid % BITS_PER_LONG));
+		atomic_or_ulong(&rfence_pending.bits[index / BITS_PER_LONG],
+				BIT(index % BITS_PER_LONG));
 	}
-	for_each_hart_in_mask(hartid, targets) {
-		if (hartid == self)
+	for_each_hart_in_mask(index, targets) {
+		if (index == self)
 			continue;
 		pmu_fw_event(SBI_PMU_FW_FENCE_I_SENT + 2 * req->type);
-		ipi_send(hartid, IPI_EVENT_RFENCE);
+		ipi_send(index, IPI_EVENT_RFENCE);
 	}
 
 	if (local)

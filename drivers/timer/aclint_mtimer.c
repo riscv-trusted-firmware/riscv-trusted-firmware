@@ -25,13 +25,13 @@
 
 static vaddr_t mtime;
 static vaddr_t mtimecmp_base;
-/* Which MTIMECMP is a hart's, -1: none. */
-static int mtimecmp_index[CONFIG_PLATFORM_HART_COUNT];
+/* Which MTIMECMP belongs to a hart (by hart index), -1: none. */
+static int mtimecmp_of[CONFIG_PLATFORM_HART_COUNT];
 
 /* 0: this hart has none. */
 static vaddr_t mtimecmp(void)
 {
-	int idx = mtimecmp_index[this_hartid()];
+	int idx = mtimecmp_of[this_hart_index()];
 
 	return idx < 0 ? 0 : mtimecmp_base + 8 * (vaddr_t)idx;
 }
@@ -84,9 +84,14 @@ static int aclint_mtimer_probe(const void *fdt, int node)
 		mtime_addr = CONFIG_TIMER_ACLINT_MTIMER_MTIME_ADDR;
 		cmp_addr = CONFIG_TIMER_ACLINT_MTIMER_MTIMECMP_ADDR;
 		harts = CONFIG_PLATFORM_HART_COUNT;
-		for (unsigned int h = 0; h < harts; h++)
-			mtimecmp_index[h] =
-				(int)h - CONFIG_TIMER_ACLINT_MTIMER_FIRST_HART;
+		/* Registers in hart id order, from the first hart's on. */
+		for (unsigned int i = 0; i < harts; i++) {
+			mtimecmp_of[i] = -1;
+			if (hart_by_index(i))
+				mtimecmp_of[i] =
+					(int)hart_id_of(i) -
+					CONFIG_TIMER_ACLINT_MTIMER_FIRST_HART;
+		}
 	} else {
 		if (!fdt_node_check_compatible(fdt, node,
 					       "riscv,aclint-mtimer")) {
@@ -100,8 +105,9 @@ static int aclint_mtimer_probe(const void *fdt, int node)
 			mtime_addr = cmp_addr + CLINT_MTIME_OFFSET;
 			cmp_addr += CLINT_MTIMECMP_OFFSET;
 		}
-		harts = fdt_hart_indices(fdt, node, IRQ_M_TIMER, mtimecmp_index,
-					 CONFIG_PLATFORM_HART_COUNT);
+		harts = fdt_hart_positions(fdt, node, IRQ_M_TIMER, hart_index,
+					   mtimecmp_of,
+					   CONFIG_PLATFORM_HART_COUNT);
 		if (!harts)
 			return -1;
 		timer_frequency_from_fdt(fdt);

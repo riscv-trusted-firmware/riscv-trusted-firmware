@@ -105,7 +105,7 @@ static unsigned int lowest_bit(unsigned long v)
 
 static struct pmu_hart *this_pmu(void)
 {
-	return &pmu_harts[this_hartid()];
+	return &pmu_harts[this_hart_index()];
 }
 
 /* ---- CSR access by counter number -------------------------------------- */

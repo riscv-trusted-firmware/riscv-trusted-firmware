@@ -10,7 +10,7 @@
  * interrupts the node lists. Without a node the Kconfig geometry applies.
  */
 
-#include <arch/csr.h>
+#include <arch/hart.h>
 #include <driver.h>
 #include <fdt_util.h>
 #include <io.h>
@@ -20,27 +20,28 @@
 #include <types_ext.h>
 
 static vaddr_t msip_base;
-/* Which MSIP is a hart's, -1: none. */
-static int msip_index[CONFIG_PLATFORM_HART_COUNT];
+/* Which MSIP belongs to a hart (by hart index), -1: none. */
+static int msip_of[CONFIG_PLATFORM_HART_COUNT];
 
-static vaddr_t msip(unsigned long hartid)
+/* 0: the hart has none. */
+static vaddr_t msip(unsigned int index)
 {
-	if (hartid >= CONFIG_PLATFORM_HART_COUNT || msip_index[hartid] < 0)
+	if (index >= CONFIG_PLATFORM_HART_COUNT || msip_of[index] < 0)
 		return 0;
-	return msip_base + 4 * (vaddr_t)msip_index[hartid];
+	return msip_base + 4 * (vaddr_t)msip_of[index];
 }
 
-static void aclint_mswi_send(unsigned long hartid)
+static void aclint_mswi_send(unsigned int index)
 {
-	vaddr_t reg = msip(hartid);
+	vaddr_t reg = msip(index);
 
 	if (reg)
 		io_write32(reg, 1);
 }
 
-static void aclint_mswi_clear(unsigned long hartid)
+static void aclint_mswi_clear(unsigned int index)
 {
-	vaddr_t reg = msip(hartid);
+	vaddr_t reg = msip(index);
 
 	if (reg)
 		io_write32(reg, 0);
@@ -63,12 +64,16 @@ static int aclint_mswi_probe(const void *fdt, int node)
 
 	if (node < 0) {
 		base = CONFIG_IPI_ACLINT_MSWI_ADDR;
-		for (unsigned int h = 0; h < CONFIG_PLATFORM_HART_COUNT; h++)
-			msip_index[h] =
-				(int)h - CONFIG_IPI_ACLINT_MSWI_FIRST_HART;
+		/* Registers in hart id order, from the first hart's on. */
+		for (unsigned int i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++) {
+			msip_of[i] = -1;
+			if (hart_by_index(i))
+				msip_of[i] = (int)hart_id_of(i) -
+					     CONFIG_IPI_ACLINT_MSWI_FIRST_HART;
+		}
 	} else if (fdt_reg(fdt, node, 0, &base, NULL) ||
-		   !fdt_hart_indices(fdt, node, IRQ_M_SOFT, msip_index,
-				     CONFIG_PLATFORM_HART_COUNT)) {
+		   !fdt_hart_positions(fdt, node, IRQ_M_SOFT, hart_index,
+				       msip_of, CONFIG_PLATFORM_HART_COUNT)) {
 		return -1;
 	}
 

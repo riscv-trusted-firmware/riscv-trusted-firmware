@@ -55,15 +55,22 @@ _setup:
 .option pop
 	la	t0, _strap_entry
 	csrw	stvec, t0
-	li	t0, CONFIG_STACK_SIZE
-	mv	t1, zero
+	/*
+	 * sp = end of _sbitest_stacks[hart id]; ids we have no stack for wait.
+	 */
+	li	t0, 16				/* SBITEST_MAX_HARTS */
+3:	bltu	a0, t0, 4f
+	wfi
+	j	3b
+4:	li	t0, CONFIG_STACK_SIZE
+	mv	t1, t0
 	mv	t2, a0
 1:	beqz	t2, 2f
 	add	t1, t1, t0
 	addi	t2, t2, -1
 	j	1b
-2:	la	sp, __stack_top
-	sub	sp, sp, t1
+2:	la	sp, _sbitest_stacks
+	add	sp, sp, t1
 	ret
 
 	/* sepc = strap_handler(scause, sepc, stval), on the current stack. */

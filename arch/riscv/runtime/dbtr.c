@@ -65,7 +65,7 @@ static struct dbtr_hart dbtr_harts[CONFIG_PLATFORM_HART_COUNT];
 
 static struct dbtr_hart *this_dbtr(void)
 {
-	return &dbtr_harts[this_hartid()];
+	return &dbtr_harts[this_hart_index()];
 }
 
 static unsigned long mode_bits(unsigned long tdata1)

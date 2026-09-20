@@ -247,11 +247,11 @@ static unsigned int serve_hsm(const struct rpmi_hdr *hdr, const uint32_t *req,
 static unsigned int serve_cppc(const struct rpmi_hdr *hdr, const uint32_t *req,
 			       uint32_t *resp)
 {
-	static uint64_t desired[CONFIG_PLATFORM_HART_COUNT];
+	static uint64_t desired[SBITEST_MAX_HARTS];
 	uint32_t reg = req[0], hart = req[1];
 
 	resp[0] = RPMI_SUCCESS;
-	if (hdr->datalen < 8 || hart >= CONFIG_PLATFORM_HART_COUNT) {
+	if (hdr->datalen < 8 || hart >= SBITEST_MAX_HARTS) {
 		resp[0] = (uint32_t)RPMI_ERR_INVALID_PARAM;
 		return 1;
 	}

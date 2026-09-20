@@ -143,6 +143,19 @@ nodes and invalidates the PLIC's M-mode contexts, so that the next stage
 only sees what it may drive. With Smstateen all state enables are opened:
 the monitor has no policy that would keep state from S-mode.
 
+### Hart ids and hart indices
+
+Hart ids are the hardware's and can be anything; `CONFIG_PLATFORM_HART_COUNT`
+only says how many harts the monitor manages. The boot hart builds the hart
+table (`<boot.h>`): itself first, then the enabled cpu nodes of the device
+tree in order. A hart's index is its id's position there, and everything
+inside the monitor goes by index: the stack `entry.S` hands out, `struct
+hart`, every per-hart array, hart masks, IPI targets, the per-hart register
+tables of the CLINT and IMSIC drivers. Ids are translated where they cross
+the boundary: SBI hart masks and hart ids coming in, a6 of an SSE handler,
+the SSE preferred hart and RPMI messages going out. A hart that is not in
+the table parks itself, and its cpu node is disabled for the next stage.
+
 ### Hart state management
 
 The boot hart (whichever wins the boot lottery) initialises the monitor,
@@ -354,10 +367,8 @@ with `IMAGE_SBITEST` disabled.
    same MPXY channels; MSI / SSE indication of notifications; the P2A
    doorbell and the SYSTEM_MSI group; CPPC fast channels and the PuC's HSM
    suspend types.
-3. **Harts.** The maximum number of harts is a build-time constant and a
-   hart is indexed by its id (`hartid < CONFIG_PLATFORM_HART_COUNT`): sparse
-   hart ids need an index mapping. The monitor's own load address and size
-   are link-time values.
+3. The maximum number of harts is a build-time constant, and the monitor's
+   own load address and size are link-time values.
 4. More timer / IPI / reset / serial drivers.
 5. **Scalability.** Remote fences are serialised system-wide.
 

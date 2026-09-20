@@ -28,8 +28,8 @@
 struct sse_event {
 	uint32_t id;
 	bool pending;
-	/* global: where it is, or is to be, handled */
-	unsigned long hart;
+	/* index of the hart that handles it (global: or is to) */
+	unsigned int hart;
 	/* [STATUS] is the state alone */
 	unsigned long attr[SSE_ATTR_COUNT];
 };
@@ -90,7 +90,7 @@ static void event_source_update(const struct sse_event *e)
 /*
  * SBI_SUCCESS with *e set, NOT_SUPPORTED for the rest of the standard events.
  */
-static long event_find(unsigned long event_id, unsigned long hartid,
+static long event_find(unsigned long event_id, unsigned int hart,
 		       struct sse_event **e)
 {
 	for (unsigned int i = 0; i < ARRAY_SIZE(local_ids); i++)
@@ -98,7 +98,7 @@ static long event_find(unsigned long event_id, unsigned long hartid,
 			/* Known, but only there with the hardware behind it. */
 			if (!event_available(local_ids[i]))
 				return SBI_ERR_NOT_SUPPORTED;
-			*e = &local_events[hartid][i];
+			*e = &local_events[hart][i];
 			return SBI_SUCCESS;
 		}
 	for (unsigned int i = 0; i < ARRAY_SIZE(global_ids); i++)
@@ -121,15 +121,16 @@ static long event_find(unsigned long event_id, unsigned long hartid,
 	}
 }
 
-static void event_reset(struct sse_event *e, uint32_t id, unsigned long hartid)
+/* 'hart' is an index; the PREFERRED_HART attribute is S-mode's, a hart id. */
+static void event_reset(struct sse_event *e, uint32_t id, unsigned int hart)
 {
-	*e = (struct sse_event){ .id = id, .hart = hartid };
-	e->attr[SSE_ATTR_PREFERRED_HART] = hartid;
+	*e = (struct sse_event){ .id = id, .hart = hart };
+	e->attr[SSE_ATTR_PREFERRED_HART] = hart_id_of(hart);
 }
 
 void sse_hart_init(void)
 {
-	unsigned long self = this_hartid();
+	unsigned int self = this_hart_index();
 	static bool globals_ready;
 
 	spin_lock(&sse_lock);
@@ -232,7 +233,7 @@ static void inject(struct sse_event *e, struct trap_regs *regs)
 
 void sse_process(struct trap_regs *regs)
 {
-	unsigned long self = this_hartid();
+	unsigned int self = this_hart_index();
 	struct sse_event *next = NULL, *running = NULL;
 
 	if (!atomic_load_ulong(&kick[self]))
@@ -251,12 +252,13 @@ void sse_process(struct trap_regs *regs)
 
 bool sse_pending(void)
 {
-	return atomic_load_ulong(&kick[this_hartid()]);
+	return atomic_load_ulong(&kick[this_hart_index()]);
 }
 
 bool sse_complete(struct trap_regs *regs)
 {
-	unsigned long self = this_hartid(), mstatus = regs->mstatus, flags = 0;
+	unsigned long mstatus = regs->mstatus, flags = 0;
+	unsigned int self = this_hart_index();
 	struct sse_event *e = NULL;
 
 	spin_lock(&sse_lock);
@@ -322,36 +324,33 @@ bool sse_complete(struct trap_regs *regs)
  * Where a global event goes: the preferred hart if it listens, else anyone who
  * does.
  */
-static unsigned long global_target(const struct sse_event *e)
+static unsigned int global_target(const struct sse_event *e)
 {
-	unsigned long pref = e->attr[SSE_ATTR_PREFERRED_HART],
-		      self = this_hartid();
+	int pref = hart_index(e->attr[SSE_ATTR_PREFERRED_HART]);
+	unsigned int self = this_hart_index();
 	struct hartmask running = {};
 
 	hsm_interruptible_mask(&running);
-	if (unmasked[pref] && hartmask_test(&running, pref))
-		return pref;
+	if (pref >= 0 && unmasked[pref] &&
+	    hartmask_test(&running, (unsigned int)pref))
+		return (unsigned int)pref;
 	if (unmasked[self])
 		return self;
-	for (unsigned long h = 0; h < CONFIG_PLATFORM_HART_COUNT; h++)
+	for (unsigned int h = 0; h < CONFIG_PLATFORM_HART_COUNT; h++)
 		if (unmasked[h] && hartmask_test(&running, h))
 			return h;
-	return pref;
+	return pref >= 0 ? (unsigned int)pref : self;
 }
 
-static void make_pending(struct sse_event *e, unsigned long hartid)
+static void make_pending(struct sse_event *e)
 {
 	e->pending = true;
-	if (is_global(e->id) && e->attr[SSE_ATTR_STATUS] != SSE_STATE_RUNNING) {
-		hartid = global_target(e);
-		e->hart = hartid;
-	} else {
-		hartid = e->hart;
-	}
-	atomic_store_ulong(&kick[hartid], 1);
+	if (is_global(e->id) && e->attr[SSE_ATTR_STATUS] != SSE_STATE_RUNNING)
+		e->hart = global_target(e);
+	atomic_store_ulong(&kick[e->hart], 1);
 	/* Our own trap exit is on its way; another hart needs to take one. */
-	if (hartid != this_hartid())
-		ipi_send(hartid, IPI_EVENT_SSE);
+	if (e->hart != this_hart_index())
+		ipi_send(e->hart, IPI_EVENT_SSE);
 }
 
 /*
@@ -360,7 +359,7 @@ static void make_pending(struct sse_event *e, unsigned long hartid)
  */
 bool sse_raise_local(uint32_t event_id)
 {
-	unsigned long self = this_hartid();
+	unsigned int self = this_hart_index();
 	struct sse_event *e = NULL;
 	bool taken = false;
 
@@ -368,7 +367,7 @@ bool sse_raise_local(uint32_t event_id)
 		return false;
 	spin_lock(&sse_lock);
 	taken = unmasked[self] && e->attr[SSE_ATTR_STATUS] >= SSE_STATE_ENABLED;
-	make_pending(e, self);
+	make_pending(e);
 	spin_unlock(&sse_lock);
 	return taken;
 }
@@ -385,14 +384,14 @@ long sse_inject(unsigned long event_id, unsigned long hartid)
 		hartid = this_hartid();
 	else if (!hart_valid(hartid))
 		return SBI_ERR_INVALID_PARAM;
-	rc = event_find(event_id, hartid, &e);
+	rc = event_find(event_id, (unsigned int)hart_index(hartid), &e);
 	if (rc)
 		return rc;
 	if (!event_injectable(e->id))
 		return SBI_ERR_INVALID_PARAM;
 
 	spin_lock(&sse_lock);
-	make_pending(e, hartid);
+	make_pending(e);
 	spin_unlock(&sse_lock);
 	return SBI_SUCCESS;
 }
@@ -402,7 +401,7 @@ static long transition(unsigned long event_id, unsigned long from,
 		       unsigned long to)
 {
 	struct sse_event *e = NULL;
-	long rc = event_find(event_id, this_hartid(), &e);
+	long rc = event_find(event_id, this_hart_index(), &e);
 
 	if (rc)
 		return rc;
@@ -414,12 +413,9 @@ static long transition(unsigned long event_id, unsigned long from,
 		event_source_update(e);
 		/* Newly enabled and already pending: deliver. */
 		if (to == SSE_STATE_ENABLED && e->pending)
-			make_pending(e, e->hart);
+			make_pending(e);
 		if (to == SSE_STATE_UNUSED)
-			event_reset(e, e->id,
-				    is_global(e->id) ?
-				    e->attr[SSE_ATTR_PREFERRED_HART] :
-				    this_hartid());
+			event_reset(e, e->id, e->hart);
 	}
 	spin_unlock(&sse_lock);
 	return rc;
@@ -429,7 +425,7 @@ long sse_register(unsigned long event_id, unsigned long entry_pc,
 		  unsigned long entry_arg)
 {
 	struct sse_event *e = NULL;
-	long rc = event_find(event_id, this_hartid(), &e);
+	long rc = event_find(event_id, this_hart_index(), &e);
 
 	if (rc)
 		return rc;
@@ -465,7 +461,7 @@ long sse_disable(unsigned long event_id)
 
 long sse_hart_unmask(void)
 {
-	unsigned long self = this_hartid();
+	unsigned int self = this_hart_index();
 
 	if (unmasked[self])
 		return SBI_ERR_ALREADY_STARTED;
@@ -477,7 +473,7 @@ long sse_hart_unmask(void)
 
 long sse_hart_mask(void)
 {
-	unsigned long self = this_hartid();
+	unsigned int self = this_hart_index();
 
 	if (!unmasked[self])
 		return SBI_ERR_ALREADY_STOPPED;
@@ -492,7 +488,7 @@ static long attrs_check(unsigned long event_id, unsigned long base,
 			unsigned long count, unsigned long addr,
 			struct sse_event **e)
 {
-	long rc = event_find(event_id, this_hartid(), e);
+	long rc = event_find(event_id, this_hart_index(), e);
 
 	if (rc)
 		return rc;
@@ -561,7 +557,8 @@ static long attr_write_check(const struct sse_event *e, unsigned long id,
 	case SSE_ATTR_INTERRUPTED_A6:
 	case SSE_ATTR_INTERRUPTED_A7:
 		/* Only the hart that runs the handler may change these. */
-		return state == SSE_STATE_RUNNING && e->hart == this_hartid() ?
+		return state == SSE_STATE_RUNNING &&
+				       e->hart == this_hart_index() ?
 			       SBI_SUCCESS :
 			       SBI_ERR_INVALID_STATE;
 	default:

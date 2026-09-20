@@ -16,6 +16,7 @@
 #include <arch/pmu.h>
 #include <arch/sse.h>
 #include <atomic.h>
+#include <boot.h>
 #include <ipi.h>
 #include <log.h>
 #include <memregion.h>
@@ -65,9 +66,32 @@ void memregion_add(paddr_t base, paddr_size_t size, enum memregion_kind kind)
 	memregions[nr_memregions++] = (struct memregion){ base, size, kind };
 }
 
+struct hart *hart_by_index(unsigned int index)
+{
+	return index < _boot_hart_nr ? &harts[index] : NULL;
+}
+
+int hart_index(unsigned long hartid)
+{
+	return boot_hart_index(hartid);
+}
+
 struct hart *hart_get(unsigned long hartid)
 {
-	return hartid < CONFIG_PLATFORM_HART_COUNT ? &harts[hartid] : NULL;
+	int index = boot_hart_index(hartid);
+
+	return index < 0 ? NULL : &harts[index];
+}
+
+unsigned long hart_id_of(unsigned int index)
+{
+	return index < _boot_hart_nr ? _boot_hart_ids[index] : ~UL(0);
+}
+
+bool hart_index_valid(unsigned int index)
+{
+	return index < _boot_hart_nr &&
+	       atomic_load_ulong(&harts[index].present);
 }
 
 bool hart_valid(unsigned long hartid)
@@ -81,17 +105,20 @@ unsigned int hart_count(void)
 {
 	unsigned int n = 0;
 
-	for (unsigned long i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++)
-		n += hart_valid(i);
+	for (unsigned int i = 0; i < _boot_hart_nr; i++)
+		n += atomic_load_ulong(&harts[i].present) != 0;
 	return n;
 }
 
 void hart_init(unsigned long hartid)
 {
-	struct hart *h = &harts[hartid];
+	/* entry.S gave this hart a stack, so it is in the table. */
+	unsigned int index = (unsigned int)boot_hart_index(hartid);
+	struct hart *h = &harts[index];
 
 	h->hartid = hartid;
-	h->m_sp = (unsigned long)__stack_top - hartid * CONFIG_STACK_SIZE;
+	h->index = index;
+	h->m_sp = (unsigned long)__stack_top - index * CONFIG_STACK_SIZE;
 	atomic_store_ulong(&h->hsm_state, SBI_HSM_STATE_STOPPED);
 	__asm__ __volatile__("mv tp, %0" : : "r"(h));
 	atomic_store_ulong(&h->present, 1);

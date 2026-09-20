@@ -48,7 +48,7 @@ bool reset_supported(enum reset_type type)
 void __noreturn system_reset(enum reset_type type)
 {
 	const struct reset_ops *ops = backend_for(type);
-	unsigned long self = this_hartid();
+	unsigned int self = this_hart_index();
 	uint64_t until = 0;
 
 	if (ops) {
@@ -61,8 +61,8 @@ void __noreturn system_reset(enum reset_type type)
 			cpu_relax();
 	}
 
-	for (unsigned long h = 0; h < CONFIG_PLATFORM_HART_COUNT; h++)
-		if (h != self && hart_valid(h))
-			ipi_send(h, IPI_EVENT_HALT);
+	for (unsigned int i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++)
+		if (i != self && hart_index_valid(i))
+			ipi_send(i, IPI_EVENT_HALT);
 	hart_halt();
 }

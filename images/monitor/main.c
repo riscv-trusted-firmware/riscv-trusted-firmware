@@ -16,7 +16,9 @@
 #include <arch/pmu.h>
 #include <boot.h>
 #include <driver.h>
+#include <fdt_util.h>
 #include <generated/version.h>
+#include <io.h>
 #include <ipi.h>
 #include <log.h>
 #include <mpxy.h>
@@ -67,7 +69,8 @@ static void print_services(void)
 /* Every hart that entered the image must be known before harts are managed. */
 static void wait_for_secondaries(void)
 {
-	while (hart_count() < _boot_hart_count)
+	while (hart_count() + READ_ONCE(_boot_hart_parked) <
+	       READ_ONCE(_boot_hart_count))
 		cpu_relax();
 }
 
@@ -76,6 +79,8 @@ void image_main(unsigned long hartid, unsigned long fdt)
 	unsigned long next = CONFIG_MONITOR_NEXT_STAGE_ADDR;
 	void *tree = NULL;
 
+	/* The hart table first: it is what gives a hart its per-hart state. */
+	boot_harts_init(fdt_valid((const void *)fdt), hartid);
 	hart_init(hartid);
 	plat_early_init((const void *)fdt);
 

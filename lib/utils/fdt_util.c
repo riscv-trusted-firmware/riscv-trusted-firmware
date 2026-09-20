@@ -131,24 +131,26 @@ bool fdt_range_is_memory(const void *fdt, uint64_t base, uint64_t size)
 	return false;
 }
 
-unsigned int fdt_hart_indices(const void *fdt, int node, uint32_t irq,
-			      int *index_of, unsigned int nr_harts)
+unsigned int fdt_hart_positions(const void *fdt, int node, uint32_t irq,
+				int (*slot_of)(unsigned long hartid),
+				int *position, unsigned int nr_slots)
 {
 	unsigned int found = 0;
 	unsigned long hartid = 0;
 	uint32_t this_irq = 0;
-	int index = 0;
+	int pos = 0, slot = 0;
 
-	for (unsigned int h = 0; h < nr_harts; h++)
-		index_of[h] = -1;
+	for (unsigned int i = 0; i < nr_slots; i++)
+		position[i] = -1;
 	for (int i = 0; !fdt_hart_irq(fdt, node, i, &hartid, &this_irq); i++) {
 		if (this_irq != irq)
 			continue;
-		if (hartid < nr_harts) {
-			index_of[hartid] = index;
+		slot = slot_of(hartid);
+		if (slot >= 0 && (unsigned int)slot < nr_slots) {
+			position[slot] = pos;
 			found++;
 		}
-		index++;
+		pos++;
 	}
 	return found;
 }

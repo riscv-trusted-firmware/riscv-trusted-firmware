@@ -6,7 +6,10 @@
 #ifndef HARTMASK_H
 #define HARTMASK_H
 
-/* Bitmap of hart ids, sized by CONFIG_PLATFORM_HART_COUNT. */
+/*
+ * Bitmap of hart indices (not ids: see <arch/hart.h>),
+ * CONFIG_PLATFORM_HART_COUNT bits.
+ */
 
 #include <atomic.h>
 #include <bitstring.h>
@@ -25,26 +28,25 @@ static inline void hartmask_clear_all(struct hartmask *m)
 		m->bits[i] = 0;
 }
 
-static inline void hartmask_set(struct hartmask *m, unsigned long hartid)
+static inline void hartmask_set(struct hartmask *m, unsigned int index)
 {
-	bit_set(m->bits, hartid);
+	bit_set(m->bits, index);
 }
 
-static inline void hartmask_clear(struct hartmask *m, unsigned long hartid)
+static inline void hartmask_clear(struct hartmask *m, unsigned int index)
 {
-	bit_clear(m->bits, hartid);
+	bit_clear(m->bits, index);
 }
 
-static inline bool hartmask_test(const struct hartmask *m, unsigned long hartid)
+static inline bool hartmask_test(const struct hartmask *m, unsigned int index)
 {
-	return bit_test(m->bits, hartid);
+	return bit_test(m->bits, index);
 }
 
 /* Atomic variants, for a mask shared between harts. */
-static inline void hartmask_clear_atomic(struct hartmask *m,
-					 unsigned long hartid)
+static inline void hartmask_clear_atomic(struct hartmask *m, unsigned int index)
 {
-	atomic_and_ulong(&m->bits[_bit_word(hartid)], ~_bit_mask(hartid));
+	atomic_and_ulong(&m->bits[_bit_word(index)], ~_bit_mask(index));
 }
 
 static inline bool hartmask_empty_atomic(const struct hartmask *m)

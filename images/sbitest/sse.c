@@ -48,7 +48,7 @@ struct sse_ctx {
 	unsigned long stack[256];
 };
 
-static struct sse_ctx local_ctx[CONFIG_PLATFORM_HART_COUNT], global_ctx;
+static struct sse_ctx local_ctx[SBITEST_MAX_HARTS], global_ctx;
 static unsigned long sequence;
 
 static struct sbiret sse_call(unsigned long fid, unsigned long event)
@@ -58,9 +58,8 @@ static struct sbiret sse_call(unsigned long fid, unsigned long event)
 
 static unsigned long attr_read(unsigned long event, unsigned long attr)
 {
-	static unsigned long val[CONFIG_PLATFORM_HART_COUNT];
-	unsigned long *slot =
-		&val[csr_read(sscratch) % CONFIG_PLATFORM_HART_COUNT];
+	static unsigned long val[SBITEST_MAX_HARTS];
+	unsigned long *slot = &val[csr_read(sscratch) % SBITEST_MAX_HARTS];
 	struct sbiret ret = {};
 
 	ret = sbi_call(SBI_EXT_SSE, FID_READ_ATTRS, event, attr, 1,
@@ -166,7 +165,7 @@ static void test_attrs_and_states(struct sse_ctx *ctx)
 	CHECK_RET(attr_write(LOCAL, SSE_ATTR_INTERRUPTED_A6, 0),
 		  SBI_ERR_INVALID_STATE);
 	CHECK_RET(attr_write(GLOBAL, SSE_ATTR_PREFERRED_HART,
-			     CONFIG_PLATFORM_HART_COUNT),
+			     SBITEST_MAX_HARTS),
 		  SBI_ERR_INVALID_PARAM);
 
 	CHECK_RET(sse_call(FID_ENABLE, LOCAL), SBI_SUCCESS);
@@ -208,8 +207,7 @@ static void test_delivery(struct sse_ctx *ctx, unsigned long self)
 
 	CHECK_RET(sbi_call2(SBI_EXT_SSE, FID_INJECT, LOCAL, self), SBI_SUCCESS);
 	CHECK(ctx->runs == 2, "%lu runs after a second injection", ctx->runs);
-	CHECK_RET(sbi_call2(SBI_EXT_SSE, FID_INJECT, LOCAL,
-			    CONFIG_PLATFORM_HART_COUNT),
+	CHECK_RET(sbi_call2(SBI_EXT_SSE, FID_INJECT, LOCAL, SBITEST_MAX_HARTS),
 		  SBI_ERR_INVALID_PARAM);
 	/* Completion outside a handler does nothing. */
 	CHECK_RET(sse_call(FID_COMPLETE, 0), SBI_SUCCESS);

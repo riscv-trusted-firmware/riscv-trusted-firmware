@@ -100,7 +100,7 @@ static long feature_check(unsigned long feature)
 
 void fwft_hart_init(void)
 {
-	locked[this_hartid()] = 0;
+	locked[this_hart_index()] = 0;
 	/*
 	 * hart_runtime_init() has put medeleg and menvcfg at their reset
 	 * values.
@@ -132,7 +132,7 @@ long fwft_get(unsigned long feature, unsigned long *value)
 
 long fwft_set(unsigned long feature, unsigned long value, unsigned long flags)
 {
-	unsigned long *lock = &locked[this_hartid()];
+	unsigned long *lock = &locked[this_hart_index()];
 	long rc = feature_check(feature);
 	uint64_t field = 0, bits = 0;
 

@@ -31,9 +31,10 @@ struct ipi_ops {
 	unsigned long irq;
 	/* Calling hart: get ready to receive. May be NULL. */
 	void (*hart_init)(void);
-	void (*send)(unsigned long hartid);
+	/* Harts go by index here, as everywhere inside the monitor. */
+	void (*send)(unsigned int index);
 	/* Calling hart only: acknowledge what is pending. */
-	void (*clear)(unsigned long hartid);
+	void (*clear)(unsigned int index);
 };
 
 void ipi_register(const struct ipi_ops *ops);
@@ -45,10 +46,10 @@ const char *ipi_name(void);
 /* Calling hart: drop stale state, enable the M-mode software interrupt. */
 void ipi_hart_init(void);
 
-void ipi_send(unsigned long hartid, enum ipi_event event);
+void ipi_send(unsigned int index, enum ipi_event event);
 void ipi_send_mask(const struct hartmask *mask, enum ipi_event event);
 /* Wake a hart out of WFI without an event. */
-void ipi_kick(unsigned long hartid);
+void ipi_kick(unsigned int index);
 
 /*
  * Handle everything pending for the calling hart. Called on the M-mode

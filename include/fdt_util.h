@@ -48,11 +48,14 @@ int fdt_hart_irq(const void *fdt, int node, int index, unsigned long *hartid,
 
 /*
  * Devices with one register (set) per hart number them by position among
- * the "interrupts-extended" entries for local interrupt 'irq': fill
- * index_of[hartid] for the harts below 'nr_harts', -1 where the device has
- * nothing for a hart. Returns how many harts it has something for.
+ * the "interrupts-extended" entries for local interrupt 'irq'. 'slot_of'
+ * translates a hart id into where the caller keeps that hart (-1: it does
+ * not); position[slot] is filled for slots below 'nr_slots', -1 where the
+ * device has nothing for a hart. Returns how many harts it has something
+ * for.
  */
-unsigned int fdt_hart_indices(const void *fdt, int node, uint32_t irq,
-			      int *index_of, unsigned int nr_harts);
+unsigned int fdt_hart_positions(const void *fdt, int node, uint32_t irq,
+				int (*slot_of)(unsigned long hartid),
+				int *position, unsigned int nr_slots);
 
 #endif

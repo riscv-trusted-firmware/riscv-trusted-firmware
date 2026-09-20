@@ -42,35 +42,35 @@ void ipi_hart_init(void)
 		return;
 	if (ipi->hart_init)
 		ipi->hart_init();
-	ipi->clear(h->hartid);
+	ipi->clear(h->index);
 	atomic_store_ulong(&h->ipi_pending, 0);
 	csr_set(mie, ipi->irq);
 }
 
-void ipi_kick(unsigned long hartid)
+void ipi_kick(unsigned int index)
 {
-	if (ipi)
-		ipi->send(hartid);
+	if (ipi && hart_by_index(index))
+		ipi->send(index);
 }
 
-void ipi_send(unsigned long hartid, enum ipi_event event)
+void ipi_send(unsigned int index, enum ipi_event event)
 {
-	struct hart *h = hart_get(hartid);
+	struct hart *h = hart_by_index(index);
 
 	if (!ipi || !h)
 		return;
 	if (event == IPI_EVENT_SMODE)
 		pmu_fw_event(SBI_PMU_FW_IPI_SENT);
 	atomic_or_ulong(&h->ipi_pending, BIT(event));
-	ipi->send(hartid);
+	ipi->send(index);
 }
 
 void ipi_send_mask(const struct hartmask *mask, enum ipi_event event)
 {
-	unsigned long hartid = 0;
+	unsigned int index = 0;
 
-	for_each_hart_in_mask(hartid, mask)
-		ipi_send(hartid, event);
+	for_each_hart_in_mask(index, mask)
+		ipi_send(index, event);
 }
 
 void ipi_process(void)
@@ -84,7 +84,7 @@ void ipi_process(void)
 	/*
 	 * Clear first: an event posted after the read re-raises the interrupt.
 	 */
-	ipi->clear(h->hartid);
+	ipi->clear(h->index);
 	pending = atomic_swap_ulong(&h->ipi_pending, 0);
 
 	if (pending & BIT(IPI_EVENT_HALT))

@@ -17,6 +17,13 @@
 #define TICKS_SHORT ULL(20000)
 #define TICKS_TIMEOUT ULL(20000000)
 
+/*
+ * The payload keeps its harts by hart id, which the monitor does not bound:
+ * ids below this get a stack and a mailbox, and that covers every QEMU virt
+ * configuration, however few harts the monitor is built to manage.
+ */
+#define SBITEST_MAX_HARTS 16
+
 extern unsigned int checks, failures;
 
 #define CHECK(cond, fmt, ...)                                                 \

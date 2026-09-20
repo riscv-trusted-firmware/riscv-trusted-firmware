@@ -27,7 +27,7 @@ static unsigned long shmem[CONFIG_PLATFORM_HART_COUNT];
 
 void mpxy_hart_init(void)
 {
-	shmem[this_hartid()] = SHMEM_NONE;
+	shmem[this_hart_index()] = SHMEM_NONE;
 }
 
 long mpxy_channel_register(struct mpxy_channel *ch)
@@ -59,14 +59,14 @@ static struct mpxy_channel *channel_find(unsigned long id)
 
 static uint32_t *this_shmem(void)
 {
-	unsigned long addr = shmem[this_hartid()];
+	unsigned long addr = shmem[this_hart_index()];
 
 	return addr == SHMEM_NONE ? NULL : (uint32_t *)addr;
 }
 
 void mpxy_shmem_access(bool begin)
 {
-	unsigned long addr = shmem[this_hartid()];
+	unsigned long addr = shmem[this_hart_index()];
 
 	if (addr == SHMEM_NONE)
 		return;
@@ -78,7 +78,7 @@ void mpxy_shmem_access(bool begin)
 
 long mpxy_set_shmem(unsigned long lo, unsigned long hi, unsigned long flags)
 {
-	unsigned long *cur = &shmem[this_hartid()], old = *cur;
+	unsigned long *cur = &shmem[this_hart_index()], old = *cur;
 	unsigned long *new = NULL;
 
 	if (flags > 1)
