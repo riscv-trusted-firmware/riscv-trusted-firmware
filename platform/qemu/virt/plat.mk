@@ -17,9 +17,14 @@ else
 qemu-images = -bios $(1)/images/monitor/monitor.bin
 endif
 
-# The S-mode test payload, when built, is the next stage. Otherwise pass one
-# with QEMU_ARGS, e.g. -device loader,file=<image>,addr=<MONITOR_NEXT_STAGE_ADDR>.
-ifneq ($(CONFIG_IMAGE_SBITEST),)
+# Next stage: QEMU_KERNEL=<Image> boots a kernel (QEMU loads it where
+# MONITOR_NEXT_STAGE_ADDR points without the loader image, and fills in
+# /chosen from -append / -initrd in QEMU_ARGS). Otherwise the S-mode test
+# payload, when it is built.
+QEMU_KERNEL ?=
+ifneq ($(QEMU_KERNEL),)
+qemu-images += -kernel $(QEMU_KERNEL)
+else ifneq ($(CONFIG_IMAGE_SBITEST),)
 qemu-images += -device loader,file=$(1)/images/sbitest/sbitest.bin,addr=$(CONFIG_SBITEST_LOAD_ADDR)
 endif
 

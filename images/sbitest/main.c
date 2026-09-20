@@ -18,6 +18,10 @@
 #include <stdio.h>
 #include <util.h>
 
+#ifdef CONFIG_MONITOR_FDT_FIXUP
+#include <libfdt.h>
+#endif
+
 #include "sbicall.h"
 #include "sbitest.h"
 
@@ -69,7 +73,7 @@ static uint64_t now(void)
 		hi = csr_read(timeh);
 		lo = csr_read(time);
 	} while (hi != csr_read(timeh));
-	return SHIFT_U64(hi, 32) | lo;
+	return reg_pair_to_64(hi, lo);
 #else
 	return csr_read(time);
 #endif
@@ -762,6 +766,57 @@ static void test_smp(void)
 	}
 }
 
+#ifdef CONFIG_MONITOR_FDT_FIXUP
+/* The device tree we were given must keep us away from the monitor. */
+static void test_fdt(unsigned long addr)
+{
+	const void *fdt = (const void *)addr;
+	int parent = 0, node = 0, found = 0;
+
+	printf("fdt\n");
+	CHECK(addr && fdt_check_header(fdt) == 0, "no valid device tree at %lx",
+	      addr);
+	if (!addr || fdt_check_header(fdt))
+		return;
+	CHECK(fdt_check_full(fdt, fdt_totalsize(fdt)) == 0,
+	      "fdt_check_full failed");
+
+	parent = fdt_path_offset(fdt, "/reserved-memory");
+	CHECK(parent >= 0, "no /reserved-memory node");
+	if (parent < 0)
+		return;
+	CHECK(fdt_getprop(fdt, parent, "ranges", NULL),
+	      "/reserved-memory without ranges");
+
+	fdt_for_each_subnode(node, fdt, parent) {
+		int ac = fdt_address_cells(fdt, parent);
+		int sc = fdt_size_cells(fdt, parent);
+		uint64_t base = 0, size = 0;
+		const fdt32_t *reg = NULL;
+		int len = 0;
+
+		reg = fdt_getprop(fdt, node, "reg", &len);
+		if (!reg || len != (ac + sc) * (int)sizeof(*reg))
+			continue;
+		for (int i = 0; i < ac; i++)
+			base = (base << 32) | fdt32_to_cpu(reg[i]);
+		for (int i = 0; i < sc; i++)
+			size = (size << 32) | fdt32_to_cpu(reg[ac + i]);
+		if (base != CONFIG_MONITOR_LOAD_ADDR ||
+		    size != CONFIG_MONITOR_SIZE)
+			continue;
+		found++;
+		CHECK(fdt_getprop(fdt, node, "no-map", NULL),
+		      "monitor memory is not no-map");
+	}
+	CHECK(found == 1, "%d reserved-memory entries for the monitor", found);
+}
+#else
+static void test_fdt(unsigned long addr)
+{
+}
+#endif
+
 static void test_srst_errors(void)
 {
 	printf("srst\n");
@@ -787,6 +842,7 @@ void test_main(unsigned long hartid, unsigned long fdt)
 	      "interrupts enabled at entry");
 	CHECK(csr_read(sie) == 0, "sie %lx at entry", csr_read(sie));
 
+	test_fdt(fdt);
 	test_base();
 	test_dbcn();
 	test_time();

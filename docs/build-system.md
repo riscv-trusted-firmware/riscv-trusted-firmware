@@ -105,6 +105,7 @@ srcs-$(CONFIG_X)  += baz.c             Kconfig-gated source
 subdirs-y         += dir               recurse
 incdirs-y         += include           -I for this directory's objects only
 global-incdirs-y  += include           -I for every object of the image
+global-sysincdirs-y += include         same with -isystem (imported code: lib/libfdt)
 cflags-y          += -DX               this directory's C files
 cflags-foo.c-y    += -DX               one file
 asflags-y / asflags-bar.S-y            assembly

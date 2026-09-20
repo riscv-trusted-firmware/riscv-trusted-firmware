@@ -107,21 +107,33 @@ QEMU_EXTRA_ARGS="-cpu rv64,sstc=off" sh scripts/boot-test.sh build   # M-mode ti
 make run QEMU_SMP=8
 ```
 
-To boot something else, disable `IMAGE_SBITEST` and load it at
-`MONITOR_NEXT_STAGE_ADDR`, e.g.
-`make run QEMU_ARGS="-device loader,file=payload.bin,addr=0x80200000"`.
+## Booting Linux
+
+```
+make qemu_virt_rv64_defconfig && make -j
+make run QEMU_KERNEL=/path/to/Image \
+         QEMU_ARGS="-append 'console=ttyS0 earlycon=sbi' -initrd rootfs.cpio.gz"
+```
+
+`QEMU_KERNEL` takes the place of the test payload as the next stage. Before
+the hand-over the monitor adds its own memory to `/reserved-memory` in the
+device tree (`no-map`, `images/monitor/fdt_fixup.c`); without that entry a
+kernel allocates those pages and faults on the PMP fence. The tree is
+grown in place, or moved to `CONFIG_MONITOR_FDT_ADDR` first. Tested with
+Linux 6.19 and 7.3-rc on 4 harts, with and without Sstc: SMP bring-up, CPU
+hotplug (HSM stop/start), `reboot` and `poweroff` (SRST), `earlycon=sbi`
+(DBCN).
+
+Any other payload: `make run QEMU_ARGS="-device loader,file=payload.bin,addr=<MONITOR_NEXT_STAGE_ADDR>"`
+with `IMAGE_SBITEST` disabled.
 
 ## Gaps
 
-In rough order of what a Linux boot needs next:
-
-1. **Device tree.** No libfdt yet: device addresses come from Kconfig, and
-   the device tree is passed through unmodified. Linux needs the monitor's
-   memory as a `reserved-memory` `no-map` node (it faults on the PMP fence
-   otherwise), so booting Linux waits for the FDT fix-ups.
+1. **PMU**, then **SUSP**, **FWFT** and the rest of the list above.
 2. **Misaligned load/store emulation** (redirected to S-mode today) and the
    other illegal-instruction emulations.
-3. **PMU**, then **SUSP**, **FWFT** and the rest of the list above.
+3. **Device tree driven configuration.** libfdt is only used for the
+   fix-up; device addresses and the hart count still come from Kconfig.
 4. **Smepmp.** PMP is programmed without `mseccfg.MML`.
 5. **Interrupt controller set-up** (PLIC/APLIC M-mode contexts), more
    timer / IPI / reset / serial drivers.

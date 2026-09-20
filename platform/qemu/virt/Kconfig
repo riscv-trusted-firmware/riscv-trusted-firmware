@@ -18,8 +18,10 @@ config PLATFORM_FW_START
 config LOADER_NEXT_STAGE_ADDR
 	default 0x80200000
 
+# Where QEMU's -kernel puts an image: 2 MiB into RAM on RV64, 4 MiB on RV32.
+# With the loader in front, the monitor itself sits at 2 MiB.
 config MONITOR_NEXT_STAGE_ADDR
-	default 0x80400000 if IMAGE_LOADER
+	default 0x80400000 if IMAGE_LOADER || RISCV_RV32I
 	default 0x80200000
 
 config QEMU_VIRT_RAM_SIZE

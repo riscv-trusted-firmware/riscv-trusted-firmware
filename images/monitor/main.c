@@ -23,6 +23,8 @@
 #include <service.h>
 #include <timer.h>
 
+#include "fdt_fixup.h"
+
 static void print_features(void)
 {
 	static const char *const names[HART_FEAT_COUNT] = {
@@ -91,7 +93,10 @@ void image_main(unsigned long hartid, unsigned long fdt)
 		hsm_hart_wait();
 	}
 
-	pr_info("monitor: next stage at %lx (S-mode)\n", next);
+#ifdef CONFIG_MONITOR_FDT_FIXUP
+	fdt = fdt_fixup(fdt);
+#endif
+	pr_info("monitor: next stage at %lx (S-mode), fdt: %lx\n", next, fdt);
 	hsm_boot_hart_start(next, fdt);
 }
 
