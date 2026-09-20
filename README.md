@@ -47,5 +47,6 @@ configs/      defconfigs
 ## License
 
 BSD-3-Clause, see [LICENSE](LICENSE). What came from elsewhere keeps its
-license: the checkpatch wrapper scripts are BSD-2-Clause and `.clang-format`
-GPL-2.0.
+license: `lib/libfdt` comes from the device tree compiler and keeps its
+terms, GPL-2.0-or-later or BSD-2-Clause; the checkpatch wrapper scripts are
+BSD-2-Clause and `.clang-format` GPL-2.0.

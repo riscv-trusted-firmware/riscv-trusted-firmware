@@ -93,3 +93,25 @@ char *strchr(const char *s, int c)
 			return NULL;
 	}
 }
+
+char *strrchr(const char *s, int c)
+{
+	const char *last = NULL;
+
+	for (;; s++) {
+		if (*s == (char)c)
+			last = s;
+		if (!*s)
+			return (char *)last;
+	}
+}
+
+void *memchr(const void *s, int c, size_t n)
+{
+	const unsigned char *p = s;
+
+	for (; n; n--, p++)
+		if (*p == (unsigned char)c)
+			return (void *)p;
+	return NULL;
+}

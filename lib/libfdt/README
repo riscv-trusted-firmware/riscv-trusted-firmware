@@ -1,0 +1,12 @@
+libfdt, from the device tree compiler project:
+
+  https://git.kernel.org/pub/scm/utils/dtc/dtc.git   tag v1.7.2
+
+The sources and headers are verbatim copies of libfdt/ at that tag, under
+their original licence (GPL-2.0-or-later OR BSD-2-Clause; this project uses
+them under BSD-2-Clause). Not imported: fdt_overlay.c, fdt_empty_tree.c and
+the upstream build files.
+
+To update: copy the same files from a newer tag and adjust the tag above.
+Local changes do not belong here; the C environment libfdt expects
+(string.h, stdlib.h, limits.h) is provided by lib/libc.
