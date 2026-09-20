@@ -57,4 +57,34 @@ config RESET_SIFIVE_TEST_ADDR
 config SBI_SUSP
 	default y
 
+config QEMU_VIRT_RPMI
+	bool "RPMI shared memory transport in RAM, for a PuC model"
+	default y if IMAGE_SBITEST
+	select RPMI
+	select RPMI_SHMEM
+	select RPMI_SHMEM_IN_RAM
+	select MPXY
+	help
+	  QEMU virt has no platform microcontroller. This sets 16 KiB of RAM
+	  aside as an RPMI shared memory transport and publishes MPXY
+	  channels for the clock and voltage service groups. The SBI test
+	  payload runs a PuC model on one hart to test MPXY, the RPMI client
+	  and the transport end to end.
+
+if QEMU_VIRT_RPMI
+
+config QEMU_VIRT_RPMI_CHANNEL_BASE
+	hex "First MPXY channel id"
+	default 0x1000
+
+# Clear of everything QEMU loads with at least 128 MiB of RAM.
+config RPMI_SHMEM_BASE
+	default 0x83f00000
+
+# The PuC model runs in S-mode.
+config RPMI_SHMEM_PROTECT
+	default n
+
+endif
+
 endif

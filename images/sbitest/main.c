@@ -29,30 +29,15 @@
 #define SIP_STIP BIT(IRQ_S_TIMER)
 #define SSTATUS_SIE BIT(1)
 
-/* QEMU's mtime ticks at 10 MHz; only the order of magnitude matters. */
-#define TICKS_SHORT ULL(20000)
-#define TICKS_TIMEOUT ULL(20000000)
-
 #define MAX_HARTS CONFIG_PLATFORM_HART_COUNT
 #define BOGUS_EID UL(0x0badc0de)
 #define MAGIC UL(0x5b17e57)
 
 /* ---- bookkeeping ------------------------------------------------------ */
 
-static unsigned int checks, failures;
+unsigned int checks, failures;
 
-#define CHECK(cond, fmt, ...)                                                 \
-	do {                                                                  \
-		checks++;                                                     \
-		if (!(cond)) {                                                \
-			failures++;                                           \
-			printf("  FAIL %s:%d: " fmt "\n", __func__, __LINE__, \
-			       ##__VA_ARGS__);                                \
-		}                                                             \
-	} while (0)
-
-/* CHECK() of an SBI return's error, from where the macro is used. */
-static void check_ret(const char *func, int line, long error, long expected)
+void check_ret(const char *func, int line, long error, long expected)
 {
 	checks++;
 	if (error != expected) {
@@ -62,9 +47,7 @@ static void check_ret(const char *func, int line, long error, long expected)
 	}
 }
 
-#define CHECK_RET(ret, err) check_ret(__func__, __LINE__, (ret).error, err)
-
-static uint64_t now(void)
+uint64_t now(void)
 {
 #if __RISCV_XLEN__ == 32
 	uint32_t hi = 0, lo = 0;
@@ -78,18 +61,6 @@ static uint64_t now(void)
 	return csr_read(time);
 #endif
 }
-
-/* Poll until cond or the timeout; evaluates to the final cond. */
-#define WAIT_FOR(cond)                                  \
-	({                                              \
-		uint64_t __end = now() + TICKS_TIMEOUT; \
-		bool __ok;                              \
-							\
-		do {                                    \
-			__ok = (cond);                  \
-		} while (!__ok && now() < __end);       \
-		__ok;                                   \
-	})
 
 static struct sbiret sbi_set_timer(uint64_t when)
 {
@@ -162,6 +133,7 @@ enum cmd {
 	CMD_STOP,
 	CMD_SUSPEND_RETENTIVE,
 	CMD_SUSPEND_NON_RETENTIVE,
+	CMD_PUC, /* serve the RPMI PuC model from now on */
 };
 
 struct mailbox {
@@ -171,6 +143,7 @@ struct mailbox {
 	unsigned long ipis;
 	unsigned long suspend_ret; /* retentive suspend returned */
 	long suspend_error;
+	unsigned long puc; /* serving the PuC model */
 };
 
 static struct mailbox mbox[MAX_HARTS];
@@ -186,9 +159,18 @@ static void __noreturn secondary_loop(unsigned long hartid)
 			atomic_add_ulong(&m->ipis, 1);
 		}
 
+		if (READ_ONCE(m->puc))
+			puc_poll();
+
 		switch (READ_ONCE(m->cmd)) {
+		case CMD_PUC:
+			WRITE_ONCE(m->cmd, CMD_NONE);
+			puc_init();
+			WRITE_ONCE(m->puc, 1);
+			break;
 		case CMD_STOP:
 			WRITE_ONCE(m->cmd, CMD_NONE);
+			WRITE_ONCE(m->puc, 0);
 			sbi_call0(SBI_EXT_HSM, SBI_HSM_HART_STOP);
 			break;
 		case CMD_SUSPEND_RETENTIVE:
@@ -664,6 +646,14 @@ static void test_smp(void)
 		CHECK(WAIT_FOR(READ_ONCE(mbox[h].ipis) == 2),
 		      "hart %lu: %lu IPIs (all)", h, READ_ONCE(mbox[h].ipis));
 	csr_clear(sip, SIP_SSIP);
+
+	/* One of the secondaries plays the platform microcontroller. */
+	if (first != ~UL(0)) {
+		WRITE_ONCE(mbox[first].cmd, CMD_PUC);
+		CHECK(WAIT_FOR(READ_ONCE(mbox[first].puc)),
+		      "hart %lu: no PuC model", first);
+		test_mpxy();
+	}
 
 	printf("rfence\n");
 	for (unsigned long fid = SBI_RFENCE_FENCE_I;

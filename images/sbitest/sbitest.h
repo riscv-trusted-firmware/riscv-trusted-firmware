@@ -6,13 +6,85 @@
 #ifndef SBITEST_H
 #define SBITEST_H
 
-/* start.S, the trap entry and main.c */
-void test_main(unsigned long hartid, unsigned long fdt);
-void secondary_main(unsigned long hartid, unsigned long opaque);
-void resume_main(unsigned long hartid, unsigned long opaque);
+#include <atomic.h>
+#include <io.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <util.h>
+
+/* QEMU's mtime ticks at 10 MHz; only the order of magnitude matters. */
+#define TICKS_SHORT ULL(20000)
+#define TICKS_TIMEOUT ULL(20000000)
+
+extern unsigned int checks, failures;
+
+#define CHECK(cond, fmt, ...)                                                 \
+	do {                                                                  \
+		checks++;                                                     \
+		if (!(cond)) {                                                \
+			failures++;                                           \
+			printf("  FAIL %s:%d: " fmt "\n", __func__, __LINE__, \
+			       ##__VA_ARGS__);                                \
+		}                                                             \
+	} while (0)
+
+#define CHECK_RET(ret, err) check_ret(__func__, __LINE__, (ret).error, err)
+/* CHECK() of an SBI return's error, from where the macro is used. */
+void check_ret(const char *func, int line, long error, long expected);
+
+uint64_t now(void);
+
+/* Poll until cond or the timeout; evaluates to the final cond. */
+#define WAIT_FOR(cond)                                  \
+	({                                              \
+		uint64_t __end = now() + TICKS_TIMEOUT; \
+		bool __ok;                              \
+							\
+		do {                                    \
+			__ok = (cond);                  \
+		} while (!__ok && now() < __end);       \
+		__ok;                                   \
+	})
+
+/*
+ * puc.c: a model of an RPMI platform microcontroller, served by whichever
+ * hart calls puc_poll(). puc_init() sets the shared memory queues up.
+ */
+#define PUC_IMPL_ID 0x7e57
+#define PUC_IMPL_VERSION 0x00020003
+#define PUC_NUM_CLOCKS 3
+static inline uint64_t puc_clock_rate(uint32_t id)
+{
+	return ULL(1000000) * (id + 1) + SHIFT_U64(id, 32);
+}
+
+/* Services the model adds to the clock group, for the sake of testing. */
+#define PUC_TEST_POSTED 0xe0 /* posted: remember word 0 of the data */
+#define PUC_TEST_SILENT 0xe1 /* never acknowledged */
+#define PUC_TEST_STALE_ACK 0xe2 /* a foreign acknowledgment first */
+#define PUC_TEST_NOTIFY 0xe3 /* word 0: number of events to send */
+#define PUC_TEST_ECHO 0xe4 /* STATUS, then the request data */
+
+#define PUC_EVENT_ID 0x01
+#define PUC_EVENT_DATALEN 8 /* (sequence number, PUC_EVENT_MAGIC) */
+#define PUC_EVENT_MAGIC 0xe7e27
+
+extern uint32_t puc_posted_value;
+extern uint32_t puc_notifications_enabled;
+
+void puc_init(void);
+void puc_poll(void);
+
+/* mpxy.c: needs another hart running puc_poll(). */
+void test_mpxy(void);
+
 unsigned long strap_handler(unsigned long scause, unsigned long sepc,
 			    unsigned long stval);
-void _secondary_start(void);
+void secondary_main(unsigned long hartid, unsigned long opaque);
+void resume_main(unsigned long hartid, unsigned long opaque);
+void test_main(unsigned long hartid, unsigned long fdt);
 void _resume_start(void);
+void _secondary_start(void);
 
 #endif
