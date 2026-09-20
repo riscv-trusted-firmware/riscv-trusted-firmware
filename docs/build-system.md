@@ -17,7 +17,8 @@ mk/image.mk           multi-image rules: compile, preprocess linker script, link
 mk/verbose.mk         V=1 handling
 scripts/kconfig.py    kconfiglib front-end (defconfig, menuconfig, sync, ...)
 scripts/boot-test.sh  boots a build on the platform simulator and greps the log
-arch/riscv/           entry, traps, CSR/ISA headers, isa.mk (-march/-mabi from Kconfig)
+arch/riscv/           entry, trap entry, CSR/ISA headers, isa.mk (-march/-mabi from Kconfig)
+arch/riscv/runtime/   what hosting S-mode takes (harts, trap policy, PMP, HSM); monitor only
 platform/<v>/<b>/     Kconfig.plat + Kconfig + plat.mk + sub.mk + sources
 images/<name>/        Kconfig + image.mk + <name>.ld.S + sources
 lib/<name>/           Kconfig + sub.mk + sources (libc, builtins, utils)
@@ -122,10 +123,16 @@ images is compiled twice, once per image, with that image's flags.
 
 ```
 images-$(CONFIG_IMAGE_MONITOR) += monitor
-monitor-dirs     := arch/riscv lib drivers services platform/$(CONFIG_PLATFORM_DIR) images/monitor
+monitor-dirs     := arch/riscv arch/riscv/runtime lib drivers services \
+                    platform/$(CONFIG_PLATFORM_DIR) images/monitor
 monitor-ldscript := $(SRCTREE)/images/monitor/monitor.ld.S
 monitor-cppflags := -DIMAGE_MONITOR      # also -cflags, -asflags, -ldflags
 ```
+
+An image lists exactly the directories it links: the loader takes
+`drivers/core drivers/serial` rather than all of `drivers/`, and the S-mode
+test payload (`images/sbitest`) only `lib` and itself, with its own entry
+code instead of `arch/riscv`.
 
 The linker script is preprocessed (`-x assembler-with-cpp -D__LINKER__`), so
 it uses `CONFIG_*`. `arch/riscv/include/arch/image.lds.h` holds the common
@@ -157,8 +164,12 @@ platform/<vendor>/<board>/
 A driver is a `DRIVER_DEFINE()` descriptor in the `.driver_table` linker
 set, probed by `drivers_init()`. A service is a `SERVICE_DEFINE()`
 descriptor in `.service_table` owning an ecall EID range; `service_ecall()`
-routes S/U-mode ecalls (SBI convention: a7 = EID, a6 = FID) to it. Device
-tree matching for drivers is the next layer (libfdt goes under `lib/`).
+routes S-mode ecalls (SBI convention: a7 = EID, a6 = FID) to it; an optional
+`probe` hook tells whether the service is usable on this platform. Timer,
+IPI and reset drivers register an ops structure with the core of their
+class (`include/timer.h`, `ipi.h`, `reset.h`). Device tree matching for
+drivers is the next layer (libfdt goes under `lib/`). The SBI implementation
+is described in [sbi.md](sbi.md).
 
 ## Toolchains
 
@@ -172,8 +183,12 @@ toolchain has one for the target; otherwise `lib/builtins` supplies the
 ## Testing
 
 `scripts/boot-test.sh <build dir> [expected]` boots the build with the
-platform's `plat-run` hook and greps the serial log. `.github/workflows/build.yml`
-runs the defconfig matrix with both toolchains and boot-tests each result.
+platform's `plat-run` hook and greps the serial log: for the verdict of the
+SBI test payload (`sbitest: PASS`) when the build has `IMAGE_SBITEST`, for
+the monitor's idle message otherwise. `QEMU_EXTRA_ARGS` adds simulator
+options (`-cpu rv64,sstc=off`). `.github/workflows/build.yml` runs the
+defconfig matrix with both toolchains and boot-tests each result, with and
+without Sstc.
 
 ## lib/libutils
 
