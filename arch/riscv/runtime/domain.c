@@ -40,6 +40,13 @@ struct domain *this_domain(void)
 	return this_hart()->domain;
 }
 
+unsigned int this_domain_key(void)
+{
+	const struct domain *dom = this_hart()->domain;
+
+	return dom ? dom->index : 0;
+}
+
 /* Inclusive, so that the top of the address space fits. */
 static unsigned long region_last(const struct domain_region *r)
 {

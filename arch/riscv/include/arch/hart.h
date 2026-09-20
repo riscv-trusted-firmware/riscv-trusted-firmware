@@ -135,6 +135,15 @@ void hart_runtime_init(void);
 /* Read a CSR that may not exist: false when the access trapped. */
 #define csr_probe(csr, valp) may_trap(*(valp) = csr_read(csr))
 
+/*
+ * The calling hart changes domain (<domain.h>): what the services keep for
+ * S-mode per hart is per domain as well, and what of it lives in the hart
+ * (counters, triggers, feature bits) is taken out before the change and
+ * put back, or set up anew for a domain that has not run here, after it.
+ */
+void hart_services_switch_out(void);
+void hart_services_switch_in(bool fresh);
+
 /* Ssdbltrp, and S-mode has turned it on (FWFT DOUBLE_TRAP: menvcfg.DTE). */
 bool hart_smode_double_trap_enabled(void);
 

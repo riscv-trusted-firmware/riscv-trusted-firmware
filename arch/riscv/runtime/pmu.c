@@ -16,6 +16,7 @@
 #include <arch/hart.h>
 #include <arch/pmp.h>
 #include <arch/pmu.h>
+#include <domain.h>
 #include <libfdt.h>
 #include <log.h>
 #include <sbi/sbi.h>
@@ -78,9 +79,19 @@ struct pmu_hart {
 	uint32_t event[PMU_COUNTERS]; /* EVENT_NONE: free */
 	uint32_t fw_started; /* bit per firmware counter */
 	uint64_t fw_value[PMU_FW_COUNTERS];
+	/*
+	 * While the hart runs another domain: the hardware side of the above.
+	 */
+	struct {
+		unsigned long inhibit;
+		unsigned long irq_enabled, irq_delegated, irq_pending;
+		uint64_t value[PMU_HW_COUNTERS];
+		uint64_t select[PMU_HW_COUNTERS];
+	} hw;
 };
 
-static struct pmu_hart pmu_harts[CONFIG_PLATFORM_HART_COUNT];
+/* Per domain and hart, see <domain.h>. */
+static struct pmu_hart pmu_harts[DOMAIN_KEYS][CONFIG_PLATFORM_HART_COUNT];
 
 /* Without Zbb the compiler builtins for these are library calls. */
 static unsigned int count_bits(uint32_t v)
@@ -105,7 +116,7 @@ static unsigned int lowest_bit(unsigned long v)
 
 static struct pmu_hart *this_pmu(void)
 {
-	return &pmu_harts[this_hart_index()];
+	return &pmu_harts[this_domain_key()][this_hart_index()];
 }
 
 /* ---- CSR access by counter number -------------------------------------- */
@@ -1068,6 +1079,71 @@ void pmu_hart_init(void)
 			hw_event_write(n, 0);
 }
 
+/*
+ * A domain counts what happens while it runs, cycles and instructions
+ * included: the counters stand still for it while the hart is elsewhere,
+ * and nothing of what another domain does shows in them.
+ */
+void pmu_hart_switch_out(void)
+{
+	struct pmu_hart *p = this_pmu();
+
+	if (hart_has(HART_FEAT_SSCOFPMF)) {
+		p->hw.irq_enabled = csr_read(mie) & BIT(IRQ_PMU_OVF);
+		p->hw.irq_delegated = csr_read(mideleg) & BIT(IRQ_PMU_OVF);
+		p->hw.irq_pending = csr_read(mip) & BIT(IRQ_PMU_OVF);
+		csr_clear(mie, BIT(IRQ_PMU_OVF));
+	}
+	if (!have_inhibit)
+		return;
+	p->hw.inhibit = csr_read(CSR_MCOUNTINHIBIT);
+	csr_write(CSR_MCOUNTINHIBIT, hw_counters);
+	for (unsigned int n = 0; n < PMU_HW_COUNTERS; n++) {
+		if (!(hw_counters & BIT(n)))
+			continue;
+		p->hw.value[n] = hw_counter_read(n);
+		if (n >= 3)
+			p->hw.select[n] = hw_event_read(n);
+	}
+}
+
+void pmu_hart_switch_in(bool fresh)
+{
+	struct pmu_hart *p = this_pmu();
+
+	if (fresh) {
+		/* As pmu_hart_init() leaves it, with every counter at zero. */
+		p->hw.inhibit = hw_counters & ~(BIT(0) | BIT(2));
+		p->hw.irq_enabled = 0;
+		p->hw.irq_delegated = BIT(IRQ_PMU_OVF);
+		p->hw.irq_pending = 0;
+		for (unsigned int n = 0; n < PMU_HW_COUNTERS; n++) {
+			p->hw.value[n] = 0;
+			p->hw.select[n] = 0;
+		}
+		pmu_hart_init();
+	}
+	if (have_inhibit) {
+		csr_write(CSR_MCOUNTINHIBIT, hw_counters);
+		for (unsigned int n = 0; n < PMU_HW_COUNTERS; n++) {
+			if (!(hw_counters & BIT(n)))
+				continue;
+			hw_event_write(n, p->hw.select[n]);
+			hw_counter_write(n, p->hw.value[n]);
+		}
+		csr_write(CSR_MCOUNTINHIBIT, p->hw.inhibit);
+	}
+	if (hart_has(HART_FEAT_SSCOFPMF)) {
+		/* Whose interrupt it is first, then whether it is wanted. */
+		csr_clear(mie, BIT(IRQ_PMU_OVF));
+		csr_clear(mideleg, BIT(IRQ_PMU_OVF));
+		csr_set(mideleg, p->hw.irq_delegated);
+		csr_clear(mip, BIT(IRQ_PMU_OVF));
+		csr_set(mip, p->hw.irq_pending);
+		csr_set(mie, p->hw.irq_enabled);
+	}
+}
+
 /* ---- firmware counters ------------------------------------------------- */
 
 void pmu_fw_event(unsigned int event)
@@ -1252,12 +1328,7 @@ long pmu_counter_start(unsigned long base, unsigned long mask,
 	    (flags & SBI_PMU_START_FLAG_INIT_SNAPSHOT))
 		return SBI_ERR_INVALID_PARAM;
 	if (flags & SBI_PMU_START_FLAG_INIT_SNAPSHOT) {
-		/*
-		 * Set, and still this domain's: the hart may have changed
-		 * hands.
-		 */
-		if (p->snapshot == SNAPSHOT_NONE ||
-		    !smode_range_ok(p->snapshot, SNAPSHOT_SIZE))
+		if (p->snapshot == SNAPSHOT_NONE)
 			return SBI_ERR_NO_SHMEM;
 		snap = smode_access_begin(p->snapshot, SNAPSHOT_SIZE);
 	}
@@ -1306,12 +1377,7 @@ long pmu_counter_stop(unsigned long base, unsigned long mask,
 	if (!counter_set_ok(base, mask))
 		return SBI_ERR_INVALID_PARAM;
 	if (flags & SBI_PMU_STOP_FLAG_TAKE_SNAPSHOT) {
-		/*
-		 * Set, and still this domain's: the hart may have changed
-		 * hands.
-		 */
-		if (p->snapshot == SNAPSHOT_NONE ||
-		    !smode_range_ok(p->snapshot, SNAPSHOT_SIZE))
+		if (p->snapshot == SNAPSHOT_NONE)
 			return SBI_ERR_NO_SHMEM;
 		snap = smode_access_begin(p->snapshot, SNAPSHOT_SIZE);
 	}

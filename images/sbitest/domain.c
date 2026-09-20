@@ -128,6 +128,47 @@ static void test_trusted(void)
 	sbi_set_timer(~ULL(0));
 }
 
+/*
+ * PMU, SSE, DBTR and FWFT state is a domain's own, on a hart two of them
+ * use: each side leaves its mark, neither finds the other's.
+ */
+static void test_services(void)
+{
+	static unsigned long mem[512] __aligned(4096);
+	unsigned long bad = 0, here = 0, there = 0;
+
+	/*
+	 * A domain counts what it does itself: what this one burns between two
+	 * looks at the other one's instruction counter does not show there.
+	 */
+	there = (unsigned long)enter(TCMD(TCMD_INSTRET, 0)).value;
+	for (here = instret_coarse();
+	     ((instret_coarse() - here) & INSTRET_COARSE_MASK) < 0x400;)
+		;
+	there = ((unsigned long)enter(TCMD(TCMD_INSTRET, 0)).value - there) &
+		INSTRET_COARSE_MASK;
+	/* A step or two back is QEMU misreading a counter that was stopped. */
+	CHECK(there < 0x200 || there > INSTRET_COARSE_MASK - 0x100,
+	      "instret: %lx counted over there for 400 here", there);
+
+	bad = services_mark(SERVICES_UNTRUSTED, mem);
+	CHECK(!bad, "marking the services: %lx", bad);
+	bad = (unsigned long)enter(TCMD(TCMD_SERVICES_SET, 0)).value;
+	CHECK(!(bad & 0xff),
+	      "the trusted domain found service state that is not its own: %lx",
+	      bad & 0xff);
+	CHECK(!(bad >> 8), "the trusted domain could not set its own: %lx",
+	      bad >> 8);
+	bad = services_check(SERVICES_UNTRUSTED, mem);
+	CHECK(!bad, "service state lost or changed across a domain call: %lx",
+	      bad);
+	bad = (unsigned long)enter(TCMD(TCMD_SERVICES_GET, 0)).value;
+	CHECK(!bad, "the trusted domain lost its service state: %lx", bad);
+	bad = services_check(SERVICES_UNTRUSTED, mem);
+	CHECK(!bad, "service state lost or changed, second time: %lx", bad);
+	services_clean(mem);
+}
+
 static void test_trusted_smp(unsigned long other)
 {
 	unsigned long ipis = 0;
@@ -259,6 +300,7 @@ void test_domains(unsigned long boot, unsigned long other)
 		  SBI_ERR_NOT_SUPPORTED);
 
 	test_trusted();
+	test_services();
 	if (other != ~UL(0))
 		test_trusted_smp(other);
 	if (count == 4)
@@ -273,6 +315,12 @@ void test_domains(unsigned long boot, unsigned long other)
 	      "trusted domain, second boot: %ld %lx", ret.error, ret.value);
 	CHECK(enter(TCMD(TCMD_ECHO, 2)).value == 7,
 	      "echo after the second boot");
+	/*
+	 * ...and with nothing left of what it had with the monitor's services.
+	 */
+	ret = enter(TCMD(TCMD_SERVICES_SET, 0));
+	CHECK(!ret.error && !ret.value,
+	      "trusted domain, second boot: services %lx", ret.value);
 }
 
 #else

@@ -5,13 +5,25 @@
 
 #include <arch/fwft.h>
 #include <arch/hart.h>
+#include <domain.h>
 #include <sbi/sbi.h>
 #include <util.h>
 
 #define FWFT_FEATURES SBI_FWFT_LOCAL_RESERVED_START
 
-/* Bit per feature: locked until the hart is started again. */
-static unsigned long locked[CONFIG_PLATFORM_HART_COUNT];
+/* Per domain and hart, see <domain.h>. */
+static struct fwft_hart {
+	/* Bit per feature: locked until the hart is started again. */
+	unsigned long locked;
+	/* While the hart runs another domain: what the features were set to. */
+	uint64_t envcfg;
+	bool misaligned_deleg;
+} fwft_harts[DOMAIN_KEYS][CONFIG_PLATFORM_HART_COUNT];
+
+static struct fwft_hart *this_fwft(void)
+{
+	return &fwft_harts[this_domain_key()][this_hart_index()];
+}
 
 #define MISALIGNED_DELEG \
 	(BIT(CAUSE_MISALIGNED_LOAD) | BIT(CAUSE_MISALIGNED_STORE))
@@ -100,11 +112,45 @@ static long feature_check(unsigned long feature)
 
 void fwft_hart_init(void)
 {
-	locked[this_hart_index()] = 0;
+	this_fwft()->locked = 0;
 	/*
 	 * hart_runtime_init() has put medeleg and menvcfg at their reset
 	 * values.
 	 */
+}
+
+/* Every menvcfg field a feature stands for. */
+static uint64_t feature_fields(void)
+{
+	uint64_t fields = 0;
+
+	for (unsigned long f = 0; f < FWFT_FEATURES; f++)
+		fields |= feature_field(f);
+	return fields;
+}
+
+void fwft_hart_switch_out(void)
+{
+	struct fwft_hart *f = this_fwft();
+
+	f->misaligned_deleg = csr_read(medeleg) & MISALIGNED_DELEG;
+	if (hart_has(HART_FEAT_MENVCFG))
+		f->envcfg = envcfg_read() & feature_fields();
+}
+
+void fwft_hart_switch_in(bool fresh)
+{
+	struct fwft_hart *f = this_fwft();
+
+	/* Every feature is off out of reset. */
+	if (fresh)
+		*f = (struct fwft_hart){ 0 };
+	if (f->misaligned_deleg)
+		csr_set(medeleg, MISALIGNED_DELEG);
+	else
+		csr_clear(medeleg, MISALIGNED_DELEG);
+	if (hart_has(HART_FEAT_MENVCFG))
+		envcfg_write((envcfg_read() & ~feature_fields()) | f->envcfg);
 }
 
 long fwft_get(unsigned long feature, unsigned long *value)
@@ -132,7 +178,7 @@ long fwft_get(unsigned long feature, unsigned long *value)
 
 long fwft_set(unsigned long feature, unsigned long value, unsigned long flags)
 {
-	unsigned long *lock = &locked[this_hart_index()];
+	unsigned long *lock = &this_fwft()->locked;
 	long rc = feature_check(feature);
 	uint64_t field = 0, bits = 0;
 

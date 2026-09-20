@@ -30,6 +30,9 @@
 void pmu_init(const void *fdt);
 /* Every hart, before it enters the next stage: all counters released. */
 void pmu_hart_init(void);
+/* The calling hart changes domain, see <arch/hart.h>. */
+void pmu_hart_switch_out(void);
+void pmu_hart_switch_in(bool fresh);
 
 /* Count one occurrence of firmware event SBI_PMU_FW_* on the calling hart. */
 void pmu_fw_event(unsigned int event);
@@ -65,6 +68,14 @@ static inline void pmu_init(const void *fdt)
 }
 
 static inline void pmu_hart_init(void)
+{
+}
+
+static inline void pmu_hart_switch_out(void)
+{
+}
+
+static inline void pmu_hart_switch_in(bool fresh)
 {
 }
 

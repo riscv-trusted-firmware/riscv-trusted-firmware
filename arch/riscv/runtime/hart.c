@@ -507,6 +507,21 @@ void smode_access_end(void)
 		pmp_entry_cfg(1, 0);
 }
 
+void hart_services_switch_out(void)
+{
+	pmu_hart_switch_out();
+	dbtr_hart_switch_out();
+	fwft_hart_switch_out();
+}
+
+void hart_services_switch_in(bool fresh)
+{
+	fwft_hart_switch_in(fresh);
+	dbtr_hart_switch_in(fresh);
+	pmu_hart_switch_in(fresh);
+	sse_hart_switch_in(fresh);
+}
+
 void hart_runtime_init(void)
 {
 	unsigned long deleg = 0;

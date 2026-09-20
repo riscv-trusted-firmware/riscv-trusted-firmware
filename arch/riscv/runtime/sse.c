@@ -20,6 +20,7 @@
 #include <arch/pmu.h>
 #include <arch/sse.h>
 #include <atomic.h>
+#include <domain.h>
 #include <ipi.h>
 #include <sbi/sbi.h>
 #include <spinlock.h>
@@ -52,10 +53,20 @@ static const uint32_t local_ids[] = {
 static const uint32_t global_ids[] = { SSE_EVENT_GLOBAL_SOFTWARE };
 
 static unsigned long sse_lock = SPINLOCK_UNLOCK;
-static struct sse_event local_events[CONFIG_PLATFORM_HART_COUNT]
-				    [ARRAY_SIZE(local_ids)];
-static struct sse_event global_events[ARRAY_SIZE(global_ids)];
-static bool unmasked[CONFIG_PLATFORM_HART_COUNT];
+/* The events are a domain's own (<domain.h>), global ones included. */
+static struct sse_domain {
+	struct sse_event local[CONFIG_PLATFORM_HART_COUNT]
+			      [ARRAY_SIZE(local_ids)];
+	struct sse_event global[ARRAY_SIZE(global_ids)];
+	bool unmasked[CONFIG_PLATFORM_HART_COUNT];
+	bool globals_ready;
+} sse_domains[DOMAIN_KEYS];
+
+static struct sse_domain *this_sse(void)
+{
+	return &sse_domains[this_domain_key()];
+}
+
 /* Something may be deliverable on the hart: look, under the lock. */
 static unsigned long kick[CONFIG_PLATFORM_HART_COUNT];
 
@@ -98,12 +109,12 @@ static long event_find(unsigned long event_id, unsigned int hart,
 			/* Known, but only there with the hardware behind it. */
 			if (!event_available(local_ids[i]))
 				return SBI_ERR_NOT_SUPPORTED;
-			*e = &local_events[hart][i];
+			*e = &this_sse()->local[hart][i];
 			return SBI_SUCCESS;
 		}
 	for (unsigned int i = 0; i < ARRAY_SIZE(global_ids); i++)
 		if (event_id == global_ids[i]) {
-			*e = &global_events[i];
+			*e = &this_sse()->global[i];
 			return SBI_SUCCESS;
 		}
 
@@ -131,17 +142,32 @@ static void event_reset(struct sse_event *e, uint32_t id, unsigned int hart)
 void sse_hart_init(void)
 {
 	unsigned int self = this_hart_index();
-	static bool globals_ready;
+	struct sse_domain *d = this_sse();
 
 	spin_lock(&sse_lock);
-	unmasked[self] = false;
+	d->unmasked[self] = false;
 	for (unsigned int i = 0; i < ARRAY_SIZE(local_ids); i++)
-		event_reset(&local_events[self][i], local_ids[i], self);
-	/* The first hart to get here is the boot hart. */
-	for (unsigned int i = 0; i < ARRAY_SIZE(global_ids) && !globals_ready;
-	     i++)
-		event_reset(&global_events[i], global_ids[i], self);
-	globals_ready = true;
+		event_reset(&d->local[self][i], local_ids[i], self);
+	/* The first hart of the domain to get here: its boot hart. */
+	for (unsigned int i = 0;
+	     i < ARRAY_SIZE(global_ids) && !d->globals_ready; i++)
+		event_reset(&d->global[i], global_ids[i], self);
+	d->globals_ready = true;
+	spin_unlock(&sse_lock);
+}
+
+void sse_hart_switch_in(bool fresh)
+{
+	if (fresh)
+		sse_hart_init();
+	/* What became due for this domain while the hart ran another one. */
+	atomic_store_ulong(&kick[this_hart_index()], 1);
+}
+
+void sse_domain_reset(unsigned int key)
+{
+	spin_lock(&sse_lock);
+	sse_domains[key].globals_ready = false;
 	spin_unlock(&sse_lock);
 }
 
@@ -161,8 +187,8 @@ static struct sse_event *top_event(unsigned long self, unsigned long state)
 	for (unsigned int i = 0;
 	     i < ARRAY_SIZE(local_ids) + ARRAY_SIZE(global_ids); i++) {
 		e = i < ARRAY_SIZE(local_ids) ?
-			    &local_events[self][i] :
-			    &global_events[i - ARRAY_SIZE(local_ids)];
+			    &this_sse()->local[self][i] :
+			    &this_sse()->global[i - ARRAY_SIZE(local_ids)];
 		if (e->attr[SSE_ATTR_STATUS] != state || e->hart != self ||
 		    (state == SSE_STATE_ENABLED && !e->pending))
 			continue;
@@ -245,12 +271,8 @@ void sse_process(struct trap_regs *regs)
 	if (!next)
 		atomic_store_ulong(&kick[self], 0);
 	running = top_event(self, SSE_STATE_RUNNING);
-	/*
-	 * Not into a domain that did not ask for it: the hart may have changed
-	 * hands.
-	 */
-	if (next && unmasked[self] && (!running || outranks(next, running)) &&
-	    smode_entry_ok(next->attr[SSE_ATTR_ENTRY_PC]))
+	if (next && this_sse()->unmasked[self] &&
+	    (!running || outranks(next, running)))
 		inject(next, regs);
 	spin_unlock(&sse_lock);
 }
@@ -333,16 +355,17 @@ static unsigned int global_target(const struct sse_event *e)
 {
 	int pref = hart_index(e->attr[SSE_ATTR_PREFERRED_HART]);
 	unsigned int self = this_hart_index();
+	const struct sse_domain *d = this_sse();
 	struct hartmask running = {};
 
 	hsm_interruptible_mask(&running);
-	if (pref >= 0 && unmasked[pref] &&
+	if (pref >= 0 && d->unmasked[pref] &&
 	    hartmask_test(&running, (unsigned int)pref))
 		return (unsigned int)pref;
-	if (unmasked[self])
+	if (d->unmasked[self])
 		return self;
 	for (unsigned int h = 0; h < CONFIG_PLATFORM_HART_COUNT; h++)
-		if (unmasked[h] && hartmask_test(&running, h))
+		if (d->unmasked[h] && hartmask_test(&running, h))
 			return h;
 	return pref >= 0 ? (unsigned int)pref : self;
 }
@@ -371,7 +394,8 @@ bool sse_raise_local(uint32_t event_id)
 	if (event_find(event_id, self, &e))
 		return false;
 	spin_lock(&sse_lock);
-	taken = unmasked[self] && e->attr[SSE_ATTR_STATUS] >= SSE_STATE_ENABLED;
+	taken = this_sse()->unmasked[self] &&
+		e->attr[SSE_ATTR_STATUS] >= SSE_STATE_ENABLED;
 	make_pending(e);
 	spin_unlock(&sse_lock);
 	return taken;
@@ -387,7 +411,9 @@ long sse_inject(unsigned long event_id, unsigned long hartid)
 	/* hart_id only matters for a local event. */
 	if (is_global((uint32_t)event_id))
 		hartid = this_hartid();
-	else if (!hart_valid(hartid))
+	else if (!hart_valid(hartid) ||
+		 !domain_hart_member(this_domain(),
+				     (unsigned int)hart_index(hartid)))
 		return SBI_ERR_INVALID_PARAM;
 	rc = event_find(event_id, (unsigned int)hart_index(hartid), &e);
 	if (rc)
@@ -468,9 +494,9 @@ long sse_hart_unmask(void)
 {
 	unsigned int self = this_hart_index();
 
-	if (unmasked[self])
+	if (this_sse()->unmasked[self])
 		return SBI_ERR_ALREADY_STARTED;
-	unmasked[self] = true;
+	this_sse()->unmasked[self] = true;
 	/* Events may have piled up meanwhile. */
 	atomic_store_ulong(&kick[self], 1);
 	return SBI_SUCCESS;
@@ -480,9 +506,9 @@ long sse_hart_mask(void)
 {
 	unsigned int self = this_hart_index();
 
-	if (!unmasked[self])
+	if (!this_sse()->unmasked[self])
 		return SBI_ERR_ALREADY_STOPPED;
-	unmasked[self] = false;
+	this_sse()->unmasked[self] = false;
 	return SBI_SUCCESS;
 }
 

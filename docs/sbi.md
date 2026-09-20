@@ -373,8 +373,7 @@ with `IMAGE_SBITEST` disabled.
    doorbell and the SYSTEM_MSI group; CPPC fast channels and the PuC's HSM
    suspend types.
 3. The maximum number of harts and domains and the monitor's size are
-   build-time constants. Domains that share a hart share its PMU, SSE,
-   debug trigger and FWFT state.
+   build-time constants.
 4. More timer / IPI / reset / serial drivers.
 5. **Scalability.** Remote fences are serialised system-wide.
 

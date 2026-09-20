@@ -15,6 +15,7 @@
 #include <arch/dbtr.h>
 #include <arch/hart.h>
 #include <arch/pmp.h>
+#include <domain.h>
 #include <sbi/sbi.h>
 #include <util.h>
 
@@ -59,13 +60,16 @@ struct dbtr_hart {
 	/* tinfo: bit per supported type */
 	uint32_t types[MAX_TRIGGERS];
 	unsigned long state[MAX_TRIGGERS];
+	/* While the hart runs another domain: the mapped triggers, tdata1-3. */
+	unsigned long saved[MAX_TRIGGERS][3];
 };
 
-static struct dbtr_hart dbtr_harts[CONFIG_PLATFORM_HART_COUNT];
+/* Per domain and hart, see <domain.h>. */
+static struct dbtr_hart dbtr_harts[DOMAIN_KEYS][CONFIG_PLATFORM_HART_COUNT];
 
 static struct dbtr_hart *this_dbtr(void)
 {
-	return &dbtr_harts[this_hart_index()];
+	return &dbtr_harts[this_domain_key()][this_hart_index()];
 }
 
 static unsigned long mode_bits(unsigned long tdata1)
@@ -129,6 +133,44 @@ void dbtr_hart_init(void)
 	if (d->count) {
 		csr_write(CSR_TSELECT, 0);
 		d->has_tdata3 = may_trap(val = csr_read(CSR_TDATA3));
+	}
+}
+
+void dbtr_hart_switch_out(void)
+{
+	struct dbtr_hart *d = this_dbtr();
+
+	for (unsigned int i = 0; i < d->count; i++) {
+		if (!(d->state[i] & STATE_MAPPED))
+			continue;
+		csr_write(CSR_TSELECT, i);
+		d->saved[i][0] = csr_read(CSR_TDATA1);
+		d->saved[i][1] = csr_read(CSR_TDATA2);
+		d->saved[i][2] = d->has_tdata3 ? csr_read(CSR_TDATA3) : 0;
+		hw_clear(i);
+	}
+}
+
+void dbtr_hart_switch_in(bool fresh)
+{
+	struct dbtr_hart *d = this_dbtr();
+
+	if (fresh) {
+		dbtr_hart_init();
+		return;
+	}
+	/*
+	 * As they were, hit bits included: the hardware took these values
+	 * before.
+	 */
+	for (unsigned int i = 0; i < d->count; i++) {
+		if (!(d->state[i] & STATE_MAPPED))
+			continue;
+		hw_clear(i);
+		csr_write(CSR_TDATA2, d->saved[i][1]);
+		if (d->has_tdata3)
+			csr_write(CSR_TDATA3, d->saved[i][2]);
+		csr_write(CSR_TDATA1, d->saved[i][0]);
 	}
 }
 
@@ -219,9 +261,7 @@ static unsigned long state_of(unsigned int idx, unsigned long tdata1)
 static long entries_get(struct dbtr_hart *d, unsigned long count,
 			struct dbtr_entry **entries)
 {
-	/* Set, and still this domain's: the hart may have changed hands. */
-	if (d->shmem == SHMEM_NONE ||
-	    !smode_range_ok(d->shmem, d->count * sizeof(struct dbtr_entry)))
+	if (d->shmem == SHMEM_NONE)
 		return SBI_ERR_NO_SHMEM;
 	if (count > d->count)
 		return SBI_ERR_BAD_RANGE;

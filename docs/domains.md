@@ -10,9 +10,11 @@ everything the monitor does for S-mode on that hart goes by that domain:
   programmed again whenever the hart changes domain.
 * **Addresses in SBI calls** (shared memory, buffers, start and resume
   addresses, event handlers) must lie in memory the domain can use that
-  way: read-write, or executable for entry points. Addresses the monitor
-  keeps (PMU snapshot and debug trigger memory, SSE handlers) are checked
-  again when they are used, as the hart may have changed hands since.
+  way: read-write, or executable for entry points.
+* **Service state.** What the monitor keeps for S-mode per hart (PMU
+  counters and snapshot memory, SSE events, debug triggers, FWFT settings
+  and locks, the MPXY shared memory) it keeps per domain and hart: domains
+  that share a hart neither see nor disturb what the other has there.
 * **Harts.** HSM, IPI and RFENCE calls see the harts of the caller's domain
   and no others: a foreign hart id is `SBI_ERR_INVALID_PARAM`.
 * **System reset and suspend** are `SBI_ERR_DENIED` without the domain's
@@ -143,11 +145,27 @@ While a hart is away, the domain it left sees it as started. An IPI for it
 is kept and delivered when it is back; remote fences skip it (it flushes on
 the way back anyway).
 
+The state of the SBI services moves with the hart as well. The software
+side is simply kept per domain and hart (`DOMAIN_KEYS`, `this_domain_key()`);
+the hardware side is taken out and put back by `hart_services_switch_out()`
+and `_in()`:
+
+* **PMU**: mcountinhibit, every counter (cycle and instret included) and
+  event selector, and whose the counter overflow interrupt is. A domain
+  counts what happens while it runs; the counters stand still for it while
+  the hart is elsewhere, and a new context starts from zero.
+* **DBTR**: the installed triggers are read out and cleared, and written
+  back on return; no trigger of one domain can fire in another.
+* **FWFT**: the menvcfg fields and the misaligned exception delegation the
+  features stand for, and the lock bits.
+* **SSE**: events, global ones included, are a domain's own. One that becomes
+  due for a hart that is away is delivered when the hart is back.
+
+A context that has not run before, or whose domain was stopped since, finds
+all of it as a started hart does: nothing registered, every feature off.
+
 Not switched, and so shared by the domains that share a hart: the H
-extension's CSRs, external interrupt routing, and the monitor's per-hart
-service state (PMU counters, SSE events, debug triggers, FWFT settings). A
-domain that is entered on another domain's harts should leave those
-services alone.
+extension's CSRs and external interrupt routing.
 
 ## Testing
 
@@ -157,6 +175,8 @@ to the device tree in which the test payload runs as "untrusted", next to
 hart). All three run parts of the payload's image. The tests cover memory
 isolation in both directions, address checks in SBI calls, hart visibility,
 reset permission, enter / exit with register, FPU, vector and timer state,
+PMU / SSE / DBTR / FWFT state set up on both sides of a shared hart (each
+finds its own again and nothing of the other's, in the hardware as well),
 a second hart visiting (stopped, started by the domain, IPI while away),
 stopping and starting a domain that runs, and a second boot of a stopped
 one.

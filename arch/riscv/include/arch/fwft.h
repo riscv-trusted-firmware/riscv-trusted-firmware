@@ -13,7 +13,12 @@
  */
 
 /* Every hart, before it enters the next stage: reset values, nothing locked. */
+#include <stdbool.h>
+
 void fwft_hart_init(void);
+/* The calling hart changes domain, see <arch/hart.h>. */
+void fwft_hart_switch_out(void);
+void fwft_hart_switch_in(bool fresh);
 
 long fwft_set(unsigned long feature, unsigned long value, unsigned long flags);
 long fwft_get(unsigned long feature, unsigned long *value);

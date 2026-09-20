@@ -13,16 +13,17 @@
  * (CALLING) or to be entered again after they exited (IDLE). Switching is
  * done by the hart itself, from an ecall, under one lock: it is rare.
  *
- * What is not switched stays with the hart: the H extension's CSRs, and
- * the monitor's per-hart service state (PMU counters, SSE events, debug
- * triggers, FWFT settings). Addresses S-mode left with those services are
- * checked against the running domain again when they are used.
+ * What the monitor's services keep for S-mode per hart (PMU counters, SSE
+ * events, debug triggers, FWFT settings) is per domain as well, and its
+ * hardware side moves with the context: hart_services_switch_out() / _in().
+ * What is not switched stays with the hart: the H extension's CSRs.
  */
 
 #include <arch/domain_state.h>
 #include <arch/hart.h>
 #include <arch/hsm.h>
 #include <arch/pmp.h>
+#include <arch/sse.h>
 #include <atomic.h>
 #include <domain.h>
 #include <ipi.h>
@@ -168,10 +169,14 @@ static void context_save(struct domain_context *ctx,
 		ctx->senvcfg = csr_read(CSR_SENVCFG);
 	ctx->timer = timer_smode_get();
 	unit_state_save(ctx);
+	hart_services_switch_out();
 }
 
-/* The other half: the hart is 'ctx' from here on. Under the lock. */
-static void context_restore(struct domain_context *ctx)
+/*
+ * The other half: the hart is 'ctx' from here on, 'fresh' when that has not
+ * run before. Under the lock.
+ */
+static void context_restore(struct domain_context *ctx, bool fresh)
 {
 	struct hart *h = this_hart();
 	struct domain *from = h->domain, *to = domain_of(ctx);
@@ -203,6 +208,10 @@ static void context_restore(struct domain_context *ctx)
 	ctx->state = CONTEXT_RUNNING;
 	/* Flushes the address translation caches as well, as satp asks for. */
 	pmp_domain_set();
+	/*
+	 * After sie: the counter overflow interrupt may not be S-mode's here.
+	 */
+	hart_services_switch_in(fresh);
 }
 
 /* The context the hart leaves keeps the MPXY memory the next one swaps out. */
@@ -256,16 +265,20 @@ static void context_switch(struct domain_context *to, struct trap_regs *regs,
 			   long error, unsigned long value)
 {
 	struct domain *dom = domain_of(to);
+	bool fresh = to->state == CONTEXT_NONE;
 
-	if (to->state == CONTEXT_NONE) {
+	if (fresh) {
 		context_fresh(to, regs);
 		if (dom->boot_hart != (int)this_hart_index()) {
 			/*
 			 * Only the domain's boot hart boots it: the others are
-			 * started.
+			 * started. Not a started hart of that domain even for
+			 * the moment it takes to stop.
 			 */
 			to->regs.mstatus = regs->mstatus;
-			context_restore(to);
+			atomic_store_ulong(&this_hart()->hsm_state,
+					   SBI_HSM_STATE_STOP_PENDING);
+			context_restore(to, true);
 			spin_unlock(&domain_lock);
 			hsm_hart_force_stop();
 		}
@@ -273,7 +286,7 @@ static void context_switch(struct domain_context *to, struct trap_regs *regs,
 		to->regs.a0 = (unsigned long)error;
 		to->regs.a1 = value;
 	}
-	context_restore(to);
+	context_restore(to, fresh);
 	if (regs)
 		*regs = to->regs;
 }
@@ -415,6 +428,8 @@ long domain_start(struct domain *dom)
 	for (unsigned int i = 0; !rc && hart_by_index(i); i++)
 		context_of(dom, i)->state = CONTEXT_NONE;
 	spin_unlock(&domain_lock);
+	if (!rc)
+		sse_domain_reset(dom->index);
 
 	return rc ? rc :
 		    hsm_hart_boot((unsigned int)dom->boot_hart, dom->next_addr,
@@ -447,6 +462,7 @@ void domain_stop_self(struct trap_regs *regs)
 		hsm_hart_force_stop();
 	}
 	/* It came from another domain: back there, its call failed. */
+	hart_services_switch_out();
 	context_switch(to, regs, SBI_ERR_FAILED, 0);
 	spin_unlock(&domain_lock);
 	if (!regs)
@@ -494,6 +510,11 @@ long domain_stop(struct trap_regs *regs, struct domain *dom)
 		ipi_process();
 	} while (busy);
 
+	/*
+	 * Entered again, it starts over: nothing is registered, nothing
+	 * pending.
+	 */
+	sse_domain_reset(dom->index);
 	atomic_store_ulong(&dom->stopping, 0);
 	spin_unlock(&stop_lock);
 	if (dom == this_domain())

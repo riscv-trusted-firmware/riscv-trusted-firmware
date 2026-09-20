@@ -54,6 +54,10 @@
  * unused.
  */
 void sse_hart_init(void);
+/* The calling hart has changed domain, see <arch/hart.h>. */
+void sse_hart_switch_in(bool fresh);
+/* Domain 'key' starts over: its global events are as out of reset. */
+void sse_domain_reset(unsigned int key);
 
 /*
  * End of every trap taken from S/U-mode: if an event is due on this hart,
@@ -83,6 +87,14 @@ long sse_hart_mask(void);
 #else
 
 static inline void sse_hart_init(void)
+{
+}
+
+static inline void sse_hart_switch_in(bool fresh)
+{
+}
+
+static inline void sse_domain_reset(unsigned int key)
 {
 }
 

@@ -60,12 +60,197 @@ static unsigned long units_get(unsigned long x)
 	return v;
 }
 
+/*
+ * ---- the monitor's per-hart services, which are per domain ----------------
+ */
+
+/* Function ids the monitor keeps to itself. */
+#define SBI_SSE_READ_ATTRS 0
+#define SBI_SSE_REGISTER 2
+#define SBI_SSE_UNREGISTER 3
+#define SBI_DBTR_NUM_TRIGGERS 0
+#define SBI_DBTR_SET_SHMEM 1
+#define SBI_DBTR_READ 2
+#define SBI_DBTR_INSTALL 3
+#define SBI_DBTR_UNINSTALL 5
+
+#define FW_COUNTER 32 /* the first firmware counter */
+#define FW_EVENT ((SBI_PMU_EVENT_TYPE_FW << 16) | SBI_PMU_FW_SET_TIMER)
+#define MARK_ADDR(who) (0x1000 + 8 * (who))
+#define TDATA1_EXEC_S \
+	(SHIFT_UL(2, __RISCV_XLEN__ - 4) | BIT(2) | BIT(4)) /* mcontrol */
+#define DBTR_MAPPED BIT(0)
+
+static long sse_attr(unsigned long attr, unsigned long *mem)
+{
+	mem[0] = ~UL(0);
+	if (sbi_call(SBI_EXT_SSE, SBI_SSE_READ_ATTRS, UL(0xffff0000), attr, 1,
+		     (unsigned long)mem, 0)
+		    .error)
+		return -1;
+	return (long)mem[0];
+}
+
+static bool have(unsigned long eid)
+{
+	return sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, eid).value;
+}
+
+static unsigned long triggers(unsigned long *mem)
+{
+	if (!have(SBI_EXT_DBTR) || sbi_call3(SBI_EXT_DBTR, SBI_DBTR_SET_SHMEM,
+					     (unsigned long)mem, 0, 0)
+					   .error)
+		return 0;
+	return (unsigned long)sbi_call1(SBI_EXT_DBTR, SBI_DBTR_NUM_TRIGGERS, 0)
+		.value;
+}
+
+/* Trigger 'i' the way the hardware has it: mem[0..3] = state, tdata1-3. */
+static bool trigger_read(unsigned long i, unsigned long *mem)
+{
+	return !sbi_call2(SBI_EXT_DBTR, SBI_DBTR_READ, i, 1).error;
+}
+
+/* Nothing of anybody's: what a domain finds on a hart it has not used. */
+unsigned long services_pristine(unsigned long *mem)
+{
+	unsigned long bad = 0, n = 0;
+
+	if (sbi_call1(SBI_EXT_FWFT, SBI_FWFT_GET, SBI_FWFT_MISALIGNED_EXC_DELEG)
+	    .value)
+		bad |= BIT(0);
+	if (have(SBI_EXT_PMU) &&
+	    sbi_call1(SBI_EXT_PMU, SBI_PMU_COUNTER_FW_READ, FW_COUNTER).error !=
+		    SBI_ERR_INVALID_PARAM)
+		bad |= BIT(1);
+	if (have(SBI_EXT_SSE) && (sse_attr(0, mem) & 3) != 0)
+		bad |= BIT(2);
+	n = triggers(mem);
+	for (unsigned long i = 0; i < n; i++)
+		if (!trigger_read(i, mem) || (mem[0] & DBTR_MAPPED) || mem[2])
+			bad |= BIT(3);
+	return bad;
+}
+
+unsigned long services_mark(unsigned long who, unsigned long *mem)
+{
+	unsigned long bad = 0;
+
+	long rc = 0;
+
+	/*
+	 * The untrusted side has the feature off and locked (the FWFT test saw
+	 * to that, if this does not), which the other one is not to notice.
+	 */
+	if (who == SERVICES_TRUSTED)
+		rc = sbi_call3(SBI_EXT_FWFT, SBI_FWFT_SET,
+			       SBI_FWFT_MISALIGNED_EXC_DELEG, 1, 0)
+			     .error;
+	else
+		rc = sbi_call3(SBI_EXT_FWFT, SBI_FWFT_SET,
+			       SBI_FWFT_MISALIGNED_EXC_DELEG, 0,
+			       SBI_FWFT_SET_FLAG_LOCK)
+			     .error;
+	if (rc && (who == SERVICES_TRUSTED || rc != SBI_ERR_DENIED_LOCKED))
+		bad |= BIT(0);
+	if (have(SBI_EXT_PMU)) {
+		/*
+		 * A firmware counter that counts set_timer calls: 'who' of
+		 * them.
+		 */
+		if (sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_CONFIG_MATCHING,
+			     FW_COUNTER, 1,
+			     SBI_PMU_CFG_FLAG_CLEAR_VALUE |
+			     SBI_PMU_CFG_FLAG_AUTO_START,
+			     FW_EVENT, 0)
+			    .value != FW_COUNTER)
+			bad |= BIT(1);
+		for (unsigned long i = 0; i < who; i++)
+			sbi_call2(SBI_EXT_TIME, SBI_TIME_SET_TIMER, ~UL(0),
+				  ~UL(0));
+	}
+	if (have(SBI_EXT_SSE) &&
+	    sbi_call3(SBI_EXT_SSE, SBI_SSE_REGISTER, UL(0xffff0000),
+		      CONFIG_SBITEST_LOAD_ADDR, who)
+		    .error)
+		bad |= BIT(2);
+	if (triggers(mem)) {
+		mem[0] = 0;
+		mem[1] = TDATA1_EXEC_S;
+		mem[2] = MARK_ADDR(who);
+		mem[3] = 0;
+		if (sbi_call1(SBI_EXT_DBTR, SBI_DBTR_INSTALL, 1).error)
+			bad |= BIT(3);
+	}
+	return bad;
+}
+
+unsigned long services_check(unsigned long who, unsigned long *mem)
+{
+	unsigned long bad = 0, n = 0, mine = 0;
+	bool trusted = false;
+	long rc = 0;
+
+	rc = sbi_call3(SBI_EXT_FWFT, SBI_FWFT_SET,
+		       SBI_FWFT_MISALIGNED_EXC_DELEG, 1, 0)
+		     .error;
+	trusted = who == SERVICES_TRUSTED;
+	if (sbi_call1(SBI_EXT_FWFT, SBI_FWFT_GET, SBI_FWFT_MISALIGNED_EXC_DELEG)
+	    .value != trusted ||
+	    rc != (who == SERVICES_TRUSTED ? SBI_SUCCESS :
+		   SBI_ERR_DENIED_LOCKED))
+		bad |= BIT(0);
+	if (have(SBI_EXT_PMU) &&
+	    sbi_call1(SBI_EXT_PMU, SBI_PMU_COUNTER_FW_READ, FW_COUNTER).value !=
+		    (long)who)
+		bad |= BIT(1);
+	if (have(SBI_EXT_SSE) &&
+	    ((sse_attr(0, mem) & 3) != 1 || sse_attr(5, mem) != (long)who))
+		bad |= BIT(2);
+	n = triggers(mem);
+	for (unsigned long i = 0; i < n; i++) {
+		if (!trigger_read(i, mem))
+			bad |= BIT(3);
+		else if (mem[0] & DBTR_MAPPED)
+			mine += mem[2] == MARK_ADDR(who) ? 1 : 2;
+	}
+	if (n && mine != 1)
+		bad |= BIT(3);
+	return bad;
+}
+
+void services_clean(unsigned long *mem)
+{
+	if (have(SBI_EXT_PMU))
+		sbi_call3(SBI_EXT_PMU, SBI_PMU_COUNTER_STOP, FW_COUNTER, 1,
+			  SBI_PMU_STOP_FLAG_RESET);
+	if (have(SBI_EXT_SSE))
+		sbi_call1(SBI_EXT_SSE, SBI_SSE_UNREGISTER, UL(0xffff0000));
+	if (triggers(mem)) {
+		sbi_call2(SBI_EXT_DBTR, SBI_DBTR_UNINSTALL, 0, ~UL(0));
+		sbi_call3(SBI_EXT_DBTR, SBI_DBTR_SET_SHMEM, ~UL(0), ~UL(0), 0);
+	}
+}
+
+unsigned long instret_coarse(void)
+{
+	return (csr_read(instret) >> 16) & INSTRET_COARSE_MASK;
+}
+
 /* Exit with 'value', and again with the answer to every command that comes. */
 static void __noreturn trusted_serve(unsigned long hartid, unsigned long value)
 {
+	/*
+	 * A page of its own for every hart, past the word trusted_main() uses.
+	 */
+	unsigned long *scratch =
+		(unsigned long *)(DOM_TMEM + 0x1000 * (hartid + 1));
+
 	for (;;) {
 		struct sbiret ret =
 			sbi_call1(SBI_EXT_FW_DOMAIN, SBI_FW_DOMAIN_EXIT, value);
+		struct sbiret started = {};
 		unsigned long param = (unsigned long)ret.value >> 8;
 
 		/*
@@ -93,6 +278,16 @@ static void __noreturn trusted_serve(unsigned long hartid, unsigned long value)
 				;
 			WRITE_ONCE(DOM_SHARED->waiting, 0);
 			value = TCMD_WAIT_DONE;
+			break;
+		case TCMD_SERVICES_SET:
+			value = services_pristine(scratch) |
+				services_mark(SERVICES_TRUSTED, scratch) << 8;
+			break;
+		case TCMD_SERVICES_GET:
+			value = services_check(SERVICES_TRUSTED, scratch);
+			break;
+		case TCMD_INSTRET:
+			value = instret_coarse();
 			break;
 		case TCMD_START:
 			started = sbi_call3(SBI_EXT_HSM, SBI_HSM_HART_START,

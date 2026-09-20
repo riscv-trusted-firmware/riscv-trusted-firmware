@@ -57,6 +57,10 @@ struct dom_shared {
 #define TCMD_WAIT 4 /* until dom_shared.release; TCMD_WAIT_DONE */
 #define TCMD_START 5 /* sbi_hart_start(param) in "trusted": its error */
 
+#define TCMD_SERVICES_SET 6 /* services_pristine() | services_mark() << 8 */
+#define TCMD_SERVICES_GET 7 /* services_check() */
+#define TCMD_INSTRET 8 /* instret_coarse() over there */
+
 #define TCMD(cmd, param) ((cmd) | SHIFT_UL(param, 8))
 #define TCMD_WAIT_DONE UL(0x3a17)
 #define TSEC_OPAQUE UL(0x5ec)
@@ -64,6 +68,27 @@ struct dom_shared {
 
 #define SSTATUS_FS GENMASK_UL(14, 13)
 #define SSTATUS_VS GENMASK_UL(10, 9)
+
+/*
+ * State a domain keeps with the monitor's per-hart services, for both
+ * sides to leave there and look for again (tdomain.c; no variables, so
+ * that the trusted domain can run it). 'who' tells the two apart, 'mem'
+ * is a page of the caller's for the calls that need memory. All three
+ * return a bit per thing found wrong.
+ */
+#define SERVICES_UNTRUSTED UL(1)
+#define SERVICES_TRUSTED UL(2)
+unsigned long services_pristine(unsigned long *mem);
+unsigned long services_mark(unsigned long who, unsigned long *mem);
+unsigned long services_check(unsigned long who, unsigned long *mem);
+void services_clean(unsigned long *mem);
+/*
+ * Bits 16 to 31 of the instruction counter, for differences modulo 2^16:
+ * enough to tell who counted, and one CSR on RV32 as well, where QEMU does
+ * not carry from one half of a counter into the other.
+ */
+#define INSTRET_COARSE_MASK UL(0xffff)
+unsigned long instret_coarse(void);
 
 /* tdomain_entry.S */
 long trusted_probe(unsigned long addr, unsigned long write);

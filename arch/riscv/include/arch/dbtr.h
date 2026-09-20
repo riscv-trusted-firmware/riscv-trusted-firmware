@@ -13,10 +13,15 @@
  * supported; a trigger index is the index of the hardware trigger.
  */
 
+#include <stdbool.h>
+
 #ifdef CONFIG_SBI_DBTR
 
 /* Every hart, before it enters the next stage: find the triggers, all free. */
 void dbtr_hart_init(void);
+/* The calling hart changes domain, see <arch/hart.h>. */
+void dbtr_hart_switch_out(void);
+void dbtr_hart_switch_in(bool fresh);
 
 unsigned long dbtr_num_triggers(unsigned long tdata1);
 long dbtr_set_shmem(unsigned long lo, unsigned long hi, unsigned long flags);
@@ -31,6 +36,14 @@ long dbtr_disable(unsigned long base, unsigned long mask);
 #else
 
 static inline void dbtr_hart_init(void)
+{
+}
+
+static inline void dbtr_hart_switch_out(void)
+{
+}
+
+static inline void dbtr_hart_switch_in(bool fresh)
 {
 }
 

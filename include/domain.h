@@ -48,6 +48,18 @@
 #define DOMAIN_PERM_SU_RWX \
 	(DOMAIN_PERM_SU_R | DOMAIN_PERM_SU_W | DOMAIN_PERM_SU_X)
 
+/*
+ * S-mode software of different domains shares nothing through the monitor:
+ * what a service keeps for S-mode per hart, it keeps per domain and hart,
+ * DOMAIN_KEYS of them, the running one being this_domain_key(). What such
+ * state has in hardware moves at the domain switch, see <arch/hart.h>.
+ */
+#ifdef CONFIG_DOMAINS
+#define DOMAIN_KEYS CONFIG_DOMAIN_MAX
+#else
+#define DOMAIN_KEYS 1
+#endif
+
 #ifdef CONFIG_DOMAINS
 
 struct domain_region {
@@ -102,6 +114,8 @@ unsigned int domain_count(void);
 struct domain *domain_by_index(unsigned int index);
 /* The domain the calling hart runs now. */
 struct domain *this_domain(void);
+/* Its index; 0 before there are domains. */
+unsigned int this_domain_key(void);
 
 /*
  * May S/U-mode of 'dom' access [addr, addr + size) the way 'perm' (SU bits)
@@ -200,6 +214,11 @@ static inline unsigned int domain_count(void)
 static inline struct domain *this_domain(void)
 {
 	return NULL;
+}
+
+static inline unsigned int this_domain_key(void)
+{
+	return 0;
 }
 
 static inline bool domain_hart_assigned(const struct domain *dom,
