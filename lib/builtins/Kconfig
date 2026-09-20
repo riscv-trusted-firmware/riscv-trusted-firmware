@@ -4,7 +4,7 @@
 config LIB_BUILTINS
 	bool "Always build the compiler runtime helpers"
 	help
-	  64-bit division helpers (__udivdi3 and friends) the compiler may
+	  64-bit division and shift helpers (__udivdi3, __ashldi3 and friends) the compiler may
 	  call on RV32. They are built automatically when the toolchain ships
 	  no libgcc/compiler-rt for the target; enable this to build them
 	  regardless.

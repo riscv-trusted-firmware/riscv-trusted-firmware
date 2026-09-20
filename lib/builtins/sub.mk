@@ -4,3 +4,4 @@
 # Built when asked for, or when the toolchain has no runtime library for the target.
 builtins-y := $(if $(LIBGCC),$(CONFIG_LIB_BUILTINS),y)
 srcs-$(builtins-y) += divdi3.c
+srcs-$(builtins-y) += shdi3.c
