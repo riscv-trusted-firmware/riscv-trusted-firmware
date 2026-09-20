@@ -14,6 +14,7 @@
 #include <arch/image.h>
 #include <arch/pmp.h>
 #include <arch/pmu.h>
+#include <arch/rfence.h>
 #include <arch/sse.h>
 #include <atomic.h>
 #include <boot.h>
@@ -575,6 +576,7 @@ void *this_domain_hart_slot(void *base, size_t size)
 
 void hart_services_init(void)
 {
+	rfence_init();
 	fwft_init();
 	dbtr_init();
 	sse_init();

@@ -178,10 +178,14 @@ remote fences without waking up.
 
 The IPI core multiplexes events (S-mode IPI, remote fence, halt) over the
 one M-mode software interrupt through a per-hart atomic pending word. Remote
-fences are synchronous: one request at a time, published under a lock,
-acknowledged by each target in a shared hart mask. A hart waiting for the
-lock, for a start, or in a suspend loop keeps processing its own IPIs, so
-harts fencing each other cannot deadlock.
+fences are synchronous, but not serialised: every hart has a short queue
+of requests, a requester puts a copy of its request into each target's and
+waits for a count of its own to come down to zero, which the targets do as
+they get to it. Harts that fence at the same time only meet at the queues
+they share. A hart waiting for room in a queue, for its targets, for a
+start, or in a suspend loop keeps serving its own queue, so harts fencing
+each other cannot deadlock; one that stops serves what was queued while it
+ran.
 
 ### Performance counters
 
@@ -474,7 +478,6 @@ with `IMAGE_SBITEST` disabled.
    it can manage (a bit in a hart mask each). What there is
    of harts, domains and regions is counted at boot.
 4. More timer / IPI / reset / serial drivers.
-5. **Scalability.** Remote fences are serialised system-wide.
 
 The H-extension paths (trap redirection from VS/VU-mode, `hfence` on a real
 guest) are written after the specification but have not run under a

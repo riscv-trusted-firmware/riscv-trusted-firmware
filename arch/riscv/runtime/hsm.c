@@ -5,6 +5,7 @@
 
 #include <arch/hart.h>
 #include <arch/hsm.h>
+#include <arch/rfence.h>
 #include <arch/sse.h>
 #include <atomic.h>
 #include <domain.h>
@@ -71,6 +72,8 @@ static void hsm_wait_loop(void)
 	/* Only an IPI wakes a stopped hart. */
 	csr_write(mie, 0);
 	ipi_hart_init();
+	/* Fences asked of it while it still ran: their requesters wait. */
+	rfence_process();
 	while (atomic_load_ulong(&h->hsm_state) !=
 	       SBI_HSM_STATE_START_PENDING) {
 		wfi();

@@ -4,17 +4,25 @@
  */
 
 /*
- * Remote fences. One request is in flight at a time: the requester takes
- * the lock, publishes the request, interrupts the targets and waits until
- * each has cleared its bit in the pending mask. A hart waiting for the
- * lock keeps serving requests aimed at it, so two harts fencing each other
- * cannot deadlock.
+ * Remote fences. Every hart has a short queue of requests to serve. A
+ * requester puts a copy of its request into the queue of each target,
+ * interrupts them, does its own part and waits until all of them are done
+ * with theirs: each entry points at the requester's count of requests still
+ * out. Harts that fence at the same time only meet at the queues they
+ * have in common, so nothing here is serialised system-wide.
+ *
+ * Whoever waits (for room in a queue, for its targets) keeps serving its
+ * own queue, so two harts fencing each other cannot deadlock. A queue is
+ * served from the IPI and, for a hart that stops, once more on the way
+ * down: a target is picked among the harts that run, and may have stopped
+ * running by the time the request arrives.
  */
 
 #include <arch/hart.h>
 #include <arch/pmu.h>
 #include <arch/rfence.h>
 #include <atomic.h>
+#include <heap.h>
 #include <ipi.h>
 #include <sbi/sbi.h>
 #include <spinlock.h>
@@ -24,9 +32,24 @@
 /* Beyond this many pages a full flush is cheaper than a walk. */
 #define RFENCE_MAX_PAGES UL(64)
 
-static unsigned long rfence_lock = SPINLOCK_UNLOCK;
-static struct rfence_req rfence_cur;
-static struct hartmask rfence_pending;
+#define RFENCE_QUEUE_LEN 8
+
+struct rfence_queue {
+	unsigned long lock; /* the queue and its counts */
+	unsigned int head, count;
+	struct {
+		struct rfence_req req;
+		unsigned long *out; /* the requester's count, atomic */
+	} entries[RFENCE_QUEUE_LEN];
+};
+
+/* One per hart of the hart table. */
+static struct rfence_queue *queues;
+
+void rfence_init(void)
+{
+	queues = heap_alloc_array(hart_table_size(), sizeof(*queues));
+}
 
 /* hfence.* by encoding: assemblers want the H extension in -march. */
 static inline void hfence_vvma(unsigned long addr, unsigned long asid)
@@ -153,48 +176,81 @@ static void fence_local(const struct rfence_req *req)
 
 void rfence_process(void)
 {
-	unsigned int self = this_hart_index();
+	struct rfence_queue *q = &queues[this_hart_index()];
 
-	if (!hartmask_test(&rfence_pending, self))
-		return;
-	/* Sent/received event pairs follow enum rfence_type. */
-	pmu_fw_event(SBI_PMU_FW_FENCE_I_RECEIVED + 2 * rfence_cur.type);
-	fence_local(&rfence_cur);
-	hartmask_clear_atomic(&rfence_pending, self);
+	for (;;) {
+		struct rfence_req req = {};
+		unsigned long *out = NULL;
+
+		spin_lock(&q->lock);
+		if (!q->count) {
+			spin_unlock(&q->lock);
+			return;
+		}
+		req = q->entries[q->head].req;
+		out = q->entries[q->head].out;
+		q->head = (q->head + 1) % RFENCE_QUEUE_LEN;
+		q->count--;
+		spin_unlock(&q->lock);
+
+		/* Sent/received event pairs follow enum rfence_type. */
+		pmu_fw_event(SBI_PMU_FW_FENCE_I_RECEIVED + 2 * req.type);
+		fence_local(&req);
+		/* The requester's stack: not to be touched after this. */
+		atomic_add_ulong(out, -UL(1));
+	}
+}
+
+/* false: the target's queue is full. */
+static bool enqueue(unsigned int target, const struct rfence_req *req,
+		    unsigned long *out)
+{
+	struct rfence_queue *q = &queues[target];
+	bool room = false;
+
+	spin_lock(&q->lock);
+	room = q->count < RFENCE_QUEUE_LEN;
+	if (room) {
+		unsigned int tail = (q->head + q->count++) % RFENCE_QUEUE_LEN;
+
+		q->entries[tail].req = *req;
+		q->entries[tail].out = out;
+		atomic_add_ulong(out, 1);
+	}
+	spin_unlock(&q->lock);
+	return room;
 }
 
 int rfence_request(const struct hartmask *targets, const struct rfence_req *req)
 {
 	unsigned int self = this_hart_index();
+	unsigned long out = 0;
 	unsigned int index = 0;
-	bool local = hartmask_test(targets, self);
 
 	if (req->type >= RFENCE_HFENCE_GVMA && !hart_has(HART_FEAT_H))
 		return SBI_ERR_NOT_SUPPORTED;
 
-	while (!spin_trylock(&rfence_lock))
-		ipi_process();
-
-	rfence_cur = *req;
 	for_each_hart_in_mask(index, targets) {
 		if (index == self)
 			continue;
-		atomic_or_ulong(&rfence_pending.bits[index / BITS_PER_LONG],
-				BIT(index % BITS_PER_LONG));
-	}
-	for_each_hart_in_mask(index, targets) {
-		if (index == self)
-			continue;
+		/*
+		 * A full queue drains as its hart gets to it: that may be
+		 * waiting for us.
+		 */
+		while (!enqueue(index, req, &out)) {
+			ipi_send(index, IPI_EVENT_RFENCE);
+			ipi_process();
+		}
 		pmu_fw_event(SBI_PMU_FW_FENCE_I_SENT + 2 * req->type);
 		ipi_send(index, IPI_EVENT_RFENCE);
 	}
 
-	if (local)
+	if (hartmask_test(targets, self))
 		fence_local(req);
 
-	while (!hartmask_empty_atomic(&rfence_pending))
+	while (atomic_load_ulong(&out)) {
+		rfence_process();
 		cpu_relax();
-
-	spin_unlock(&rfence_lock);
+	}
 	return SBI_SUCCESS;
 }

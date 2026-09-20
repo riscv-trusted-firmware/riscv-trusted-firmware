@@ -36,5 +36,7 @@ int rfence_request(const struct hartmask *targets,
 
 /* IPI_EVENT_RFENCE handler. */
 void rfence_process(void);
+/* Boot hart, once the hart table is there. */
+void rfence_init(void);
 
 #endif

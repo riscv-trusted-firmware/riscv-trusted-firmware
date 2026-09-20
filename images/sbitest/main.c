@@ -135,6 +135,7 @@ enum cmd {
 	CMD_SSE,
 	/* enter the trusted domain with mailbox.domain_arg */
 	CMD_DOMAIN,
+	CMD_FENCE, /* FENCE_STORM remote fences at everybody */
 };
 
 struct mailbox {
@@ -147,11 +148,29 @@ struct mailbox {
 	unsigned long suspend_ret; /* retentive suspend returned */
 	long suspend_error;
 	unsigned long puc; /* serving the PuC model */
+	unsigned long fences; /* of CMD_FENCE, done */
 	unsigned long domain_arg, domain_done;
 	long domain_error, domain_value;
 };
 
 static struct mailbox mbox[MAX_HARTS];
+
+/* Fences at every hart, one after the other, short ranges and everything. */
+#define FENCE_STORM UL(200)
+
+static unsigned long fence_storm(void)
+{
+	unsigned long done = 0;
+
+	for (unsigned long i = 0; i < FENCE_STORM; i++)
+		done += !sbi_call(SBI_EXT_RFENCE,
+				  i & 1 ? SBI_RFENCE_SFENCE_VMA :
+				  SBI_RFENCE_FENCE_I,
+				  0, ~UL(0), UL(0x80000000),
+				  i & 2 ? 0x2000 : ~UL(0), 0)
+				 .error;
+	return done;
+}
 
 static void __noreturn secondary_loop(unsigned long hartid)
 {
@@ -176,6 +195,10 @@ static void __noreturn secondary_loop(unsigned long hartid)
 		case CMD_SSE:
 			WRITE_ONCE(m->cmd, CMD_NONE);
 			sse_secondary_setup(hartid);
+			break;
+		case CMD_FENCE:
+			WRITE_ONCE(m->cmd, CMD_NONE);
+			WRITE_ONCE(m->fences, fence_storm());
 			break;
 		case CMD_DOMAIN:
 			WRITE_ONCE(m->cmd, CMD_NONE);
@@ -394,7 +417,7 @@ static void test_time(void)
 	CHECK_RET(sbi_set_timer(~ULL(0)), SBI_SUCCESS);
 
 	/* Delivered: the handler counts it and pushes the deadline away. */
-	WRITE_ONCE(timer_irqs, 0);
+	timer_irqs = 0;
 	csr_write(sie, SIP_STIP);
 	csr_set(sstatus, SSTATUS_SIE);
 	CHECK_RET(sbi_set_timer(now() + TICKS_SHORT), SBI_SUCCESS);
@@ -424,7 +447,7 @@ static void test_ipi_self(void)
 	CHECK(WAIT_FOR(csr_read(sip) & SIP_SSIP), "SSIP not pending (base 0)");
 	csr_clear(sip, SIP_SSIP);
 
-	WRITE_ONCE(soft_irqs, 0);
+	soft_irqs = 0;
 	csr_write(sie, SIP_SSIP);
 	csr_set(sstatus, SSTATUS_SIE);
 	CHECK_RET(sbi_call2(SBI_EXT_IPI, SBI_IPI_SEND_IPI, 0, ~UL(0)),
@@ -883,6 +906,19 @@ static void test_smp(void)
 	ret = sbi_call(SBI_EXT_RFENCE, SBI_RFENCE_SFENCE_VMA, all, 0, 0, 0x1000,
 		       0);
 	CHECK_RET(ret, SBI_SUCCESS);
+
+	/*
+	 * Everybody at everybody, at once: each hart serves the others while it
+	 * waits.
+	 */
+	for (h = next_secondary(0); h < MAX_HARTS; h = next_secondary(h + 1))
+		WRITE_ONCE(mbox[h].fences, 0);
+	secondaries_cmd(CMD_FENCE);
+	CHECK(fence_storm() == FENCE_STORM, "fences of the boot hart failed");
+	for (h = next_secondary(0); h < MAX_HARTS; h = next_secondary(h + 1))
+		CHECK(WAIT_FOR(READ_ONCE(mbox[h].fences) == FENCE_STORM),
+		      "hart %lu: %lu fences done", h,
+		      READ_ONCE(mbox[h].fences));
 	ret = sbi_call(SBI_EXT_RFENCE, SBI_RFENCE_SFENCE_VMA, 1, MAX_HARTS, 0,
 		       0x1000, 0);
 	CHECK_RET(ret, SBI_ERR_INVALID_PARAM);
