@@ -17,6 +17,12 @@ else
 qemu-images = -bios $(1)/images/monitor/monitor.bin
 endif
 
+# The S-mode test payload, when built, is the next stage. Otherwise pass one
+# with QEMU_ARGS, e.g. -device loader,file=<image>,addr=<MONITOR_NEXT_STAGE_ADDR>.
+ifneq ($(CONFIG_IMAGE_SBITEST),)
+qemu-images += -device loader,file=$(1)/images/sbitest/sbitest.bin,addr=$(CONFIG_SBITEST_LOAD_ADDR)
+endif
+
 define plat-run
 	$(QEMU) -M virt -nographic -smp $(QEMU_SMP) -m $$(($(CONFIG_QEMU_VIRT_RAM_SIZE)/1048576)) \
 		$(call qemu-images,$(1)) $(QEMU_ARGS)

@@ -21,5 +21,12 @@ jobs:
         run: make ${{ matrix.defconfig }}
       - name: Build
         run: make -j"$(nproc)" W=1 ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}
+      # The defconfigs build the S-mode SBI test payload: the boot test is
+      # its verdict ("sbitest: PASS").
       - name: Boot test
-        run: MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" scripts/boot-test.sh build
+        run: MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+      - name: Boot test, hart without Sstc (M-mode timer path)
+        run: |
+          xlen=$(sed -n 's/^CONFIG_RISCV_XLEN=//p' build/.config)
+          QEMU_EXTRA_ARGS="-cpu rv$xlen,sstc=off" \
+          MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build

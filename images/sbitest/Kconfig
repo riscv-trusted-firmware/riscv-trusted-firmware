@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+config IMAGE_SBITEST
+	bool "S-mode SBI test payload"
+	depends on IMAGE_MONITOR && SBI_DBCN
+	help
+	  A small S-mode next stage that calls every SBI extension the
+	  monitor implements, checks results, error codes and side effects
+	  (interrupts, hart states, trap redirection, PMP), prints
+	  "sbitest: PASS" or "sbitest: FAIL" and powers the machine off.
+	  scripts/boot-test.sh looks for that line.
+
+if IMAGE_SBITEST
+
+config SBITEST_LOAD_ADDR
+	hex "Test payload link/load address"
+	default MONITOR_NEXT_STAGE_ADDR
+
+config SBITEST_SIZE
+	hex "Memory reserved for the test payload"
+	default 0x100000
+
+endif
