@@ -5,18 +5,64 @@
 
 /*
  * M-mode runtime monitor: boot sequence.
+ *
+ * The boot hart brings up the console, drivers, services and the platform,
+ * releases the other harts and enters the next stage in S-mode. Every other
+ * hart parks in the HSM wait loop until the next stage starts it.
  */
 
-#include <arch/csr.h>
+#include <arch/hart.h>
+#include <arch/hsm.h>
 #include <boot.h>
 #include <driver.h>
 #include <generated/version.h>
+#include <ipi.h>
 #include <log.h>
 #include <platform.h>
+#include <reset.h>
 #include <service.h>
+#include <timer.h>
+
+static void print_features(void)
+{
+	static const char *const names[HART_FEAT_COUNT] = {
+		[HART_FEAT_PMP] = "pmp",
+		[HART_FEAT_TIME_CSR] = "time",
+		[HART_FEAT_MENVCFG] = "menvcfg",
+		[HART_FEAT_SSTC] = "sstc",
+		[HART_FEAT_H] = "h",
+	};
+
+	pr_info("features:");
+	for (unsigned int i = 0; i < HART_FEAT_COUNT; i++)
+		if (hart_has(i))
+			pr_info(" %s", names[i]);
+	pr_info("\n");
+}
+
+static void print_services(void)
+{
+	const struct service *s = NULL;
+
+	pr_info("services:");
+	for_each_service(s)
+		if (service_probe(s->eid_min))
+			pr_info(" %s", s->name);
+	pr_info("\n");
+}
+
+/* Every hart that entered the image must be known before harts are managed. */
+static void wait_for_secondaries(void)
+{
+	while (hart_count() < _boot_hart_count)
+		cpu_relax();
+}
 
 void image_main(unsigned long hartid, unsigned long fdt)
 {
+	unsigned long next = CONFIG_MONITOR_NEXT_STAGE_ADDR;
+
+	hart_init(hartid);
 	plat_early_init();
 
 	pr_info("\n%s %s\n", PROJECT_NAME, PROJECT_VERSION);
@@ -26,19 +72,31 @@ void image_main(unsigned long hartid, unsigned long fdt)
 		csr_read(misa), csr_read(mvendorid), csr_read(marchid),
 		csr_read(mimpid));
 
+	hart_detect_features();
 	drivers_init();
 	services_init();
 	plat_init();
 
 	boot_release_secondaries();
+	wait_for_secondaries();
 
-	pr_info("monitor: idle (no next stage yet)\n");
-	for (;;)
-		wfi();
+	print_features();
+	pr_info("timer: %s, ipi: %s, reset: %s, harts: %u\n", timer_name(),
+		ipi_name(), reset_name(), hart_count());
+	print_services();
+
+	/* All-zero is no RISC-V instruction: nothing was loaded there. */
+	if (*(const uint32_t *)next == 0) {
+		pr_info("monitor: idle (no next stage at %lx)\n", next);
+		hsm_hart_wait();
+	}
+
+	pr_info("monitor: next stage at %lx (S-mode)\n", next);
+	hsm_boot_hart_start(next, fdt);
 }
 
 void image_secondary_main(unsigned long hartid)
 {
-	for (;;)
-		wfi();
+	hart_init(hartid);
+	hsm_hart_wait();
 }

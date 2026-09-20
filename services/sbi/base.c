@@ -28,7 +28,7 @@ static struct service_ret sbi_base_ecall(unsigned long eid, unsigned long fid,
 	case SBI_BASE_GET_IMPL_VERSION:
 		return ok(CONFIG_SBI_IMPL_VERSION);
 	case SBI_BASE_PROBE_EXTENSION:
-		return ok(service_lookup(regs->a0) ? 1 : 0);
+		return ok(service_probe(regs->a0));
 	case SBI_BASE_GET_MVENDORID:
 		return ok((long)csr_read(mvendorid));
 	case SBI_BASE_GET_MARCHID:

@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+menu "Timer"
+
+config TIMER_ACLINT_MTIMER
+	bool "RISC-V ACLINT MTIMER / SiFive CLINT timer"
+
+if TIMER_ACLINT_MTIMER
+
+config TIMER_ACLINT_MTIMER_MTIME_ADDR
+	hex "MTIME register address"
+
+config TIMER_ACLINT_MTIMER_MTIMECMP_ADDR
+	hex "MTIMECMP register array address"
+
+config TIMER_ACLINT_MTIMER_FIRST_HART
+	int "Hart id of the first MTIMECMP register"
+	default 0
+
+endif
+
+endmenu

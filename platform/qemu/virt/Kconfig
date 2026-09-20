@@ -18,6 +18,10 @@ config PLATFORM_FW_START
 config LOADER_NEXT_STAGE_ADDR
 	default 0x80200000
 
+config MONITOR_NEXT_STAGE_ADDR
+	default 0x80400000 if IMAGE_LOADER
+	default 0x80200000
+
 config QEMU_VIRT_RAM_SIZE
 	hex "RAM size passed to QEMU (bytes)"
 	default 0x8000000
@@ -34,5 +38,18 @@ config SERIAL_UART8250_REG_SHIFT
 
 config SERIAL_UART8250_REG_WIDTH
 	default 1
+
+# CLINT at 0x2000000: MSWI, then MTIMER (mtimecmp +0x4000, mtime +0xbff8).
+config IPI_ACLINT_MSWI_ADDR
+	default 0x2000000
+
+config TIMER_ACLINT_MTIMER_MTIMECMP_ADDR
+	default 0x2004000
+
+config TIMER_ACLINT_MTIMER_MTIME_ADDR
+	default 0x200bff8
+
+config RESET_SIFIVE_TEST_ADDR
+	default 0x100000
 
 endif

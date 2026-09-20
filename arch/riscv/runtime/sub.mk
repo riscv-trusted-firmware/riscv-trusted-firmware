@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+#
+# What an image needs to host a lower privilege level: per-hart state, the
+# trap policy, PMP, hart state management, remote fences. Listed by the
+# image (images/monitor/image.mk), not pulled in by arch/riscv/sub.mk.
+srcs-y += hart.c
+srcs-y += hsm.c
+srcs-y += illegal_insn.c
+srcs-y += pmp.c
+srcs-y += rfence.c
+srcs-y += switch.S
+srcs-y += trap.c
+srcs-y += unpriv.c

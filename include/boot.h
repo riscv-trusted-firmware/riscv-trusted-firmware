@@ -17,7 +17,11 @@
 void image_main(unsigned long hartid, unsigned long fdt);
 void image_secondary_main(unsigned long hartid);
 
-extern volatile uint32_t _boot_release;
+extern uint32_t _boot_release;
+/*
+ * Harts that entered the image (always 0 without the A extension); READ_ONCE.
+ */
+extern uint32_t _boot_hart_count;
 
 static inline void boot_release_secondaries(void)
 {

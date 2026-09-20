@@ -4,26 +4,48 @@
  */
 
 /*
- * M-mode trap entry: save the full GPR file on the trapping hart's stack,
- * call trap_handler(struct trap_regs *), restore and mret.
+ * M-mode trap entry: save the full GPR file, call
+ * trap_handler(struct trap_regs *), restore and mret.
  *
- * Traps taken from M-mode itself reuse the current stack; traps from lower
- * privilege levels land on the same per-hart firmware stack (mscratch is not
- * used yet: the firmware stack pointer is recovered from the hart id later,
- * when per-hart scratch areas are introduced).
+ * mscratch tells where the trap came from (see <arch/hart.h>):
+ *   0         M-mode. The frame goes on the current stack and tp is kept.
+ *   non-zero  a lower privilege level. mscratch is the hart's struct hart:
+ *             it becomes tp, and the frame goes on top of the hart's M-mode
+ *             stack, so the monitor never runs on a stack the trapping
+ *             context controls.
  */
 
+#include <arch/hart.h>
 #include <arch/trap.h>
 
 	.section .text.trap, "ax", %progbits
 	.balign	4
 	.globl _trap_entry
 _trap_entry:
+	csrrw	tp, mscratch, tp
+	bnez	tp, 1f
+
+	/* From M-mode: undo the swap, mscratch stays 0. */
+	csrrw	tp, mscratch, tp
 	addi	sp, sp, -TRAP_REGS_SIZE
-	REG_S	ra, TRAP_REGS_ra(sp)
-	REG_S	gp, TRAP_REGS_gp(sp)
-	REG_S	tp, TRAP_REGS_tp(sp)
 	REG_S	t0, TRAP_REGS_t0(sp)
+	addi	t0, sp, TRAP_REGS_SIZE
+	REG_S	t0, TRAP_REGS_sp(sp)
+	REG_S	tp, TRAP_REGS_tp(sp)
+	j	2f
+
+1:	/* From S/U-mode: tp = struct hart, mscratch = interrupted tp. */
+	REG_S	sp, HART_TMP(tp)
+	REG_L	sp, HART_M_SP(tp)
+	addi	sp, sp, -TRAP_REGS_SIZE
+	REG_S	t0, TRAP_REGS_t0(sp)
+	REG_L	t0, HART_TMP(tp)
+	REG_S	t0, TRAP_REGS_sp(sp)
+	csrrw	t0, mscratch, zero
+	REG_S	t0, TRAP_REGS_tp(sp)
+
+2:	REG_S	ra, TRAP_REGS_ra(sp)
+	REG_S	gp, TRAP_REGS_gp(sp)
 	REG_S	t1, TRAP_REGS_t1(sp)
 	REG_S	t2, TRAP_REGS_t2(sp)
 	REG_S	s0, TRAP_REGS_s0(sp)
@@ -50,18 +72,28 @@ _trap_entry:
 	REG_S	t4, TRAP_REGS_t4(sp)
 	REG_S	t5, TRAP_REGS_t5(sp)
 	REG_S	t6, TRAP_REGS_t6(sp)
-	addi	t0, sp, TRAP_REGS_SIZE
-	REG_S	t0, TRAP_REGS_sp(sp)
 	csrr	t0, mepc
 	REG_S	t0, TRAP_REGS_mepc(sp)
 	csrr	t0, mstatus
 	REG_S	t0, TRAP_REGS_mstatus(sp)
 
+.option push
+.option norelax
+	la	gp, __global_pointer$
+.option pop
+
 	mv	a0, sp
 	call	trap_handler
 
+	/* Returning below M-mode: park the hart pointer in mscratch. */
 	REG_L	t0, TRAP_REGS_mstatus(sp)
 	csrw	mstatus, t0
+	srli	t0, t0, MSTATUS_MPP_SHIFT
+	andi	t0, t0, 3
+	addi	t0, t0, -PRV_M
+	beqz	t0, 3f
+	csrw	mscratch, tp
+3:
 	REG_L	t0, TRAP_REGS_mepc(sp)
 	csrw	mepc, t0
 	REG_L	ra, TRAP_REGS_ra(sp)

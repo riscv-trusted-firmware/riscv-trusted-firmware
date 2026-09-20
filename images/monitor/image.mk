@@ -3,7 +3,7 @@
 
 images-$(CONFIG_IMAGE_MONITOR) += monitor
 
-monitor-dirs     := arch/riscv lib drivers services \
+monitor-dirs     := arch/riscv arch/riscv/runtime lib drivers services \
 		    platform/$(CONFIG_PLATFORM_DIR) images/monitor
 monitor-ldscript := $(SRCTREE)/images/monitor/monitor.ld.S
 monitor-cppflags := -DIMAGE_MONITOR

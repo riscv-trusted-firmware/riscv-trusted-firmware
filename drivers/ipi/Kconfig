@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+menu "Inter-processor interrupts"
+
+config IPI_ACLINT_MSWI
+	bool "RISC-V ACLINT MSWI / SiFive CLINT software interrupts"
+
+if IPI_ACLINT_MSWI
+
+config IPI_ACLINT_MSWI_ADDR
+	hex "MSIP register array address"
+
+config IPI_ACLINT_MSWI_FIRST_HART
+	int "Hart id of the first MSIP register"
+	default 0
+
+endif
+
+endmenu

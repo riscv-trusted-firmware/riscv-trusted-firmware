@@ -10,6 +10,7 @@
  * Boot hart: first hart to win the lottery. It zeroes .bss, sets up its
  * stack and calls image_main(hartid, fdt). Other harts wait for the boot hart
  * to release them, then call image_secondary_main(hartid) on their own stack.
+ * _boot_hart_count is the number of harts that entered the image.
  */
 
 #include <arch/csr.h>
@@ -22,6 +23,7 @@ _start:
 	csrw	mip, zero
 	csrw	mstatus, zero
 	csrw	mscratch, zero
+	mv	tp, zero
 
 .option push
 .option norelax
@@ -36,6 +38,10 @@ _start:
 	bgeu	a0, t0, _park
 
 #ifdef CONFIG_RISCV_ISA_A
+	/* Count the harts that showed up, then draw the boot hart. */
+	la	t0, _boot_hart_count
+	li	t1, 1
+	amoadd.w t2, t1, (t0)
 	la	t0, _boot_lottery
 	li	t1, 1
 	amoswap.w t2, t1, (t0)
@@ -91,4 +97,7 @@ _boot_lottery:
 	.word	0
 	.globl _boot_release
 _boot_release:
+	.word	0
+	.globl _boot_hart_count
+_boot_hart_count:
 	.word	0

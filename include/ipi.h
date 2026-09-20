@@ -1,0 +1,48 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
+/*
+ * Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+ */
+
+#ifndef IPI_H
+#define IPI_H
+
+/*
+ * Inter-processor interrupts. A backend (a driver calls ipi_register())
+ * raises and clears the M-mode software interrupt of a hart; the core
+ * multiplexes events over it through a per-hart pending word.
+ */
+
+#include <hartmask.h>
+
+enum ipi_event {
+	IPI_EVENT_SMODE, /* raise the S-mode software interrupt */
+	IPI_EVENT_RFENCE, /* serve the current remote fence request */
+	IPI_EVENT_HALT, /* stop executing, for good */
+	IPI_EVENT_COUNT,
+};
+
+struct ipi_ops {
+	const char *name;
+	void (*send)(unsigned long hartid);
+	void (*clear)(unsigned long hartid);
+};
+
+void ipi_register(const struct ipi_ops *ops);
+bool ipi_available(void);
+const char *ipi_name(void);
+
+/* Calling hart: drop stale state, enable the M-mode software interrupt. */
+void ipi_hart_init(void);
+
+void ipi_send(unsigned long hartid, enum ipi_event event);
+void ipi_send_mask(const struct hartmask *mask, enum ipi_event event);
+/* Wake a hart out of WFI without an event. */
+void ipi_kick(unsigned long hartid);
+
+/*
+ * Handle everything pending for the calling hart. Called on the M-mode
+ * software interrupt, and from M-mode loops that wait on another hart.
+ */
+void ipi_process(void);
+
+#endif

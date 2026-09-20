@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2026, The RISC-V Trusted Firmware contributors
 
-srcs-y += main.c
-srcs-y += trap.c
+srcs-y += reset.c
+srcs-$(CONFIG_RESET_SIFIVE_TEST) += sifive_test.c

@@ -47,6 +47,8 @@
 
 #ifndef __ASSEMBLY__
 
+#include <compiler.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 struct trap_regs {
@@ -58,7 +60,31 @@ struct trap_regs {
 	unsigned long mstatus;
 };
 
+/* x0..x31 by register number, for instruction emulation. */
+static inline unsigned long *trap_reg(struct trap_regs *regs, unsigned int n)
+{
+	return &((unsigned long *)regs)[n];
+}
+
+/* Cause and auxiliary values of a trap, read once at handler entry. */
+struct trap_info {
+	unsigned long cause;
+	unsigned long tval;
+	unsigned long tval2; /* H extension */
+	unsigned long tinst; /* H extension */
+	bool gva; /* tval is a guest virtual address */
+	bool virt; /* taken from VS/VU-mode */
+};
+
 void trap_handler(struct trap_regs *regs);
+
+/* Print the register file and panic. */
+void __noreturn trap_fatal(const struct trap_regs *regs, const char *what);
+
+/* Runtime (monitor) only. */
+/* Deliver 'info' to S-mode (HS-mode) as if it had been delegated. */
+void trap_redirect(struct trap_regs *regs, const struct trap_info *info);
+void trap_illegal_insn(struct trap_regs *regs, const struct trap_info *info);
 
 #endif /* !__ASSEMBLY__ */
 

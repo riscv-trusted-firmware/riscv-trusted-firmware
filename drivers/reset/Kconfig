@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+menu "System reset"
+
+config RESET_SIFIVE_TEST
+	bool "SiFive test finisher (QEMU virt / sifive_u power-off and reboot)"
+
+config RESET_SIFIVE_TEST_ADDR
+	hex "Register address"
+	depends on RESET_SIFIVE_TEST
+
+endmenu

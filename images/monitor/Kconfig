@@ -18,5 +18,16 @@ config MONITOR_LOAD_ADDR
 config MONITOR_SIZE
 	hex "Memory reserved for the monitor"
 	default PLATFORM_FW_SIZE
+	help
+	  Hidden from S/U-mode with one PMP NAPOT entry: a power of two, and
+	  MONITOR_LOAD_ADDR a multiple of it.
+
+config MONITOR_NEXT_STAGE_ADDR
+	hex "Next stage entry point"
+	help
+	  Where the boot hart enters S-mode, with a0 = hart id and a1 = the
+	  device tree address the monitor was given. Loading the next stage
+	  is up to the platform (the previous stage, or the simulator). When
+	  the first word there is zero the monitor stays idle.
 
 endif

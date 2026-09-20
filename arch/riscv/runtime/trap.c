@@ -1,0 +1,138 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+ */
+
+/*
+ * Monitor trap policy. From S/U-mode: ecalls go to the service layer,
+ * M-mode timer and software interrupts to their cores, illegal
+ * instructions to the emulator; every other exception is handed back to
+ * S-mode. A trap from M-mode itself is fatal unless the hart announced it
+ * (CSR probing, unprivileged access).
+ */
+
+#include <arch/hart.h>
+#include <arch/trap.h>
+#include <ipi.h>
+#include <log.h>
+#include <service.h>
+#include <timer.h>
+#include <util.h>
+
+static void trap_info_read(const struct trap_regs *regs, struct trap_info *info)
+{
+	info->cause = csr_read(mcause);
+	info->tval = csr_read(mtval);
+	info->tval2 = 0;
+	info->tinst = 0;
+	info->gva = false;
+	info->virt = false;
+
+	if (!hart_has(HART_FEAT_H))
+		return;
+	info->tval2 = csr_read(CSR_MTVAL2);
+	info->tinst = csr_read(CSR_MTINST);
+#if __RISCV_XLEN__ == 64
+	info->gva = regs->mstatus & MSTATUS_GVA;
+	info->virt = regs->mstatus & MSTATUS_MPV;
+#else
+	info->gva = csr_read(CSR_MSTATUSH) & MSTATUSH_GVA;
+	info->virt = csr_read(CSR_MSTATUSH) & MSTATUSH_MPV;
+#endif
+}
+
+void trap_redirect(struct trap_regs *regs, const struct trap_info *info)
+{
+	unsigned long prev = get_field_ul(regs->mstatus, MSTATUS_MPP);
+	unsigned long mstatus = regs->mstatus;
+
+	if (prev == PRV_M)
+		trap_fatal(regs, "cannot redirect an M-mode trap");
+
+	if (hart_has(HART_FEAT_H)) {
+		/*
+		 * The trap lands in HS-mode: record the virtualisation state.
+		 */
+		unsigned long hstatus = csr_read(CSR_HSTATUS);
+
+		hstatus &= ~(HSTATUS_SPV | HSTATUS_GVA);
+		if (info->virt) {
+			hstatus |= HSTATUS_SPV;
+			hstatus &= ~HSTATUS_SPVP;
+			if (prev == PRV_S)
+				hstatus |= HSTATUS_SPVP;
+		}
+		if (info->gva)
+			hstatus |= HSTATUS_GVA;
+		csr_write(CSR_HSTATUS, hstatus);
+		csr_write(CSR_HTVAL, info->tval2);
+		csr_write(CSR_HTINST, info->tinst);
+#if __RISCV_XLEN__ == 64
+		mstatus &= ~(MSTATUS_MPV | MSTATUS_GVA);
+#else
+		csr_clear(CSR_MSTATUSH, MSTATUSH_MPV | MSTATUSH_GVA);
+#endif
+	}
+
+	csr_write(scause, info->cause);
+	csr_write(stval, info->tval);
+	csr_write(sepc, regs->mepc);
+
+	/* What the hardware does on a trap into S-mode. */
+	mstatus &= ~(MSTATUS_SPP | MSTATUS_SPIE | MSTATUS_MPP);
+	if (prev == PRV_S)
+		mstatus |= MSTATUS_SPP;
+	if (mstatus & MSTATUS_SIE)
+		mstatus |= MSTATUS_SPIE;
+	mstatus &= ~MSTATUS_SIE;
+	mstatus |= SHIFT_UL(PRV_S, MSTATUS_MPP_SHIFT);
+
+	regs->mstatus = mstatus;
+	regs->mepc = csr_read(stvec) & ~UL(3);
+}
+
+void trap_handler(struct trap_regs *regs)
+{
+	struct hart *h = this_hart();
+	struct trap_info info = {};
+
+	if ((regs->mstatus & MSTATUS_MPP) == MSTATUS_MPP) {
+		if (h && h->trap_expected) {
+			h->trap_taken = 1;
+			h->trap_cause = csr_read(mcause);
+			h->trap_tval = csr_read(mtval);
+			regs->mepc += 4;
+			return;
+		}
+		trap_fatal(regs, "unexpected trap in M-mode");
+	}
+
+	trap_info_read(regs, &info);
+
+	if (info.cause & CAUSE_IRQ_FLAG) {
+		switch (info.cause & ~CAUSE_IRQ_FLAG) {
+		case IRQ_M_TIMER:
+			timer_process();
+			return;
+		case IRQ_M_SOFT:
+			ipi_process();
+			return;
+		default:
+			trap_fatal(regs, "unhandled interrupt");
+		}
+	}
+
+	switch (info.cause) {
+	case CAUSE_SUPERVISOR_ECALL:
+		/* A service may redirect or restart the hart: advance first. */
+		regs->mepc += 4;
+		service_ecall(regs);
+		return;
+	case CAUSE_ILLEGAL_INSN:
+		trap_illegal_insn(regs, &info);
+		return;
+	default:
+		trap_redirect(regs, &info);
+		return;
+	}
+}

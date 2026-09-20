@@ -3,6 +3,8 @@
 
 images-$(CONFIG_IMAGE_LOADER) += loader
 
-loader-dirs     := arch/riscv lib drivers platform/$(CONFIG_PLATFORM_DIR) images/loader
+# Console only: the runtime drivers (timer, IPI, reset) need the monitor.
+loader-dirs     := arch/riscv lib drivers/core drivers/serial \
+		   platform/$(CONFIG_PLATFORM_DIR) images/loader
 loader-ldscript := $(SRCTREE)/images/loader/loader.ld.S
 loader-cppflags := -DIMAGE_LOADER
