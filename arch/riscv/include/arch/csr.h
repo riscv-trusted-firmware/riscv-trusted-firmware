@@ -7,6 +7,7 @@
 #define ARCH_CSR_H
 
 #include <compiler.h>
+#include <util.h>
 
 #if __RISCV_XLEN__ == 64
 #define REGBYTES 8
@@ -24,8 +25,8 @@
 #define MSTATUS_MIE BIT(3)
 #define MSTATUS_MPIE BIT(7)
 #define MSTATUS_MPP_SHIFT 11
-#define MSTATUS_MPP (3UL << MSTATUS_MPP_SHIFT)
-#define MSTATUS_FS (3UL << 13)
+#define MSTATUS_MPP SHIFT_UL(3, MSTATUS_MPP_SHIFT)
+#define MSTATUS_FS GENMASK_UL(14, 13)
 #define MSTATUS_MPRV BIT(17)
 #define MSTATUS_TVM BIT(20)
 #define MSTATUS_TW BIT(21)
@@ -59,45 +60,45 @@
 #define CAUSE_LOAD_PAGE_FAULT 13
 #define CAUSE_STORE_PAGE_FAULT 15
 
-#define CAUSE_IRQ_FLAG (1UL << (__RISCV_XLEN__ - 1))
+#define CAUSE_IRQ_FLAG BIT(__RISCV_XLEN__ - 1)
 
 #ifndef __ASSEMBLY__
 
-#define csr_read(csr)                                           \
+#define csr_read(csr)                                        \
+	({                                                   \
+		unsigned long __v;                           \
+		__asm__ __volatile__("csrr %0, " TO_STR(csr) \
+				     : "=r"(__v)             \
+				     :                       \
+				     : "memory");            \
+		__v;                                         \
+	})
+
+#define csr_write(csr, val)                                     \
 	({                                                      \
-		unsigned long __v;                              \
-		__asm__ __volatile__("csrr %0, " STRINGIFY(csr) \
-				     : "=r"(__v)                \
+		unsigned long __v = (unsigned long)(val);       \
+		__asm__ __volatile__("csrw " TO_STR(csr) ", %0" \
 				     :                          \
+				     : "rK"(__v)                \
 				     : "memory");               \
-		__v;                                            \
 	})
 
-#define csr_write(csr, val)                                        \
-	({                                                         \
-		unsigned long __v = (unsigned long)(val);          \
-		__asm__ __volatile__("csrw " STRINGIFY(csr) ", %0" \
-				     :                             \
-				     : "rK"(__v)                   \
-				     : "memory");                  \
+#define csr_set(csr, val)                                       \
+	({                                                      \
+		unsigned long __v = (unsigned long)(val);       \
+		__asm__ __volatile__("csrs " TO_STR(csr) ", %0" \
+				     :                          \
+				     : "rK"(__v)                \
+				     : "memory");               \
 	})
 
-#define csr_set(csr, val)                                          \
-	({                                                         \
-		unsigned long __v = (unsigned long)(val);          \
-		__asm__ __volatile__("csrs " STRINGIFY(csr) ", %0" \
-				     :                             \
-				     : "rK"(__v)                   \
-				     : "memory");                  \
-	})
-
-#define csr_clear(csr, val)                                        \
-	({                                                         \
-		unsigned long __v = (unsigned long)(val);          \
-		__asm__ __volatile__("csrc " STRINGIFY(csr) ", %0" \
-				     :                             \
-				     : "rK"(__v)                   \
-				     : "memory");                  \
+#define csr_clear(csr, val)                                     \
+	({                                                      \
+		unsigned long __v = (unsigned long)(val);       \
+		__asm__ __volatile__("csrc " TO_STR(csr) ", %0" \
+				     :                          \
+				     : "rK"(__v)                \
+				     : "memory");               \
 	})
 
 static inline void wfi(void)

@@ -13,6 +13,7 @@ CPPFLAGS += -include $(AUTOCONF_H)
 CPPFLAGS += -I$(SRCTREE)/include
 CPPFLAGS += -I$(SRCTREE)/arch/riscv/include
 CPPFLAGS += -I$(SRCTREE)/lib/libc/include
+CPPFLAGS += -I$(SRCTREE)/lib/libutils/include
 CPPFLAGS += -I$(SRCTREE)/platform/$(CONFIG_PLATFORM_DIR)/include
 CPPFLAGS += -I$(O)/include
 CPPFLAGS += -D__RISCV_XLEN__=$(XLEN)

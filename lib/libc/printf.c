@@ -12,6 +12,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <util.h>
 
 struct out {
 	char *buf;
@@ -157,7 +158,7 @@ int vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
 	}
 
 	if (size)
-		buf[o.pos < size ? o.pos : size - 1] = '\0';
+		buf[MIN(o.pos, size - 1)] = '\0';
 	return (int)o.pos;
 }
 

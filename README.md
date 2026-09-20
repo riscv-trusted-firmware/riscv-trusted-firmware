@@ -30,7 +30,7 @@ platform/     one directory per board (QEMU virt today)
 images/       separately linked binaries: loader, monitor
 services/     ecall dispatcher and services (SBI base extension today)
 drivers/      driver table, console, serial
-lib/          freestanding libc subset, compiler helpers, utils
+lib/          freestanding libc subset, compiler helpers, libutils, utils
 include/      tree-wide headers
 mk/ scripts/  build system
 configs/      defconfigs

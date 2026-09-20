@@ -174,3 +174,14 @@ toolchain has one for the target; otherwise `lib/builtins` supplies the
 `scripts/boot-test.sh <build dir> [expected]` boots the build with the
 platform's `plat-run` hook and greps the serial log. `.github/workflows/build.yml`
 runs the defconfig matrix with both toolchains and boot-tests each result.
+
+## lib/libutils
+
+Headers only, for everybody: `compiler.h` (attributes and builtins),
+`util.h` (`BIT()`, `SHIFT_U32()`, `GENMASK_UL()`, `ROUNDUP()`, `MIN()`,
+`IS_ALIGNED()`, register pairs and fields, arithmetic that reports an
+overflow; the bit and shift macros work in assembly too), `types_ext.h`
+(`vaddr_t`, `paddr_t`: what kind of address a number is), `atomic.h`
+(`atomic_load_ulong()`, `atomic_cas_u32()`, ...) and `bitstring.h` (bit
+strings by bit number). New code uses these rather than open-coded
+shifts, masks and rounding.
