@@ -1355,6 +1355,14 @@ long pmu_counter_stop(unsigned long base, unsigned long mask,
 	return rc;
 }
 
+bool pmu_hw_counter_get(unsigned int n, uint64_t *val)
+{
+	if (n >= PMU_HW_COUNTERS || !(hw_counters & BIT(n)))
+		return false;
+	*val = hw_counter_read(n);
+	return true;
+}
+
 long pmu_snapshot_set_shmem(unsigned long lo, unsigned long hi,
 			    unsigned long flags)
 {

@@ -44,7 +44,7 @@ arch/riscv/runtime/       hart.c    per-hart state, feature probing, S-mode entr
                           hsm.c     hart state machine, wait/suspend loops
                           rfence.c  remote fence requests
                           unpriv.c  memory access as the trapping context (MPRV)
-                          illegal_insn.c  time/timeh CSR emulation
+                          illegal_insn.c  counter CSR and AMO emulation
                           misaligned.c    misaligned load / store emulation
                           pmp.c     PMP programming
                           pmu.c     hardware and firmware counters
@@ -70,8 +70,13 @@ stack S-mode controls.
 
 Traps from S/U-mode: ecalls go to the service dispatcher, the M-mode timer
 and software interrupts to the timer and IPI cores, illegal instructions
-and misaligned accesses to their emulators. A misaligned load or store
-(integer or floating-point, 32-bit or compressed encoding) is redone byte by
+and misaligned accesses to their emulators. Illegal instructions that are
+emulated: reads of the counter CSRs the hart lacks (`time` from the platform
+timer, `cycle`, `instret` and `hpmcounterN` from the machine counters,
+honouring scounteren for U-mode), and the AMO instructions on a hart that
+only has LR/SC, as an LR/SC pair under `mstatus.MPRV`. A misaligned load or
+store (integer or floating-point, 32-bit, compressed or Zcb encoding) is
+redone byte by
 byte with the privilege and translation of the trapping context, unless
 S-mode has taken misaligned exceptions for itself through FWFT. Everything else, and whatever the emulator does not handle, is
 redirected to S-mode (`trap_redirect()`, which also fills in the hypervisor
@@ -312,8 +317,8 @@ with `IMAGE_SBITEST` disabled.
    itself behind the same MPXY channels; MSI / SSE indication of
    notifications; transport and channel discovery from the device tree
    (`riscv,rpmi-shmem-mbox`, `riscv,rpmi-mpxy-*`).
-3. Emulation beyond `time` and misaligned scalar accesses: Zcb and vector
-   misaligned accesses, atomics, missing counters.
+3. Misaligned vector loads and stores are not emulated (redirected to
+   S-mode).
 4. **Device tree driven configuration.** libfdt is only used for the
    fix-up; device addresses and the hart count still come from Kconfig.
 5. More timer / IPI / reset / serial drivers.

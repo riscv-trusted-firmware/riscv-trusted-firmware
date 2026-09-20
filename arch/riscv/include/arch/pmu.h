@@ -52,6 +52,9 @@ void pmu_sse_enable(bool enable);
 bool pmu_sse_overflow_irq(void);
 void pmu_sse_complete(void);
 
+/* A hardware counter's value, for emulation; false if it does not exist. */
+bool pmu_hw_counter_get(unsigned int n, uint64_t *val);
+
 /* Fill in the 'supported' bit of 'count' event entries at physical 'addr'. */
 long pmu_event_info(unsigned long addr, unsigned long count);
 
@@ -67,6 +70,11 @@ static inline void pmu_hart_init(void)
 
 static inline void pmu_fw_event(unsigned int event)
 {
+}
+
+static inline bool pmu_hw_counter_get(unsigned int n, uint64_t *val)
+{
+	return false;
 }
 
 static inline bool pmu_sse_supported(void)

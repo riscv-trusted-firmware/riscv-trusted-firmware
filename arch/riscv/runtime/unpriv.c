@@ -7,18 +7,30 @@
 #include <arch/unpriv.h>
 
 /*
- * The load runs with MPRV set and the trapping context's MPP/MPV. If it
+ * An access runs with mstatus.MPRV set and the trapping context's MPP (and
+ * MPV). MPRV is only set around the access instruction itself: while it is
+ * set, every load and store of M-mode goes by the trapping context's
+ * rules, the compiler's jump tables and spills included. If the access
  * faults, trap_handler() sees trap_expected, records the cause and skips
  * the instruction, which therefore must be exactly 4 bytes long.
  */
+#define UNPRIV_INSN(insn, ...)                                       \
+	({                                                           \
+		__asm__ __volatile__(".option push\n.option norvc\n" \
+				     "csrs mstatus, %2\n" insn "\n"  \
+				     "csrc mstatus, %2\n"            \
+				     ".option pop" __VA_ARGS__);     \
+	})
+
 static bool __noinline unpriv_load(const struct trap_regs *regs,
 				   unsigned long addr, unsigned int width,
 				   bool exec, unsigned long *val,
 				   struct trap_info *fault)
 {
 	struct hart *h = this_hart();
+	const unsigned long mprv = MSTATUS_MPRV;
 	unsigned long saved = csr_read(mstatus);
-	unsigned long mstatus = regs->mstatus | MSTATUS_MPRV;
+	unsigned long mstatus = regs->mstatus & ~MSTATUS_MPRV;
 	unsigned long v = 0;
 
 	if (exec)
@@ -29,41 +41,36 @@ static bool __noinline unpriv_load(const struct trap_regs *regs,
 	csr_write(mstatus, mstatus);
 	switch (width) {
 	case 1:
-		__asm__ __volatile__(".option push\n.option norvc\n"
-				     "lbu %0, 0(%1)\n.option pop"
-				     : "=r"(v)
-				     : "r"(addr)
-				     : "memory");
+		UNPRIV_INSN("lbu %0, 0(%1)",
+			    : "=&r"(v)
+			    : "r"(addr), "r"(mprv)
+			    : "memory");
 		break;
 	case 2:
-		__asm__ __volatile__(".option push\n.option norvc\n"
-				     "lhu %0, 0(%1)\n.option pop"
-				     : "=r"(v)
-				     : "r"(addr)
-				     : "memory");
+		UNPRIV_INSN("lhu %0, 0(%1)",
+			    : "=&r"(v)
+			    : "r"(addr), "r"(mprv)
+			    : "memory");
 		break;
 #if __RISCV_XLEN__ == 64
 	case 4:
-		__asm__ __volatile__(".option push\n.option norvc\n"
-				     "lwu %0, 0(%1)\n.option pop"
-				     : "=r"(v)
-				     : "r"(addr)
-				     : "memory");
+		UNPRIV_INSN("lwu %0, 0(%1)",
+			    : "=&r"(v)
+			    : "r"(addr), "r"(mprv)
+			    : "memory");
 		break;
 	default:
-		__asm__ __volatile__(".option push\n.option norvc\n"
-				     "ld %0, 0(%1)\n.option pop"
-				     : "=r"(v)
-				     : "r"(addr)
-				     : "memory");
+		UNPRIV_INSN("ld %0, 0(%1)",
+			    : "=&r"(v)
+			    : "r"(addr), "r"(mprv)
+			    : "memory");
 		break;
 #else
 	default:
-		__asm__ __volatile__(".option push\n.option norvc\n"
-				     "lw %0, 0(%1)\n.option pop"
-				     : "=r"(v)
-				     : "r"(addr)
-				     : "memory");
+		UNPRIV_INSN("lw %0, 0(%1)",
+			    : "=&r"(v)
+			    : "r"(addr), "r"(mprv)
+			    : "memory");
 		break;
 #endif
 	}
@@ -93,16 +100,16 @@ bool unpriv_write_byte(const struct trap_regs *regs, unsigned long addr,
 		       uint8_t val, struct trap_info *fault)
 {
 	struct hart *h = this_hart();
+	const unsigned long mprv = MSTATUS_MPRV;
 	unsigned long saved = csr_read(mstatus), v = val;
 
 	h->trap_taken = 0;
 	h->trap_expected = 1;
-	csr_write(mstatus, regs->mstatus | MSTATUS_MPRV);
-	__asm__ __volatile__(".option push\n.option norvc\n"
-			     "sb %0, 0(%1)\n.option pop"
-			     :
-			     : "r"(v), "r"(addr)
-			     : "memory");
+	csr_write(mstatus, regs->mstatus & ~MSTATUS_MPRV);
+	UNPRIV_INSN("sb %0, 0(%1)",
+		    :
+		    : "r"(v), "r"(addr), "r"(mprv)
+		    : "memory");
 	csr_write(mstatus, saved);
 	h->trap_expected = 0;
 

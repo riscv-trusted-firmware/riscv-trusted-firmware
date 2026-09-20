@@ -10,9 +10,9 @@
  * privilege and translation of the trapping context; a fault on the way
  * goes to S-mode as the fault it is.
  *
- * Covered: the integer and floating-point loads and stores of the base ISA
- * and of the C extension. Not covered (redirected to S-mode): Zcb, vector
- * and atomic accesses.
+ * Covered: the integer and floating-point loads and stores of the base ISA,
+ * of the C extension and of Zcb. Not covered (redirected to S-mode): vector
+ * accesses, and LR/SC, which cannot be split.
  */
 
 #include <arch/hart.h>
@@ -80,6 +80,18 @@ static bool decode16(unsigned long insn, struct access *a)
 		a->len = 8;
 		a->fp = true;
 		break;
+	case 4:
+		/*
+		 * Zcb, quadrant 0: c.lhu / c.lh (100001, bit 6), c.sh (100011).
+		 */
+		if (sp_relative ||
+		    (((insn >> 10) & 7) != 1 && ((insn >> 10) & 7) != 3))
+			return false;
+		a->len = 2;
+		a->store = ((insn >> 10) & 7) == 3;
+		a->sign_extend = insn & BIT(6);
+		a->reg = 8 + ((insn >> 2) & 7);
+		return true;
 	default:
 		return false;
 	}
