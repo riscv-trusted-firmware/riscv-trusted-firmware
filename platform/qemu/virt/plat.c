@@ -9,14 +9,14 @@
  * console driver.
  */
 
-#include <drivers/serial/uart8250.h>
 #include <fdt_util.h>
 #include <platform.h>
+#include <serial.h>
 #include <util.h>
 
 void plat_early_init(const void *fdt)
 {
-	uart8250_console_init(fdt);
+	serial_console_init(fdt);
 }
 
 #if defined(IMAGE_MONITOR) && defined(CONFIG_IMAGE_SBITEST)

@@ -3,20 +3,25 @@
 
 menu "Serial"
 
+# The console is the UART /chosen/stdout-path of the device tree names, or
+# the first one in the tree a driver below knows.
+
 config SERIAL_UART8250
 	bool "8250/16550-compatible UART"
 	help
-	  The console is the UART /chosen/stdout-path of the device tree
-	  names. The values below apply when there is no tree, or no 8250
-	  behind that path.
+	  ns16550a, the DesignWare APB UART and the like. The values below
+	  apply when there is no tree to take them from; a base address of 0
+	  means there is no such default.
 
 if SERIAL_UART8250
 
 config SERIAL_UART8250_BASE
 	hex "Register base address"
+	default 0x0
 
 config SERIAL_UART8250_CLOCK
 	int "Input clock (Hz)"
+	default 0
 
 config SERIAL_UART8250_BAUD
 	int "Baud rate"
@@ -31,5 +36,45 @@ config SERIAL_UART8250_REG_WIDTH
 	default 1
 
 endif
+
+config SERIAL_SIFIVE
+	bool "SiFive UART"
+
+config SERIAL_HTIF
+	bool "HTIF console (Spike and relatives)"
+
+config SERIAL_HTIF_BASE
+	hex "Address of fromhost when the device tree does not say"
+	depends on SERIAL_HTIF
+	default 0x1000000
+	help
+	  A simulator looks the words up by symbol in an ELF; given a raw
+	  binary it falls back to an address of its own, QEMU's spike
+	  machine to this one. tohost follows 8 bytes later.
+
+config SERIAL_UARTLITE
+	bool "Xilinx UART Lite"
+
+config SERIAL_CADENCE
+	bool "Cadence UART"
+
+config SERIAL_LITEX
+	bool "LiteX UART"
+
+config SERIAL_GAISLER
+	bool "Gaisler APBUART"
+
+config SERIAL_SHAKTI
+	bool "Shakti UART"
+
+config SERIAL_RENESAS_SCIF
+	bool "Renesas SCIF (RZ/Five)"
+
+config SERIAL_SEMIHOSTING
+	bool "Semihosting output, when there is no UART"
+	help
+	  Characters go to a debugger or simulator that implements the
+	  semihosting calls. Only used when nothing else gave a console and a
+	  host answers.
 
 endmenu

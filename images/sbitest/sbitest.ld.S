@@ -5,4 +5,6 @@
 
 #define IMAGE_BASE	CONFIG_SBITEST_LOAD_ADDR
 #define IMAGE_SIZE	CONFIG_SBITEST_SIZE
+/* Its stacks are an array of its own (start.S). */
+#define IMAGE_STACKS	0
 #include <arch/image.lds.h>

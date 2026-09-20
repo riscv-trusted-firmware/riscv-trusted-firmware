@@ -39,6 +39,11 @@ SECTIONS {
 		__service_table_end = .;
 
 		. = ALIGN(8);
+		__serial_table_start = .;
+		KEEP(*(.serial_table))
+		__serial_table_end = .;
+
+		. = ALIGN(8);
 		__driver_table_start = .;
 		KEEP(*(.driver_table))
 		__driver_table_end = .;
@@ -95,10 +100,14 @@ SECTIONS {
 	ASSERT(IMAGE_BASE + IMAGE_SIZE - __heap_start >= 4 * CONFIG_STACK_SIZE,
 	       "no room for stacks and heap")
 #else
+	/* A stack per hart the platform may have, unless the image brings its own. */
+#ifndef IMAGE_STACKS
+#define IMAGE_STACKS	CONFIG_PLATFORM_HART_COUNT
+#endif
 	.stacks (NOLOAD) : {
 		. = ALIGN(16);
 		__stack_bottom = .;
-		. += CONFIG_STACK_SIZE * CONFIG_PLATFORM_HART_COUNT;
+		. += CONFIG_STACK_SIZE * IMAGE_STACKS;
 		__stack_top = .;
 	} > image
 

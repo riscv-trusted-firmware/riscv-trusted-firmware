@@ -41,6 +41,11 @@ static inline uint64_t timer_usecs_to_ticks(uint64_t us)
 }
 
 /* Calling hart: quiesce the compare register. */
+/*
+ * Busy waiting, for the few devices that want time to pass; no timer, no wait.
+ */
+void timer_udelay(uint64_t us);
+
 void timer_hart_init(void);
 /* Calling hart: (re)program the S-mode timer event, SBI set_timer semantics. */
 void timer_smode_set(uint64_t when);
