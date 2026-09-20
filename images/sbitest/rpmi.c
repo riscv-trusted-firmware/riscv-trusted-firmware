@@ -21,8 +21,10 @@
 #define FID_READ_HI 2
 #define FID_WRITE 3
 
-void test_cppc(void)
+void test_cppc(unsigned long self)
 {
+	uint32_t *chan = puc_cppc_fastchan(self);
+	uint32_t writes = 0;
 	struct sbiret ret = {};
 
 	printf("cppc\n");
@@ -70,11 +72,37 @@ void test_cppc(void)
 		  SBI_ERR_INVALID_PARAM);
 #endif
 	CHECK_RET(sbi_call0(SBI_EXT_CPPC, 4), SBI_ERR_NOT_SUPPORTED);
+
+	/*
+	 * That one was too wide for the fast channel and went by message. The
+	 * desired performance that fits is written there, the doorbell rung,
+	 * and the PuC not asked.
+	 */
+	CHECK(READ_ONCE(puc_cppc_writes) == 1 &&
+	      !READ_ONCE(puc_cppc_doorbell) && !READ_ONCE(chan[0]),
+	      "64-bit write: %u messages, doorbell %x, channel %x",
+	      READ_ONCE(puc_cppc_writes), READ_ONCE(puc_cppc_doorbell),
+	      READ_ONCE(chan[0]));
+	writes = READ_ONCE(puc_cppc_writes);
+	WRITE_ONCE(chan[1], ~U(0));
+	CHECK_RET(sbi_call2(SBI_EXT_CPPC, FID_WRITE, PUC_CPPC_REG_RW, 0x4242),
+		  SBI_SUCCESS);
+	CHECK(READ_ONCE(chan[0]) == 0x4242 && READ_ONCE(chan[1]) == 0,
+	      "fast channel: %x %x", READ_ONCE(chan[0]), READ_ONCE(chan[1]));
+	CHECK(READ_ONCE(puc_cppc_doorbell) == PUC_CPPC_DB_VALUE,
+	      "fast channel doorbell: %x", READ_ONCE(puc_cppc_doorbell));
+	CHECK(READ_ONCE(puc_cppc_writes) == writes,
+	      "a fast channel write went by message too");
+	CHECK(READ_ONCE(puc_cppc_fastchan(self + 1)[0]) == 0,
+	      "another hart's fast channel was written");
+	ret = sbi_call1(SBI_EXT_CPPC, FID_READ, PUC_CPPC_REG_RW);
+	CHECK(ret.error == 0 && ret.value == 0x4242, "read back %lx",
+	      ret.value);
 }
 
 #else
 
-void test_cppc(void)
+void test_cppc(unsigned long self)
 {
 }
 

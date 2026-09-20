@@ -118,6 +118,11 @@ extern uint32_t puc_sysmsi_requests;
 #define PUC_CPPC_REG_RO 0 /* HighestPerformance */
 #define PUC_CPPC_REG_RW 5 /* DesiredPerformance */
 #define PUC_CPPC_RO_VALUE 100
+/* Fast channels: normal mode, with a doorbell that is a word of memory. */
+#define PUC_CPPC_DB_VALUE 0x5a5a0001
+extern uint32_t puc_cppc_doorbell, puc_cppc_writes;
+/* The performance request fast channel of 'hart': (desired, reserved). */
+uint32_t *puc_cppc_fastchan(unsigned long hart);
 
 /* What the model saw of the M-mode consumers. */
 extern uint32_t puc_hsm_starts, puc_hsm_stops, puc_hsm_last_hart;
@@ -165,6 +170,6 @@ void sse_secondary_setup(unsigned long hartid);
 
 /* mpxy.c, rpmi.c: need another hart running puc_poll(). */
 void test_mpxy(void);
-void test_cppc(void);
+void test_cppc(unsigned long self);
 
 #endif

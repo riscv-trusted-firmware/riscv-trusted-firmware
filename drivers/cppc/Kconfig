@@ -14,4 +14,15 @@ config CPPC_RPMI
 	  Collaborative processor performance control registers served by
 	  the platform microcontroller, for the SBI CPPC extension.
 
+config CPPC_RPMI_FEEDBACK_AS_DELIVERED_CTR
+	bool "Read DeliveredPerformanceCounter from the feedback fast channel"
+	depends on CPPC_RPMI
+	help
+	  The performance feedback fast channel of RPMI holds the hart's
+	  current frequency in Hz, which no SBI CPPC register is. Other
+	  firmware returns it as DeliveredPerformanceCounter; say y for
+	  a platform whose S-mode software counts on that. Otherwise that
+	  register is read from the PuC by message like the others, and the
+	  feedback channel is not used.
+
 endmenu

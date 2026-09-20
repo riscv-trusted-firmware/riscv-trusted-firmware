@@ -844,7 +844,7 @@ static void test_smp(void)
 		      "hart %lu: no PuC model", first);
 		puc_hart = first;
 		test_mpxy();
-		test_cppc();
+		test_cppc(boot_hartid);
 		test_hsm_platform(first);
 	}
 

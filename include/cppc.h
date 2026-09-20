@@ -15,6 +15,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Register ids, SBI's and RPMI's alike (ACPI's _CPC order). */
+#define CPPC_REG_DESIRED_PERF 5
+#define CPPC_REG_MIN_PERF 6
+#define CPPC_REG_MAX_PERF 7
+#define CPPC_REG_DELIVERED_CTR 12
+
 struct cppc_ops {
 	const char *name;
 	/* *width: register width in bits, 0 if it is not implemented. */

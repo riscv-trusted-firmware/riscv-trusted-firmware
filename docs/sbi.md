@@ -14,7 +14,7 @@ and what is still missing.
 | RFENCE    | `RFNC` | all seven calls; the `hfence` ones need the H extension (`NOT_SUPPORTED` otherwise) |
 | HSM       | `HSM`  | start, stop, status, suspend (default retentive and non-retentive types, and the platform's through the RPMI HSM group) |
 | SRST      | `SRST` | shutdown, cold and warm reboot through the reset driver |
-| CPPC      | `CPPC` | probe, read, read_hi, write; backend: the RPMI CPPC service group |
+| CPPC      | `CPPC` | probe, read, read_hi, write; backend: the RPMI CPPC service group, fast channels included |
 | SUSP      | `SUSP` | suspend to RAM as an M-mode wait with all other harts stopped (`CONFIG_SBI_SUSP`, on for QEMU virt) |
 | FWFT      | `FWFT` | misaligned exception delegation; landing pad, shadow stack, double trap, PTE A/D updating and pointer masking where the hart has them; lock flag |
 | SSE       | `SSE`  | all ten functions; sources: the software injected local and global events, PMU counter overflow (Sscofpmf), double trap (Ssdbltrp) |
@@ -333,7 +333,16 @@ platform specific types of `sbi_hart_suspend()` (the list is asked for when
 one is first used; the hart waits in the monitor as for the default types,
 and one the PuC really took down comes back through the entry point and
 resumes from there, a path no test has taken yet as QEMU has no such PuC);
-CPPC serves the SBI CPPC extension. The
+CPPC serves the SBI CPPC extension, with the PuC's fast channels where it
+has them: a desired performance (or, in autonomous mode, a minimum or
+maximum) that fits 32 bits is written to the hart's performance request
+channel and the doorbell rung, everything else goes by message. A PuC that
+answers at boot has the fast channel region made the monitor's own, fenced
+off and reserved; one that turns up later still has it used, unprotected.
+The feedback channel holds a frequency, which no SBI CPPC register is:
+`CPPC_RPMI_FEEDBACK_AS_DELIVERED_CTR` returns it as
+DeliveredPerformanceCounter, for platforms that count on
+it. Apart from that one question the
 PuC is asked when something is wanted, not at boot. One that does not
 answer is taken for one that does not offer the service, at the cost of a
 timeout each time; one that answers no is an error for the caller.
@@ -396,7 +405,7 @@ with `IMAGE_SBITEST` disabled.
    data match.
 2. **RPMI**: service groups implemented by the firmware itself behind the
    same MPXY channels; MSI / SSE indication of notifications and the P2A
-   doorbell as an interrupt (the P2A queue is polled); CPPC fast channels.
+   doorbell as an interrupt (the P2A queue is polled).
 3. The maximum number of harts and domains and the monitor's size are
    build-time constants.
 4. More timer / IPI / reset / serial drivers.

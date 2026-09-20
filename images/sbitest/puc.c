@@ -337,6 +337,15 @@ static unsigned int serve_hsm(const struct rpmi_hdr *hdr, const uint32_t *req,
 	}
 }
 
+/* Request and feedback channel of every hart, 8 bytes each; a power of two. */
+static uint32_t cppc_fastchan[4096 / 4] __aligned(4096);
+uint32_t puc_cppc_doorbell, puc_cppc_writes;
+
+uint32_t *puc_cppc_fastchan(unsigned long hart)
+{
+	return &cppc_fastchan[4 * hart];
+}
+
 static unsigned int serve_cppc(const struct rpmi_hdr *hdr, const uint32_t *req,
 			       uint32_t *resp)
 {
@@ -344,6 +353,32 @@ static unsigned int serve_cppc(const struct rpmi_hdr *hdr, const uint32_t *req,
 	uint32_t reg = req[0], hart = req[1];
 
 	resp[0] = RPMI_SUCCESS;
+	if (hdr->service == RPMI_CPPC_GET_FAST_CHANNEL_REGION) {
+		uint64_t base = (uintptr_t)cppc_fastchan,
+			 db = (uintptr_t)&puc_cppc_doorbell;
+
+		/* 32 bits wide, normal mode */
+		resp[1] = RPMI_CPPC_FC_DOORBELL | (2 << 1);
+		resp[2] = (uint32_t)base;
+		resp[3] = high32_from_64(base);
+		resp[4] = sizeof(cppc_fastchan);
+		resp[5] = 0;
+		resp[6] = (uint32_t)db;
+		resp[7] = high32_from_64(db);
+		resp[8] = PUC_CPPC_DB_VALUE;
+		return 9;
+	}
+	if (hdr->service == RPMI_CPPC_GET_FAST_CHANNEL_OFFSET) {
+		if (hdr->datalen < 4 || req[0] >= SBITEST_MAX_HARTS) {
+			resp[0] = (uint32_t)RPMI_ERR_INVALID_PARAM;
+			return 1;
+		}
+		resp[1] = 16 * req[0];
+		resp[3] = 16 * req[0] + 8;
+		resp[2] = 0;
+		resp[4] = 0;
+		return 5;
+	}
 	if (hdr->datalen < 8 || hart >= SBITEST_MAX_HARTS) {
 		resp[0] = (uint32_t)RPMI_ERR_INVALID_PARAM;
 		return 1;
@@ -358,6 +393,14 @@ static unsigned int serve_cppc(const struct rpmi_hdr *hdr, const uint32_t *req,
 		resp[1] = reg == PUC_CPPC_REG_RW ? 64 : 32;
 		return 2;
 	case RPMI_CPPC_READ_REG:
+		/*
+		 * A ring of the doorbell: the request channel has the latest
+		 * word.
+		 */
+		if (READ_ONCE(puc_cppc_doorbell)) {
+			WRITE_ONCE(puc_cppc_doorbell, 0);
+			desired[hart] = READ_ONCE(*puc_cppc_fastchan(hart));
+		}
 		resp[1] = reg == PUC_CPPC_REG_RO ? PUC_CPPC_RO_VALUE :
 						   (uint32_t)desired[hart];
 		resp[2] = reg == PUC_CPPC_REG_RO ?
@@ -365,10 +408,12 @@ static unsigned int serve_cppc(const struct rpmi_hdr *hdr, const uint32_t *req,
 				  high32_from_64(desired[hart]);
 		return 3;
 	case RPMI_CPPC_WRITE_REG:
-		if (reg == PUC_CPPC_REG_RO)
+		if (reg == PUC_CPPC_REG_RO) {
 			resp[0] = (uint32_t)RPMI_ERR_DENIED;
-		else
+		} else {
 			desired[hart] = reg_pair_to_64(req[3], req[2]);
+			atomic_inc32(&puc_cppc_writes);
+		}
 		return 1;
 	default:
 		resp[0] = (uint32_t)RPMI_ERR_NOT_SUPPORTED;

@@ -102,6 +102,14 @@ struct rpmi_hdr {
 #define RPMI_CPPC_PROBE_REG 0x02
 #define RPMI_CPPC_READ_REG 0x03
 #define RPMI_CPPC_WRITE_REG 0x04
+#define RPMI_CPPC_GET_FAST_CHANNEL_REGION 0x05
+#define RPMI_CPPC_GET_FAST_CHANNEL_OFFSET 0x06
+/* FLAGS of GET_FAST_CHANNEL_REGION */
+#define RPMI_CPPC_FC_DOORBELL 0x1
+#define RPMI_CPPC_FC_DB_WIDTH(flags) \
+	(((flags) >> 1) & 3) /* 0, 1, 2: 8, 16, 32 bits */
+#define RPMI_CPPC_FC_MODE(flags) \
+	(((flags) >> 3) & 3) /* 0: normal, 1: autonomous */
 
 /* SYSTEM_MSI service group. */
 #define RPMI_SYSMSI_GET_ATTRIBUTES 0x02
