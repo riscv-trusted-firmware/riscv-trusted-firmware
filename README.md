@@ -15,6 +15,7 @@ into domains described in the device tree, and harts can
 move between them ([docs/domains.md](docs/domains.md)). An S-mode test payload checks
 all of it on every build. Linux boots on it (SMP, CPU hotplug, suspend to
 RAM, reboot/poweroff): `make run QEMU_KERNEL=<Image>`.
+How it is started, and told where the next stage is: [docs/boot.md](docs/boot.md).
 What is implemented and what is next: [docs/sbi.md](docs/sbi.md).
 
 ## Quick start

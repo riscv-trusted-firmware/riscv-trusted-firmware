@@ -95,7 +95,7 @@ static int add_region(struct domain *dom, unsigned long base,
 	return 0;
 }
 
-static void root_domain_init(unsigned long next_addr)
+static void root_domain_init(unsigned long next_addr, unsigned long next_mode)
 {
 	struct domain *root = &domains[0];
 
@@ -103,7 +103,7 @@ static void root_domain_init(unsigned long next_addr)
 		.name = "root",
 		.boot_hart = (int)this_hart_index(),
 		.next_addr = next_addr,
-		.next_mode = PRV_S,
+		.next_mode = next_mode,
 		.reset_allowed = true,
 		.suspend_allowed = true,
 	};
@@ -253,11 +253,12 @@ static void assign_harts(const void *fdt)
 	}
 }
 
-void domains_init(const void *fdt, unsigned long next_addr)
+void domains_init(const void *fdt, unsigned long next_addr,
+		  unsigned long next_mode)
 {
 	int config = 0, node = 0;
 
-	root_domain_init(next_addr);
+	root_domain_init(next_addr, next_mode);
 	config = fdt ? fdt_node_offset_by_compatible(fdt, -1,
 						     "riscv,domain,config") :
 		       -1;
@@ -281,11 +282,11 @@ void domains_init(const void *fdt, unsigned long next_addr)
 	}
 	assign_harts(fdt);
 
-	/*
-	 * The next stage the monitor was built for is the boot hart's domain's.
-	 */
-	if (!this_domain()->next_addr)
+	/* The next stage the monitor was given is the boot hart's domain's. */
+	if (!this_domain()->next_addr) {
 		this_domain()->next_addr = next_addr;
+		this_domain()->next_mode = next_mode;
+	}
 }
 
 static void domain_print(const struct domain *dom)

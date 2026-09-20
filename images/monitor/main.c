@@ -19,6 +19,7 @@
 #include <driver.h>
 #include <fdt_util.h>
 #include <generated/version.h>
+#include <handover.h>
 #include <io.h>
 #include <ipi.h>
 #include <log.h>
@@ -75,10 +76,29 @@ static void wait_for_secondaries(void)
 		cpu_relax();
 }
 
-void image_main(unsigned long hartid, unsigned long fdt)
+/* What the previous stage says about the next one, where it says anything. */
+static void handover_apply(const struct boot_handover *h, unsigned long *next,
+			   unsigned long *mode)
 {
-	unsigned long next = CONFIG_MONITOR_NEXT_STAGE_ADDR;
+	if (!h)
+		return;
+	log_quiet = h->options & BOOT_HANDOVER_OPT_QUIET;
+	/* A block without an address: QEMU without -kernel, for one. */
+	if (!h->next_addr)
+		return;
+	*next = h->next_addr;
+	if (h->next_mode == BOOT_HANDOVER_MODE_S ||
+	    h->next_mode == BOOT_HANDOVER_MODE_U)
+		*mode = h->next_mode;
+}
+
+void image_main(unsigned long hartid, unsigned long fdt,
+		const struct boot_handover *handover)
+{
+	unsigned long next = CONFIG_MONITOR_NEXT_STAGE_ADDR, mode = PRV_S;
 	void *tree = NULL;
+
+	handover_apply(handover, &next, &mode);
 
 	/* The hart table first: it is what gives a hart its per-hart state. */
 	boot_harts_init(fdt_valid((const void *)fdt), hartid);
@@ -88,6 +108,14 @@ void image_main(unsigned long hartid, unsigned long fdt)
 	pr_info("\n%s %s\n", PROJECT_NAME, PROJECT_VERSION);
 	pr_info("platform: %s, target: %s, boot hart: %lu, fdt: %lx\n",
 		CONFIG_PLATFORM_NAME, BUILD_TARGET, hartid, fdt);
+	if (handover) {
+		pr_info("hand-over: next stage at %lx, mode %lu, options %lx (version %lu)\n",
+			handover->next_addr, handover->next_mode,
+			handover->options, handover->version);
+		if (handover->next_addr && mode != handover->next_mode)
+			pr_warn("hand-over: mode %lu is not for a next stage of the monitor, S-mode it is\n",
+				handover->next_mode);
+	}
 	pr_info("misa: %lx mvendorid: %lx marchid: %lx mimpid: %lx\n",
 		csr_read(misa), csr_read(mvendorid), csr_read(marchid),
 		csr_read(mimpid));
@@ -98,7 +126,7 @@ void image_main(unsigned long hartid, unsigned long fdt)
 	if (tree && plat_fdt_prepare(tree))
 		pr_warn("platform: could not complete the device tree\n");
 #ifdef CONFIG_DOMAINS
-	domains_init(tree, next);
+	domains_init(tree, next, mode);
 #endif
 	drivers_init(tree);
 	services_init();
@@ -133,8 +161,9 @@ void image_main(unsigned long hartid, unsigned long fdt)
 #ifdef CONFIG_DOMAINS
 	domains_start(fdt);
 #else
-	pr_info("monitor: next stage at %lx (S-mode), fdt: %lx\n", next, fdt);
-	hsm_boot_hart_start(next, fdt, PRV_S);
+	pr_info("monitor: next stage at %lx (%c-mode), fdt: %lx\n", next,
+		mode == PRV_S ? 'S' : 'U', fdt);
+	hsm_boot_hart_start(next, fdt, mode);
 #endif
 }
 

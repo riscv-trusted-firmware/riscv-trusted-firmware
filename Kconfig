@@ -48,6 +48,17 @@ config LOG_LEVEL
 	range 0 4
 	default 3
 
+config BOOT_HANDOVER
+	bool "Take a hand-over block from the previous stage (a2)"
+	default y
+	help
+	  The previous boot stage may pass, in a2, a block that says where the
+	  next stage after this one is, in which mode it starts and which hart
+	  is to boot: what U-Boot SPL, EDK2, coreboot and QEMU (-kernel) hand
+	  to the M-mode firmware they start. See include/handover.h. Without
+	  a block the configured addresses apply. Say n when a2 is not to be
+	  looked at.
+
 endmenu
 
 source "images/Kconfig"

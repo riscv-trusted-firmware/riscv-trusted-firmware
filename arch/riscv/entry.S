@@ -4,26 +4,54 @@
  */
 
 /*
- * Reset entry, shared by every image. Contract with the previous stage
- * (or the reset vector): a0 = hart id, a1 = device tree address.
+ * Reset entry, shared by every image (docs/boot.md). Contract with the previous
+ * stage (or the reset vector): a0 = hart id, a1 = device tree address, a2 = a
+ * hand-over block (<handover.h>) or nothing of the kind.
  *
- * Boot hart: first hart to win the lottery. It zeroes .bss, sets up its
- * stack and calls image_main(hartid, fdt). Other harts wait for the boot hart
- * to release them, then call image_secondary_main(hartid) on their own stack.
+ * Boot hart: first hart to win the lottery, among those the hand-over block
+ * allows to. It zeroes .bss, sets up its stack and calls
+ * image_main(hartid, fdt, handover). Other harts wait for the boot hart to
+ * release them, then call image_secondary_main(hartid) on their own stack.
  * _boot_hart_count is the number of harts that entered the image,
  * _boot_hart_parked how many of them the image does not manage (they are
  * not in the hart table of <boot.h>).
  */
 
 #include <arch/csr.h>
+#include <handover.h>
 
 #define R_RISCV_RELATIVE	3
 
 	.section .text.entry, "ax", %progbits
 	.globl _start
 _start:
-	/* Machine mode, interrupts off, clean state. */
 	csrw	mie, zero
+
+	/*
+	 * s0 = the hand-over block, 0 without one; s1 = the hart that is to
+	 * boot, -1 for any. a2 may be anything when the previous stage knows
+	 * nothing of this: a trap while looking ends the look.
+	 */
+	mv	s0, zero
+	li	s1, -1
+#ifdef CONFIG_BOOT_HANDOVER
+	la	t0, 1f
+	csrw	mtvec, t0
+	beqz	a2, 1f
+	andi	t0, a2, REGBYTES - 1
+	bnez	t0, 1f
+	REG_L	t0, HANDOVER_MAGIC(a2)
+	li	t1, BOOT_HANDOVER_MAGIC
+	bne	t0, t1, 1f
+	REG_L	t0, HANDOVER_VERSION(a2)
+	mv	s0, a2
+	li	t1, 2
+	bltu	t0, t1, 1f
+	REG_L	s1, HANDOVER_BOOT_HART(a2)
+	.balign	4
+1:
+#endif
+	/* Machine mode, interrupts off, clean state. */
 	csrw	mip, zero
 	csrw	mstatus, zero
 #if __RISCV_XLEN__ == 32
@@ -46,12 +74,23 @@ _start:
 	la	t0, _boot_hart_count
 	li	t1, 1
 	amoadd.w t2, t1, (t0)
-	la	t0, _boot_lottery
+	/*
+	 * Not everybody has a ticket when the previous stage names the winner.
+	 */
+	li	t0, -1
+	beq	s1, t0, 1f
+	bne	s1, a0, _secondary
+1:	la	t0, _boot_lottery
 	li	t1, 1
 	amoswap.w t2, t1, (t0)
 	bnez	t2, _secondary
 #else
-	bnez	a0, _secondary
+	li	t0, -1
+	beq	s1, t0, 1f
+	bne	s1, a0, _secondary
+	j	2f
+1:	bnez	a0, _secondary
+2:
 #endif
 
 #ifdef IMAGE_PIE
@@ -95,6 +134,7 @@ _start:
 	mv	a2, zero
 	call	_setup_stack
 	fence	rw, rw
+	mv	a2, s0
 	call	image_main
 	j	_park
 

@@ -347,7 +347,8 @@ make run QEMU_KERNEL=/path/to/Image \
          QEMU_ARGS="-append 'console=ttyS0 earlycon=sbi' -initrd rootfs.cpio.gz"
 ```
 
-`QEMU_KERNEL` takes the place of the test payload as the next stage. Before
+`QEMU_KERNEL` takes the place of the test payload as the next stage; QEMU
+says where it put it in the hand-over block ([boot.md](boot.md)). Before
 the hand-over the monitor adds its own memory to `/reserved-memory` in the
 device tree (`no-map`, `images/monitor/fdt_fixup.c`); without that entry a
 kernel allocates those pages and faults on the PMP fence. The tree is

@@ -7,6 +7,8 @@
 #include <log.h>
 #include <stdarg.h>
 
+bool log_quiet;
+
 void __noreturn panic(const char *fmt, ...)
 {
 	va_list ap;

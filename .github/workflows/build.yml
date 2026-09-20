@@ -45,3 +45,11 @@ jobs:
           MAKEARGS="W=1 ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
           QEMU_EXTRA_ARGS="-cpu rv$xlen,smepmp=on,v=true" \
           MAKEARGS="W=1 ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+      # QEMU's -kernel puts the payload where the single-stage monitor sits in
+      # the two-stage build: not there.
+      - name: Boot test, next stage named by the previous stage (hand-over block)
+        if: matrix.defconfig != 'qemu_virt_rv64_2stage_defconfig'
+        run: |
+          sed -i 's/^CONFIG_MONITOR_NEXT_STAGE_ADDR=.*/CONFIG_MONITOR_NEXT_STAGE_ADDR=0x80e00000/' build/.config
+          make olddefconfig
+          MAKEARGS="W=1 QEMU_KERNEL=build/images/sbitest/sbitest.bin ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build

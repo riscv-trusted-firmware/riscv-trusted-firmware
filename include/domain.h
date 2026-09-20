@@ -94,10 +94,12 @@ struct domain {
 
 /*
  * Boot hart, once the hart table and the tree are there: the root domain,
- * and the domains of the device tree if it defines any. 'next_addr' is the
- * next stage of the root domain, and of the boot hart's if it names none.
+ * and the domains of the device tree if it defines any. 'next_addr' and
+ * 'next_mode' are the next stage of the root domain, and of the boot hart's
+ * if it names none.
  */
-void domains_init(const void *fdt, unsigned long next_addr);
+void domains_init(const void *fdt, unsigned long next_addr,
+		  unsigned long next_mode);
 /*
  * Boot hart, at the end of the boot: start every domain's boot hart at the
  * domain's next stage; 'fdt' is what a domain without a "next-arg1" gets.

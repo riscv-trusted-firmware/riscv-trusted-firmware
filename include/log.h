@@ -7,6 +7,7 @@
 #define LOG_H
 
 #include <compiler.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 #define LOG_NONE 0
@@ -15,9 +16,17 @@
 #define LOG_INFO 3
 #define LOG_DBG 4
 
+/* Informational messages are off: the previous stage asked for a quiet boot. */
+extern bool log_quiet;
+
+static inline bool log_enabled(int lvl)
+{
+	return lvl <= CONFIG_LOG_LEVEL && (lvl < LOG_INFO || !log_quiet);
+}
+
 #define pr_level(lvl, tag, fmt, ...)                    \
 	do {                                            \
-		if (CONFIG_LOG_LEVEL >= (lvl))          \
+		if (log_enabled(lvl))                   \
 			printf(tag fmt, ##__VA_ARGS__); \
 	} while (0)
 

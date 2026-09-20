@@ -14,7 +14,13 @@
  * harts spin until boot_release_secondaries() and then run
  * image_secondary_main on their own stack.
  */
-void image_main(unsigned long hartid, unsigned long fdt);
+/*
+ * 'handover' is the previous stage's hand-over block (<handover.h>), which
+ * entry.S has found to be one, or NULL.
+ */
+struct boot_handover;
+void image_main(unsigned long hartid, unsigned long fdt,
+		const struct boot_handover *handover);
 void image_secondary_main(unsigned long hartid);
 
 extern uint32_t _boot_release;
