@@ -33,6 +33,7 @@ static void sifive_test_reset(enum reset_type type)
 
 static const struct reset_ops sifive_test_ops = {
 	.name = "sifive-test",
+	.rating = 100,
 	.supported = sifive_test_supported,
 	.reset = sifive_test_reset,
 };

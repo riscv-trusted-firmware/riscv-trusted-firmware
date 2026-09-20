@@ -5,10 +5,11 @@
 
 /*
  * Model of an RPMI platform microcontroller (PuC), just enough of one to
- * test the monitor's RPMI client, its shared memory transport and the MPXY
- * channels on a machine that has none: the BASE service group, a clock
- * service group with a few real services, and test services that make the
- * PuC misbehave on request.
+ * test the monitor's RPMI client, its shared memory transport, the MPXY
+ * channels and the RPMI backends on a machine that has none: the BASE
+ * service group, a clock service group with a few real services and test
+ * services that make the PuC misbehave on request, and the system reset,
+ * HSM and CPPC groups as the monitor's backends use them.
  *
  * It sits on the other end of the queues: it consumes the A2P request
  * queue and produces the P2A acknowledgment and P2A request queues.
@@ -29,6 +30,10 @@
 #define MSG_SLOTS (QUEUE_SIZE / SLOT_SIZE - 2)
 #define MAX_DATA (SLOT_SIZE - RPMI_MSG_HDR_SIZE)
 
+uint32_t puc_hsm_starts, puc_hsm_stops, puc_hsm_last_hart;
+uint64_t puc_hsm_last_addr;
+uint32_t puc_hsm_refuse;
+uint32_t puc_reset_queries;
 uint32_t puc_posted_value;
 uint32_t puc_notifications_enabled;
 
@@ -189,6 +194,95 @@ static unsigned int serve_clock(const struct rpmi_hdr *hdr, const uint32_t *req,
 	}
 }
 
+/* The M-mode only groups: what the monitor's RPMI backends talk to. */
+static unsigned int serve_sysreset(const struct rpmi_hdr *hdr,
+				   const uint32_t *req, uint32_t *resp)
+{
+	resp[0] = RPMI_SUCCESS;
+	switch (hdr->service) {
+	case RPMI_SYSRST_GET_ATTRIBUTES:
+		atomic_inc32(&puc_reset_queries);
+		resp[1] = req[0] == 0; /* shutdown only */
+		return 2;
+	case RPMI_SYSRST_RESET:
+		if (req[0] == 0) {
+			/*
+			 * Nobody else prints now: the requester waits in
+			 * M-mode.
+			 */
+			printf("puc: shutdown requested over RPMI\n");
+			io_write32(CONFIG_RESET_SIFIVE_TEST_ADDR, 0x5555);
+		}
+		return 0;
+	default:
+		resp[0] = (uint32_t)RPMI_ERR_NOT_SUPPORTED;
+		return 1;
+	}
+}
+
+static unsigned int serve_hsm(const struct rpmi_hdr *hdr, const uint32_t *req,
+			      uint32_t *resp)
+{
+	resp[0] = RPMI_SUCCESS;
+	switch (hdr->service) {
+	case RPMI_HSM_HART_START:
+		if (READ_ONCE(puc_hsm_refuse)) {
+			resp[0] = (uint32_t)RPMI_ERR_DENIED;
+			return 1;
+		}
+		WRITE_ONCE(puc_hsm_last_hart, req[0]);
+		puc_hsm_last_addr = reg_pair_to_64(req[2], req[1]);
+		atomic_inc32(&puc_hsm_starts);
+		return 1;
+	case RPMI_HSM_HART_STOP:
+		WRITE_ONCE(puc_hsm_last_hart, req[0]);
+		atomic_inc32(&puc_hsm_stops);
+		return 1;
+	default:
+		resp[0] = (uint32_t)RPMI_ERR_NOT_SUPPORTED;
+		return 1;
+	}
+}
+
+static unsigned int serve_cppc(const struct rpmi_hdr *hdr, const uint32_t *req,
+			       uint32_t *resp)
+{
+	static uint64_t desired[CONFIG_PLATFORM_HART_COUNT];
+	uint32_t reg = req[0], hart = req[1];
+
+	resp[0] = RPMI_SUCCESS;
+	if (hdr->datalen < 8 || hart >= CONFIG_PLATFORM_HART_COUNT) {
+		resp[0] = (uint32_t)RPMI_ERR_INVALID_PARAM;
+		return 1;
+	}
+	if (reg != PUC_CPPC_REG_RO && reg != PUC_CPPC_REG_RW) {
+		resp[0] = (uint32_t)RPMI_ERR_NOT_SUPPORTED;
+		return 1;
+	}
+
+	switch (hdr->service) {
+	case RPMI_CPPC_PROBE_REG:
+		resp[1] = reg == PUC_CPPC_REG_RW ? 64 : 32;
+		return 2;
+	case RPMI_CPPC_READ_REG:
+		resp[1] = reg == PUC_CPPC_REG_RO ? PUC_CPPC_RO_VALUE :
+						   (uint32_t)desired[hart];
+		resp[2] = reg == PUC_CPPC_REG_RO ?
+				  0 :
+				  high32_from_64(desired[hart]);
+		return 3;
+	case RPMI_CPPC_WRITE_REG:
+		if (reg == PUC_CPPC_REG_RO)
+			resp[0] = (uint32_t)RPMI_ERR_DENIED;
+		else
+			desired[hart] = reg_pair_to_64(req[3], req[2]);
+		return 1;
+	default:
+		resp[0] = (uint32_t)RPMI_ERR_NOT_SUPPORTED;
+		return 1;
+	}
+}
+
 void puc_poll(void)
 {
 	uint32_t head = io_read32(queue_slot(RPMI_QUEUE_A2P_REQ, 0));
@@ -218,6 +312,12 @@ void puc_poll(void)
 		words = serve_base(&hdr, req, resp);
 	} else if (hdr.group == RPMI_GROUP_CLOCK) {
 		words = serve_clock(&hdr, req, resp);
+	} else if (hdr.group == RPMI_GROUP_SYSTEM_RESET) {
+		words = serve_sysreset(&hdr, req, resp);
+	} else if (hdr.group == RPMI_GROUP_HSM) {
+		words = serve_hsm(&hdr, req, resp);
+	} else if (hdr.group == RPMI_GROUP_CPPC) {
+		words = serve_cppc(&hdr, req, resp);
 	} else {
 		resp[0] = (uint32_t)RPMI_ERR_NOT_SUPPORTED;
 		words = 1;

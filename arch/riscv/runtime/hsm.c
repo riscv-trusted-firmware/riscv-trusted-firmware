@@ -10,10 +10,23 @@
 #include <ipi.h>
 #include <sbi/sbi.h>
 #include <spinlock.h>
+#include <suspend.h>
 #include <timer.h>
 
 /* Serialises hart_start requests aimed at the same hart. */
 static unsigned long hsm_start_lock = SPINLOCK_UNLOCK;
+
+static const struct hsm_ops *hsm_ops;
+
+void hsm_register(const struct hsm_ops *ops)
+{
+	hsm_ops = ops;
+}
+
+const char *hsm_name(void)
+{
+	return hsm_ops ? hsm_ops->name : "none";
+}
 
 static bool hsm_transition(struct hart *h, unsigned long from, unsigned long to)
 {
@@ -65,6 +78,14 @@ void __noreturn hsm_hart_wait(void)
 	hart_restart_stack(hsm_wait_loop);
 }
 
+/* A hart stops itself: tell the platform, which may power it down in WFI. */
+static void __noreturn hsm_hart_stopped(void)
+{
+	if (hsm_ops && hsm_ops->hart_stop)
+		hsm_ops->hart_stop(this_hartid());
+	hsm_hart_wait();
+}
+
 int hsm_hart_start(unsigned long hartid, unsigned long entry, unsigned long arg)
 {
 	struct hart *h = hart_get(hartid);
@@ -92,6 +113,13 @@ int hsm_hart_start(unsigned long hartid, unsigned long entry, unsigned long arg)
 		return SBI_ERR_ALREADY_AVAILABLE;
 	if (state != SBI_HSM_STATE_STOPPED)
 		return SBI_ERR_INVALID_STATE;
+
+	/* The platform gets the hart running, the kick gets it out of WFI. */
+	if (hsm_ops && hsm_ops->hart_start && hsm_ops->hart_start(hartid)) {
+		hsm_transition(h, SBI_HSM_STATE_START_PENDING,
+			       SBI_HSM_STATE_STOPPED);
+		return SBI_ERR_FAILED;
+	}
 	ipi_kick(hartid);
 	return SBI_SUCCESS;
 }
@@ -105,7 +133,7 @@ int hsm_hart_stop(void)
 		return SBI_ERR_FAILED;
 
 	timer_hart_init();
-	hsm_hart_wait();
+	hsm_hart_stopped();
 }
 
 /* Sleep until an interrupt the next stage has enabled is pending. */
@@ -177,9 +205,11 @@ int hsm_hart_suspend(unsigned long type, unsigned long resume_addr,
 	return SBI_SUCCESS;
 }
 
-int hsm_system_suspend(unsigned long resume_addr, unsigned long arg)
+int hsm_system_suspend(uint32_t sleep_type, unsigned long resume_addr,
+		       unsigned long arg)
 {
 	unsigned long self = this_hartid();
+	long rc = 0;
 
 	if (!smode_range_ok(resume_addr, 4))
 		return SBI_ERR_INVALID_ADDRESS;
@@ -190,6 +220,13 @@ int hsm_system_suspend(unsigned long resume_addr, unsigned long arg)
 		if (i != self && hart_valid(i) &&
 		    hsm_hart_state(i) != SBI_HSM_STATE_STOPPED)
 			return SBI_ERR_DENIED;
+
+	/* A platform that knows how to sleep is told; the rest is the same. */
+	if (suspend_supported(sleep_type)) {
+		rc = suspend_prepare(sleep_type, resume_addr);
+		if (rc)
+			return (int)rc;
+	}
 	return hsm_hart_suspend(SBI_HSM_SUSPEND_NON_RET_DEFAULT, resume_addr,
 				arg);
 }

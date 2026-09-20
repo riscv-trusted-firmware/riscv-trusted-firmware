@@ -27,6 +27,7 @@
 #include <reset.h>
 #include <rpmi.h>
 #include <service.h>
+#include <suspend.h>
 #include <timer.h>
 
 #include "fdt_fixup.h"
@@ -107,7 +108,8 @@ void image_main(unsigned long hartid, unsigned long fdt)
 	pr_info("timer: %s, ipi: %s, reset: %s, harts: %u\n", timer_name(),
 		ipi_name(), reset_name(), hart_count());
 #ifdef CONFIG_RPMI
-	pr_info("rpmi: %s\n", rpmi_transport_name());
+	pr_info("rpmi: %s, hart power: %s, suspend: %s\n",
+		rpmi_transport_name(), hsm_name(), suspend_name());
 #endif
 #ifdef CONFIG_MPXY
 	pr_info("mpxy: %u channel(s)\n", mpxy_channel_count());

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+menu "Hart power"
+
+config HSM_RPMI
+	bool "RPMI HSM service group"
+	depends on RPMI
+	help
+	  Tell the platform microcontroller when harts are started and
+	  stopped (SBI HSM), so that it can power them up and down.
+
+endmenu

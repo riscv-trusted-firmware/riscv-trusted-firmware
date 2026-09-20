@@ -10,6 +10,7 @@ srcs-$(CONFIG_SBI) += hsm.c
 srcs-$(CONFIG_SBI) += srst.c
 srcs-$(CONFIG_SBI) += fwft.c
 srcs-$(CONFIG_SBI_SUSP) += susp.c
+srcs-$(CONFIG_CPPC) += cppc.c
 srcs-$(CONFIG_SBI_SSE) += sse.c
 srcs-$(CONFIG_SBI_DBTR) += dbtr.c
 srcs-$(CONFIG_MPXY) += mpxy.c

@@ -70,6 +70,19 @@ static inline uint64_t puc_clock_rate(uint32_t id)
 #define PUC_EVENT_DATALEN 8 /* (sequence number, PUC_EVENT_MAGIC) */
 #define PUC_EVENT_MAGIC 0xe7e27
 
+/*
+ * CPPC registers of the model: one read-only, one read-write, the rest absent.
+ */
+#define PUC_CPPC_REG_RO 0 /* HighestPerformance */
+#define PUC_CPPC_REG_RW 5 /* DesiredPerformance */
+#define PUC_CPPC_RO_VALUE 100
+
+/* What the model saw of the M-mode consumers. */
+extern uint32_t puc_hsm_starts, puc_hsm_stops, puc_hsm_last_hart;
+extern uint64_t puc_hsm_last_addr;
+extern uint32_t puc_hsm_refuse; /* answer HSM_HART_START with DENIED */
+extern uint32_t puc_reset_queries;
+
 extern uint32_t puc_posted_value;
 extern uint32_t puc_notifications_enabled;
 
@@ -98,8 +111,9 @@ void test_sse(unsigned long self);
 void test_sse_remote(unsigned long other);
 void sse_secondary_setup(unsigned long hartid);
 
-/* mpxy.c: needs another hart running puc_poll(). */
+/* mpxy.c, rpmi.c: need another hart running puc_poll(). */
 void test_mpxy(void);
+void test_cppc(void);
 
 struct sse_ctx;
 unsigned long strap_handler(unsigned long scause, unsigned long sepc,

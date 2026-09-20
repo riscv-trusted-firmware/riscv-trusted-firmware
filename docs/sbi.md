@@ -14,6 +14,7 @@ and what is still missing.
 | RFENCE    | `RFNC` | all seven calls; the `hfence` ones need the H extension (`NOT_SUPPORTED` otherwise) |
 | HSM       | `HSM`  | start, stop, status, suspend (default retentive and non-retentive types) |
 | SRST      | `SRST` | shutdown, cold and warm reboot through the reset driver |
+| CPPC      | `CPPC` | probe, read, read_hi, write; backend: the RPMI CPPC service group |
 | SUSP      | `SUSP` | suspend to RAM as an M-mode wait with all other harts stopped (`CONFIG_SBI_SUSP`, on for QEMU virt) |
 | FWFT      | `FWFT` | misaligned exception delegation; landing pad, shadow stack, double trap, PTE A/D updating and pointer masking where the hart has them; lock flag |
 | SSE       | `SSE`  | all ten functions; sources: the software injected local and global events, PMU counter overflow (Sscofpmf), double trap (Ssdbltrp) |
@@ -23,8 +24,7 @@ and what is still missing.
 | DBCN      | `DBCN` | write, read, write_byte (`CONFIG_SBI_DBCN`) |
 | Legacy    | `0x00`-`0x08` | all v0.1 calls (`CONFIG_SBI_LEGACY`) |
 
-Not implemented yet: CPPC (it needs a platform backend,
-which RPMI can now provide). They probe as absent. NACL and
+All extensions of SBI v3.0 that are M-mode firmware's to provide are there. NACL and
 STA are interfaces a hypervisor offers its guests, not M-mode firmware.
 
 An extension whose backend is missing (no timer, IPI or reset driver)
@@ -54,6 +54,8 @@ arch/riscv/runtime/       hart.c    per-hart state, feature probing, S-mode entr
 services/mpxy/            MPXY core (shared memory, channels, attributes)
                           and the RPMI message protocol for channels
 drivers/rpmi/             RPMI client + shared memory transport
+drivers/reset/ suspend/   RPMI backends for system reset, system suspend,
+  hsm/ cppc/              hart power and CPPC, next to the local ones
 drivers/irqchip/          PLIC, APLIC, IMSIC: machine-level set-up, found in the device tree
 drivers/timer/            timer core + ACLINT MTIMER
 drivers/ipi/              IPI core (event multiplexing) + ACLINT MSWI
@@ -260,6 +262,18 @@ cached; a group the PuC does not implement makes its channel
 `SBI_ERR_NOT_SUPPORTED`. Notification events are buffered per channel with
 the events state (returned / remaining / lost).
 
+**RPMI in M-mode.** The service groups the specification keeps for M-mode
+back the monitor's own services: SYSTEM_RESET is a reset backend (the best
+rated one that supports a reset type is used, so the PuC comes before a
+local reset device, and a posted reset gets a grace period before the hart
+gives up and halts); SYSTEM_SUSPEND tells the PuC when S-mode suspends the
+system, before the last hart waits for its wake-up interrupt; HSM tells it
+when harts start and stop, with the monitor's entry point as the address a
+powered-up hart comes back through; CPPC serves the SBI CPPC extension. The
+PuC is asked when something is wanted, not at boot. One that does not
+answer is taken for one that does not offer the service, at the cost of a
+timeout each time; one that answers no is an error for the caller.
+
 ## Testing
 
 `images/sbitest` (`CONFIG_IMAGE_SBITEST`, on in the defconfigs) is an S-mode
@@ -271,7 +285,9 @@ convention and unprivileged hart-mask reads). QEMU virt has no platform
 microcontroller, so for MPXY and RPMI one of the secondary harts serves a
 PuC model (`images/sbitest/puc.c`: BASE and clock service groups, plus test
 services that stay silent, send a stale acknowledgment or fire
-notifications) over the real shared memory queues, set aside in RAM by
+notifications, and the reset, HSM and CPPC groups as the monitor's backends
+use them; the run ends with a shutdown that reaches the model over RPMI)
+over the real shared memory queues, set aside in RAM by
 `CONFIG_QEMU_VIRT_RPMI`. It prints `sbitest: PASS` or
 `sbitest: FAIL` and powers off through SRST; `scripts/boot-test.sh` greps
 for the verdict.
@@ -312,10 +328,10 @@ with `IMAGE_SBITEST` disabled.
 
 1. SSE RAS events (no source yet); DBTR trigger types other than address /
    data match.
-2. **RPMI consumers in M-mode**: system reset, system suspend, HSM and
-   CPPC backends over RPMI; service groups implemented by the firmware
-   itself behind the same MPXY channels; MSI / SSE indication of
-   notifications; transport and channel discovery from the device tree
+2. **RPMI**: service groups implemented by the firmware itself behind the
+   same MPXY channels; MSI / SSE indication of notifications; the P2A
+   doorbell and the SYSTEM_MSI group; CPPC fast channels and the PuC's HSM
+   suspend types; transport and channel discovery from the device tree
    (`riscv,rpmi-shmem-mbox`, `riscv,rpmi-mpxy-*`).
 3. Misaligned vector loads and stores are not emulated (redirected to
    S-mode).

@@ -14,6 +14,25 @@
 #include <arch/trap.h>
 #include <hartmask.h>
 
+/*
+ * Optional platform control over hart power, around the state machine: a
+ * stopped hart sits in WFI in the monitor either way, and a platform may
+ * take it down from there and bring it back through the monitor's entry
+ * point. Return 0 or an SBI error code.
+ */
+struct hsm_ops {
+	const char *name;
+	/*
+	 * Make sure 'hartid' runs (again); called by the hart that starts it.
+	 */
+	long (*hart_start)(unsigned long hartid);
+	/* The calling hart is about to wait until it is started again. */
+	void (*hart_stop)(unsigned long hartid);
+};
+
+void hsm_register(const struct hsm_ops *ops);
+const char *hsm_name(void);
+
 /* Boot hart: becomes STARTED and enters the next stage at 'entry'. */
 void __noreturn hsm_boot_hart_start(unsigned long entry, unsigned long arg);
 
@@ -31,7 +50,8 @@ int hsm_hart_suspend(unsigned long type, unsigned long resume_addr,
  * Non-retentive suspend of the calling hart as the last one running:
  * SBI_ERR_DENIED unless every other hart is stopped.
  */
-int hsm_system_suspend(unsigned long resume_addr, unsigned long arg);
+int hsm_system_suspend(uint32_t sleep_type, unsigned long resume_addr,
+		       unsigned long arg);
 /* SBI_HSM_STATE_* or SBI_ERR_INVALID_PARAM. */
 long hsm_hart_state(unsigned long hartid);
 

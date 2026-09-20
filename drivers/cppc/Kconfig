@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+menu "CPPC"
+
+config CPPC
+	bool
+
+config CPPC_RPMI
+	bool "RPMI CPPC service group"
+	depends on RPMI
+	select CPPC
+	help
+	  Collaborative processor performance control registers served by
+	  the platform microcontroller, for the SBI CPPC extension.
+
+endmenu

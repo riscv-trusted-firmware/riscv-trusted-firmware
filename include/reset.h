@@ -6,7 +6,10 @@
 #ifndef RESET_H
 #define RESET_H
 
-/* System reset: one backend, registered by a driver. */
+/*
+ * System reset. Drivers register backends; for a given reset type the
+ * supporting backend with the highest rating is used.
+ */
 
 #include <compiler.h>
 #include <stdbool.h>
@@ -19,16 +22,21 @@ enum reset_type {
 
 struct reset_ops {
 	const char *name;
+	unsigned int rating;
 	bool (*supported)(enum reset_type type);
-	/* Returns only when the reset did not happen. */
+	/*
+	 * Returns when the reset did not happen, or not yet: a backend may
+	 * only have asked someone else for it.
+	 */
 	void (*reset)(enum reset_type type);
 };
 
 void reset_register(const struct reset_ops *ops);
+/* The registered backends, best first. */
 const char *reset_name(void);
 bool reset_supported(enum reset_type type);
 
-/* Halt the other harts, then reset (or halt as well, without a backend). */
+/* Reset, halt the other harts, and halt. */
 void __noreturn system_reset(enum reset_type type);
 
 #endif

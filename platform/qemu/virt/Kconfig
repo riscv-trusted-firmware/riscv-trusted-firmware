@@ -64,12 +64,18 @@ config QEMU_VIRT_RPMI
 	select RPMI_SHMEM
 	select RPMI_SHMEM_IN_RAM
 	select MPXY
+	select RESET_RPMI
+	select SUSPEND_RPMI
+	select HSM_RPMI
+	select CPPC_RPMI
 	help
 	  QEMU virt has no platform microcontroller. This sets 16 KiB of RAM
 	  aside as an RPMI shared memory transport and publishes MPXY
-	  channels for the clock and voltage service groups. The SBI test
-	  payload runs a PuC model on one hart to test MPXY, the RPMI client
-	  and the transport end to end.
+	  channels for the clock and voltage service groups, and turns on the
+	  RPMI backends for reset, suspend, hart power and CPPC. The SBI test
+	  payload runs a PuC model on one hart to test all of that end to
+	  end; with no PuC listening the backends stand aside (after a
+	  timeout each time they are asked).
 
 if QEMU_VIRT_RPMI
 

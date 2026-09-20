@@ -183,41 +183,41 @@ int rpmi_post(uint16_t group, uint8_t service, const void *req, size_t req_len)
 	return rc;
 }
 
-/* A BASE service without request data that returns (STATUS, value). */
-int rpmi_base_get(uint8_t service, uint32_t *value)
+int rpmi_call(uint16_t group, uint8_t service, const uint32_t *req,
+	      unsigned int req_words, uint32_t *resp, unsigned int resp_words)
 {
-	uint32_t resp[2] = { 0 };
 	size_t len = 0;
 	int rc = 0;
 
-	rc = rpmi_request(RPMI_GROUP_BASE, service, NULL, 0, resp, sizeof(resp),
-			  &len);
+	rc = rpmi_request(group, service, req, 4 * req_words, resp,
+			  4 * resp_words, &len);
 	if (rc)
 		return rc;
 	if ((int32_t)resp[0])
 		return (int32_t)resp[0];
-	if (len < sizeof(resp))
-		return RPMI_ERR_IO;
-	*value = resp[1];
-	return RPMI_SUCCESS;
+	return len < 4 * resp_words ? RPMI_ERR_IO : RPMI_SUCCESS;
+}
+
+/* A BASE service without request data that returns (STATUS, value). */
+int rpmi_base_get(uint8_t service, uint32_t *value)
+{
+	uint32_t resp[2] = { 0 };
+	int rc = rpmi_call(RPMI_GROUP_BASE, service, NULL, 0, resp, 2);
+
+	if (!rc)
+		*value = resp[1];
+	return rc;
 }
 
 int rpmi_probe_group(uint16_t group, uint32_t *version)
 {
 	uint32_t req = group, resp[2] = { 0 };
-	size_t len = 0;
-	int rc = 0;
+	int rc = rpmi_call(RPMI_GROUP_BASE, RPMI_BASE_PROBE_SERVICE_GROUP, &req,
+			   1, resp, 2);
 
-	rc = rpmi_request(RPMI_GROUP_BASE, RPMI_BASE_PROBE_SERVICE_GROUP, &req,
-			  sizeof(req), resp, sizeof(resp), &len);
-	if (rc)
-		return rc;
-	if ((int32_t)resp[0])
-		return (int32_t)resp[0];
-	if (len < sizeof(resp))
-		return RPMI_ERR_IO;
-	*version = resp[1];
-	return RPMI_SUCCESS;
+	if (!rc)
+		*version = resp[1];
+	return rc;
 }
 
 int rpmi_event_sink_register(uint16_t group, rpmi_event_sink_t sink, void *ctx)

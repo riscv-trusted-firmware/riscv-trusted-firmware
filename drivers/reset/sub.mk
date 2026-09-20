@@ -3,3 +3,4 @@
 
 srcs-y += reset.c
 srcs-$(CONFIG_RESET_SIFIVE_TEST) += sifive_test.c
+srcs-$(CONFIG_RESET_RPMI) += rpmi_reset.c

@@ -10,4 +10,11 @@ config RESET_SIFIVE_TEST_ADDR
 	hex "Register address"
 	depends on RESET_SIFIVE_TEST
 
+config RESET_RPMI
+	bool "RPMI SYSTEM_RESET service group"
+	depends on RPMI
+	help
+	  Shutdown and reboot through the platform microcontroller. Preferred
+	  over the other reset devices for the reset types the PuC supports.
+
 endmenu

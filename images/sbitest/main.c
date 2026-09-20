@@ -260,8 +260,9 @@ static void test_base(void)
 	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, BOGUS_EID);
 	CHECK_RET(ret, SBI_SUCCESS);
 	CHECK(ret.value == 0, "bogus extension probed");
-	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_CPPC);
-	CHECK(ret.value == 0, "CPPC probed but not implemented");
+	/* An interface of hypervisors, not of M-mode firmware. */
+	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_NACL);
+	CHECK(ret.value == 0, "NACL probed");
 	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_FWFT);
 	CHECK(ret.value != 0, "FWFT not probed");
 
@@ -620,6 +621,66 @@ static void test_suspend_self(void)
 	      "status %ld after resume", hart_status(boot_hartid));
 }
 
+/* The hart that served the PuC model, to bring it back for the last act. */
+static unsigned long puc_hart = ~UL(0);
+
+#ifdef CONFIG_HSM_RPMI
+/*
+ * With a PuC listening, starting and stopping a hart goes through it (the
+ * monitor's RPMI HSM backend). Needs a secondary besides the PuC's.
+ */
+static void test_hsm_platform(unsigned long puc)
+{
+	unsigned long h = 0, other = ~UL(0);
+	uint32_t starts = 0, stops = 0;
+	struct sbiret ret = {};
+
+	for (h = 0; h < MAX_HARTS; h++)
+		if (h != boot_hartid && h != puc && READ_ONCE(mbox[h].started))
+			other = h;
+	if (other == ~UL(0))
+		return;
+
+	printf("hsm (platform)\n");
+	stops = READ_ONCE(puc_hsm_stops);
+	WRITE_ONCE(mbox[other].cmd, CMD_STOP);
+	CHECK(WAIT_FOR(hart_status(other) == SBI_HSM_STATE_STOPPED),
+	      "hart %lu status %ld", other, hart_status(other));
+	CHECK(READ_ONCE(puc_hsm_stops) == stops + 1 &&
+	      READ_ONCE(puc_hsm_last_hart) == other,
+	      "PuC saw %u stops, last hart %u",
+	      READ_ONCE(puc_hsm_stops) - stops, READ_ONCE(puc_hsm_last_hart));
+
+	/* A PuC that says no: the start fails and the hart stays stopped. */
+	WRITE_ONCE(puc_hsm_refuse, 1);
+	ret = sbi_call3(SBI_EXT_HSM, SBI_HSM_HART_START, other,
+			(unsigned long)_secondary_start, MAGIC);
+	CHECK_RET(ret, SBI_ERR_FAILED);
+	CHECK(hart_status(other) == SBI_HSM_STATE_STOPPED,
+	      "status %ld after a refused start", hart_status(other));
+	WRITE_ONCE(puc_hsm_refuse, 0);
+
+	starts = READ_ONCE(puc_hsm_starts);
+	WRITE_ONCE(mbox[other].started, 0);
+	ret = sbi_call3(SBI_EXT_HSM, SBI_HSM_HART_START, other,
+			(unsigned long)_secondary_start, MAGIC + other);
+	CHECK_RET(ret, SBI_SUCCESS);
+	CHECK(WAIT_FOR(READ_ONCE(mbox[other].started) == MAGIC + other),
+	      "hart %lu did not start", other);
+	/* The PuC is given the monitor's entry point, not ours. */
+	CHECK(READ_ONCE(puc_hsm_starts) == starts + 1 &&
+	      READ_ONCE(puc_hsm_last_hart) == other &&
+	      puc_hsm_last_addr == CONFIG_MONITOR_LOAD_ADDR,
+	      "PuC saw %u starts, hart %u, address %llx",
+	      READ_ONCE(puc_hsm_starts) - starts, READ_ONCE(puc_hsm_last_hart),
+	      (unsigned long long)puc_hsm_last_addr);
+}
+#else
+static void test_hsm_platform(unsigned long puc)
+{
+}
+#endif
+
 static void test_smp(void)
 {
 	unsigned int secondaries = 0;
@@ -663,7 +724,10 @@ static void test_smp(void)
 		WRITE_ONCE(mbox[first].cmd, CMD_PUC);
 		CHECK(WAIT_FOR(READ_ONCE(mbox[first].puc)),
 		      "hart %lu: no PuC model", first);
+		puc_hart = first;
 		test_mpxy();
+		test_cppc();
+		test_hsm_platform(first);
 	}
 
 	if (first != ~UL(0)) {
@@ -1304,6 +1368,25 @@ static void system_resumed(unsigned long opaque)
 static void test_finish(void)
 {
 	test_srst_errors();
+
+#ifdef CONFIG_RESET_RPMI
+	/*
+	 * The last act goes through the PuC when there can be one: bring its
+	 * hart back, and the shutdown below reaches it over RPMI.
+	 */
+	if (puc_hart != ~UL(0)) {
+		WRITE_ONCE(mbox[puc_hart].started, 0);
+		WRITE_ONCE(mbox[puc_hart].puc, 0);
+		if (!sbi_call3(SBI_EXT_HSM, SBI_HSM_HART_START, puc_hart,
+			       (unsigned long)_secondary_start, MAGIC)
+			     .error &&
+		    WAIT_FOR(READ_ONCE(mbox[puc_hart].started))) {
+			WRITE_ONCE(mbox[puc_hart].cmd, CMD_PUC);
+			CHECK(WAIT_FOR(READ_ONCE(mbox[puc_hart].puc)),
+			      "no PuC model for the shutdown");
+		}
+	}
+#endif
 
 	printf("sbitest: %u checks, %u failed\n", checks, failures);
 	printf("sbitest: %s\n", failures ? "FAIL" : "PASS");

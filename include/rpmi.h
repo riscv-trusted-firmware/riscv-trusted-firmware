@@ -90,6 +90,17 @@ struct rpmi_hdr {
 #define RPMI_BASE_PROBE_SERVICE_GROUP 0x06
 #define RPMI_BASE_GET_ATTRIBUTES 0x07
 
+/* SYSTEM_RESET, SYSTEM_SUSPEND, HSM and CPPC service groups. */
+#define RPMI_SYSRST_GET_ATTRIBUTES 0x02
+#define RPMI_SYSRST_RESET 0x03
+#define RPMI_SYSSUSP_GET_ATTRIBUTES 0x02
+#define RPMI_SYSSUSP_SUSPEND 0x03
+#define RPMI_HSM_HART_START 0x06
+#define RPMI_HSM_HART_STOP 0x07
+#define RPMI_CPPC_PROBE_REG 0x02
+#define RPMI_CPPC_READ_REG 0x03
+#define RPMI_CPPC_WRITE_REG 0x04
+
 /* Event header inside a notification: EVENT_ID[23:16] EVENT_DATALEN[15:0] */
 #define RPMI_EVENT_HDR_SIZE 4
 #define RPMI_EVENT_DATALEN(hdr) ((hdr) & 0xffff)
@@ -140,6 +151,14 @@ int rpmi_request(uint16_t group, uint8_t service, const void *req,
 		 size_t req_len, void *resp, size_t resp_max, size_t *resp_len);
 /* Send a posted request: nothing comes back. */
 int rpmi_post(uint16_t group, uint8_t service, const void *req, size_t req_len);
+
+/*
+ * A normal request with 'req_words' words in and up to 'resp_words' words
+ * out, STATUS first. 0, or a negative RPMI error: the client's own, else
+ * the STATUS of the acknowledgment. A short acknowledgment is RPMI_ERR_IO.
+ */
+int rpmi_call(uint16_t group, uint8_t service, const uint32_t *req,
+	      unsigned int req_words, uint32_t *resp, unsigned int resp_words);
 
 /* BASE group: 0 or a negative RPMI error, transport or STATUS alike. */
 int rpmi_base_get(uint8_t service, uint32_t *value);

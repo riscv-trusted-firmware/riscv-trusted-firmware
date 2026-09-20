@@ -8,3 +8,4 @@ srcs-y += mpxy.c
 srcs-y += puc.c
 srcs-y += sse.c
 srcs-y += dbtr.c
+srcs-y += rpmi.c

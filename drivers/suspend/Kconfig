@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+menu "System suspend"
+
+config SUSPEND_RPMI
+	bool "RPMI SYSTEM_SUSPEND service group"
+	depends on RPMI
+	help
+	  Tell the platform microcontroller when S-mode suspends the system
+	  (SBI SUSP), so that it can take the platform down once the last
+	  hart waits for an interrupt.
+
+endmenu
