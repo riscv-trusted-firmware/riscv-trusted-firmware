@@ -294,6 +294,14 @@ static void test_vendor(void)
 {
 	struct sbiret ret = {};
 
+#ifndef CONFIG_PLAT_QEMU_VIRT
+	/* No platform, no vendor calls. */
+	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION,
+			SBI_EXT_VENDOR_START);
+	CHECK(!ret.error && ret.value == 0, "a vendor extension: %ld %ld",
+	      ret.error, ret.value);
+	return;
+#endif
 	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION,
 			SBI_EXT_VENDOR_START);
 	CHECK(!ret.error && ret.value == 1, "vendor extension: %ld %ld",
@@ -1069,9 +1077,10 @@ static void test_fdt(unsigned long addr)
 	CHECK(fdt_check_full(fdt, fdt_totalsize(fdt)) == 0,
 	      "fdt_check_full failed");
 
+#ifdef CONFIG_PLAT_QEMU_VIRT
 	/*
-	 * An idle state of a suspend type the monitor would refuse is not
-	 * offered.
+	 * The platform's test setup: an idle state of a suspend type the
+	 * monitor would refuse is not offered.
 	 */
 	node = fdt_path_offset(fdt, "/cpus/test-idle-ok");
 	CHECK(node >= 0 && !fdt_getprop(fdt, node, "status", NULL),
@@ -1079,6 +1088,7 @@ static void test_fdt(unsigned long addr)
 	node = fdt_path_offset(fdt, "/cpus/test-idle-reserved");
 	CHECK(node >= 0 && fdt_getprop(fdt, node, "status", NULL),
 	      "the idle state nobody can enter");
+#endif
 
 	parent = fdt_path_offset(fdt, "/reserved-memory");
 	CHECK(parent >= 0, "no /reserved-memory node");

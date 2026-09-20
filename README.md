@@ -22,7 +22,8 @@ What is implemented and what is next: [docs/sbi.md](docs/sbi.md).
 
 ```
 pip install kconfiglib            # once
-make qemu_virt_rv64_defconfig     # or qemu_virt_rv32_defconfig, qemu_virt_rv64_2stage_defconfig
+make qemu_virt_rv64_defconfig     # or qemu_virt_rv32_defconfig, qemu_virt_rv64_2stage_defconfig,
+                                  # generic_rv64_defconfig, generic_rv32_defconfig
 make -j
 make run                          # QEMU; Ctrl-A X to quit
 ```
@@ -30,6 +31,10 @@ make run                          # QEMU; Ctrl-A X to quit
 The defconfigs build the SBI test payload as the next stage: `make run`
 prints its report and powers off. `sh scripts/boot-test.sh build` does the
 same and checks the verdict.
+
+The generic platform has no board in it: every driver is built and the
+device tree decides. `make run QEMU_MACHINE=spike` (or `sifive_u`, `virt`)
+boots the same image on another machine.
 
 `make LLVM=1` builds with clang and ld.lld; `make help` lists everything.
 See [docs/build-system.md](docs/build-system.md) for the layout and how to

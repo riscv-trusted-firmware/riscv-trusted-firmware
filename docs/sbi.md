@@ -63,10 +63,33 @@ drivers/rpmi/             RPMI client + shared memory transport
 drivers/reset/ suspend/   RPMI backends for system reset, system suspend,
   hsm/ cppc/              hart power and CPPC, next to the local ones
 drivers/irqchip/          PLIC, APLIC, IMSIC: machine-level set-up, found in the device tree
-drivers/timer/            timer core + ACLINT MTIMER
-drivers/ipi/              IPI core (event multiplexing) + ACLINT MSWI
-drivers/reset/            reset core + SiFive test finisher
+drivers/serial/           the console: 8250, SiFive, HTIF, UART Lite, Cadence, LiteX,
+                          Gaisler, Shakti, Renesas SCIF, semihosting
+drivers/timer/            timer core + ACLINT MTIMER (SiFive and T-Head CLINT, Andes PLMT)
+drivers/ipi/              IPI core (event multiplexing) + ACLINT MSWI, Andes PLICSW
+drivers/gpio/             output lines for the drivers + SiFive GPIO
+drivers/reset/            reset core + SiFive test finisher, syscon, HTIF, GPIO
+                          power-off / restart, watchdogs (Allwinner D1, Andes)
+platform/generic/fdt/     no board: whatever the device tree describes
+platform/qemu/virt/       the same, plus the test setups QEMU has no hardware for
 ```
+
+**Platforms.** `PLAT_GENERIC` builds every driver and takes everything from
+the device tree it is handed: the console is the UART `/chosen/stdout-path`
+names (or the first one a driver knows, or a debugger's semihosting when a
+tree has none), the devices are what the drivers' compatibles match, the
+harts and domains are counted at boot. One image boots QEMU's `virt`,
+`spike` (HTIF console and power-off) and `sifive_u` machines (SiFive UART,
+GPIO restart, and a hart 0 without S-mode, which can boot the monitor but
+is never offered to the next stage: the first hart with an S-mode enters
+it instead). A board that needs more than its tree can say gets a directory
+under `platform/`, the way QEMU virt has one for its test setups.
+
+Of the drivers, QEMU can run the 8250, SiFive UART, HTIF, semihosting,
+ACLINT/CLINT, PLIC/APLIC/IMSIC, SiFive test and syscon reset. The rest
+(UART Lite, Cadence, LiteX, Gaisler, Shakti, SCIF; Andes PLMT and PLICSW;
+GPIO restart, the watchdog resets) are written to the register
+descriptions and have not met their hardware.
 
 ### Harts and traps
 
@@ -494,7 +517,9 @@ with `IMAGE_SBITEST` disabled.
 3. The monitor's size is a build-time constant, and so is the most harts
    it can manage (a bit in a hart mask each). What there is
    of harts, domains and regions is counted at boot.
-4. More timer / IPI / reset / serial drivers.
+4. Drivers that take an I2C bus (PMIC resets) and boards whose quirks need
+   a platform directory of their own; the drivers QEMU cannot run are
+   untested.
 
 The H-extension paths (trap redirection from VS/VU-mode, `hfence` on a real
 guest) are written after the specification but have not run under a

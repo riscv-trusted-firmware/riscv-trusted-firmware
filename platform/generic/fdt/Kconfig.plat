@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+config PLAT_GENERIC
+	bool "Generic: whatever the device tree describes"
+	select RISCV_ISA_M
+	select RISCV_ISA_A
+	select RISCV_ISA_C
+	select RISCV_EXT_SSTC
+	select RISCV_EXT_SSCOFPMF
+	select RISCV_EXT_SMEPMP
+	select RISCV_EXT_SMSTATEEN
+	select SERIAL_UART8250
+	select SERIAL_SIFIVE
+	select SERIAL_HTIF
+	select SERIAL_UARTLITE
+	select SERIAL_CADENCE
+	select SERIAL_LITEX
+	select SERIAL_GAISLER
+	select SERIAL_SHAKTI
+	select SERIAL_RENESAS_SCIF
+	select SERIAL_SEMIHOSTING
+	select TIMER_ACLINT_MTIMER
+	select IPI_ACLINT_MSWI
+	select IPI_ANDES_PLICSW
+	select IRQCHIP_PLIC
+	select IRQCHIP_APLIC
+	select IRQCHIP_IMSIC
+	select GPIO_SIFIVE
+	select RESET_SIFIVE_TEST
+	select RESET_SYSCON
+	select RESET_HTIF
+	select RESET_GPIO
+	select RESET_WDT

@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+if PLAT_GENERIC
+
+config PLATFORM_DIR
+	default "generic/fdt"
+
+config PLATFORM_NAME
+	default "generic"
+
+# A bit in a hart mask each; what takes memory is sized at boot.
+config PLATFORM_HART_COUNT
+	default 128
+
+# Where it is linked; position-independent, it runs wherever it is put.
+config PLATFORM_FW_START
+	default 0x80000000
+
+config MONITOR_NEXT_STAGE_ADDR
+	default 0x80400000 if RISCV_RV32I
+	default 0x80200000
+
+config SBI_SUSP
+	default y
+
+endif

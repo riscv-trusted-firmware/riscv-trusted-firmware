@@ -53,3 +53,56 @@ jobs:
           sed -i 's/^CONFIG_MONITOR_NEXT_STAGE_ADDR=.*/CONFIG_MONITOR_NEXT_STAGE_ADDR=0x80e00000/' build/.config
           make olddefconfig
           MAKEARGS="W=1 QEMU_KERNEL=build/images/sbitest/sbitest.bin ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+
+  # One image, no board in it: the device tree of three QEMU machines.
+  generic:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        defconfig: [generic_rv64_defconfig, generic_rv32_defconfig]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchains and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-riscv64-unknown-elf qemu-system-misc
+          pip install kconfiglib
+      - name: Configure
+        run: make ${{ matrix.defconfig }}
+      - name: Build
+        run: make -j"$(nproc)" W=1
+      - name: Boot test, virt (8250, PLIC, SiFive test finisher)
+        run: MAKEARGS="QEMU_MACHINE=virt" sh scripts/boot-test.sh build
+      - name: Boot test, spike (HTIF console and power-off)
+        run: MAKEARGS="QEMU_MACHINE=spike" sh scripts/boot-test.sh build
+      - name: Boot test, sifive_u (SiFive UART; the boot hart may have no S-mode)
+        if: matrix.defconfig == 'generic_rv64_defconfig'
+        run: MAKEARGS="QEMU_MACHINE=sifive_u" sh scripts/boot-test.sh build
+
+  checkpatch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Get checkpatch.pl
+        run: |
+          mkdir -p /tmp/linux/scripts && cd /tmp/linux/scripts
+          for f in checkpatch.pl spelling.txt const_structs.checkpatch; do
+            wget --quiet https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/scripts/$f
+          done
+          chmod +x checkpatch.pl
+      - name: Run checkpatch on every commit
+        run: |
+          export CHECKPATCH=/tmp/linux/scripts/checkpatch.pl
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            range="${{ github.event.pull_request.base.sha }}..HEAD"
+          else
+            range="HEAD~1..HEAD"
+          fi
+          failed=0
+          for c in $(git rev-list --reverse $range); do
+            scripts/checkpatch.sh $c || failed=1
+          done
+          [ $failed -eq 0 ]
