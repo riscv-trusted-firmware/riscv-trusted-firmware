@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+config IMAGE_LOADER
+	bool "First-stage loader"
+	help
+	  Minimal first stage: runs from the reset/firmware address and hands
+	  over to the monitor at LOADER_NEXT_STAGE_ADDR, preserving the hart
+	  id and device tree. Exercises the multi-image build; image loading
+	  and verification come later.
+
+if IMAGE_LOADER
+
+config LOADER_LOAD_ADDR
+	hex "Loader link/load address"
+	default PLATFORM_FW_START
+
+config LOADER_SIZE
+	hex "Memory reserved for the loader"
+	default 0x40000
+
+config LOADER_NEXT_STAGE_ADDR
+	hex "Address the loader jumps to"
+
+endif

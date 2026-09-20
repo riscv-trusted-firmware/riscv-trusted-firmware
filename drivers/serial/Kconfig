@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+menu "Serial"
+
+config SERIAL_UART8250
+	bool "8250/16550-compatible UART"
+
+if SERIAL_UART8250
+
+config SERIAL_UART8250_BASE
+	hex "Register base address"
+
+config SERIAL_UART8250_CLOCK
+	int "Input clock (Hz)"
+
+config SERIAL_UART8250_BAUD
+	int "Baud rate"
+	default 115200
+
+config SERIAL_UART8250_REG_SHIFT
+	int "Register stride shift"
+	default 0
+
+config SERIAL_UART8250_REG_WIDTH
+	int "Register access width (bytes)"
+	default 1
+
+endif
+
+endmenu

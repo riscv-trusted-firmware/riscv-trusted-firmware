@@ -1,0 +1,6 @@
+/build/
+/build-*/
+*.o
+*.o.d
+*.su
+__pycache__/

@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+config LIB_UTILS
+	bool
+	default y
+	help
+	  panic() and small helpers.

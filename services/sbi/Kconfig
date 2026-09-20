@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+menuconfig SBI
+	bool "SBI (Supervisor Binary Interface)"
+	default y
+	help
+	  RISC-V SBI implementation exposed to S-mode software (the base
+	  extension is always present when SBI is enabled; the other
+	  extensions are added as separate services).
+
+if SBI
+
+config SBI_IMPL_ID
+	hex "SBI implementation ID"
+	default 0xff
+	help
+	  Value returned by sbi_get_impl_id(). IDs are allocated in the SBI
+	  specification; 0xff is a placeholder until one is registered.
+
+config SBI_IMPL_VERSION
+	hex "SBI implementation version"
+	default 0x00000100
+
+endif

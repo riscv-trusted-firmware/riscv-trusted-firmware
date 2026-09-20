@@ -1,0 +1,53 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
+/*
+ * Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+ */
+
+#ifndef SBI_SBI_H
+#define SBI_SBI_H
+
+/* RISC-V SBI specification: error codes and extension IDs. */
+
+#define SBI_SUCCESS 0
+#define SBI_ERR_FAILED -1
+#define SBI_ERR_NOT_SUPPORTED -2
+#define SBI_ERR_INVALID_PARAM -3
+#define SBI_ERR_DENIED -4
+#define SBI_ERR_INVALID_ADDRESS -5
+#define SBI_ERR_ALREADY_AVAILABLE -6
+#define SBI_ERR_ALREADY_STARTED -7
+#define SBI_ERR_ALREADY_STOPPED -8
+#define SBI_ERR_NO_SHMEM -9
+#define SBI_ERR_INVALID_STATE -10
+#define SBI_ERR_BAD_RANGE -11
+
+#define SBI_EXT_BASE 0x10
+#define SBI_EXT_TIME 0x54494D45
+#define SBI_EXT_IPI 0x735049
+#define SBI_EXT_RFENCE 0x52464E43
+#define SBI_EXT_HSM 0x48534D
+#define SBI_EXT_SRST 0x53525354
+#define SBI_EXT_PMU 0x504D55
+#define SBI_EXT_DBCN 0x4442434E
+#define SBI_EXT_SUSP 0x53555350
+#define SBI_EXT_CPPC 0x43505043
+#define SBI_EXT_NACL 0x4E41434C
+#define SBI_EXT_STA 0x535441
+#define SBI_EXT_SSE 0x535345
+#define SBI_EXT_FWFT 0x46574654
+#define SBI_EXT_DBTR 0x44425452
+#define SBI_EXT_MPXY 0x4D505859
+
+/* Base extension function IDs. */
+#define SBI_BASE_GET_SPEC_VERSION 0
+#define SBI_BASE_GET_IMPL_ID 1
+#define SBI_BASE_GET_IMPL_VERSION 2
+#define SBI_BASE_PROBE_EXTENSION 3
+#define SBI_BASE_GET_MVENDORID 4
+#define SBI_BASE_GET_MARCHID 5
+#define SBI_BASE_GET_MIMPID 6
+
+#define SBI_SPEC_VERSION_MAJOR 2
+#define SBI_SPEC_VERSION_MINOR 0
+
+#endif

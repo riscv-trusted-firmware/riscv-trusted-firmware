@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+#
+# Platforms register themselves by directory layout, no central list:
+#
+#   platform/<vendor>/<board>/Kconfig.plat   the choice entry (config PLAT_<X>)
+#   platform/<vendor>/<board>/Kconfig        options and defaults, under 'if PLAT_<X>'
+#   platform/<vendor>/<board>/plat.mk        Make hooks (plat-run, ...)
+#   platform/<vendor>/<board>/sub.mk         sources
+
+menu "Platform"
+
+choice
+	prompt "Target platform"
+
+source "platform/*/*/Kconfig.plat"
+
+endchoice
+
+# Platform files first: a platform's 'default' for a shared symbol must come
+# before the generic one below to take precedence.
+source "platform/*/*/Kconfig"
+
+config PLATFORM_DIR
+	string
+	help
+	  Path below platform/, set by the selected platform.
+
+config PLATFORM_NAME
+	string
+
+config PLATFORM_HART_COUNT
+	int "Maximum number of harts"
+	range 1 4096
+	default 1
+
+config PLATFORM_FW_START
+	hex "Firmware load/link address"
+
+config PLATFORM_FW_SIZE
+	hex "Memory reserved for the firmware"
+	default 0x200000
+
+endmenu

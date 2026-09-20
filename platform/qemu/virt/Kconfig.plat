@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+config PLAT_QEMU_VIRT
+	bool "QEMU virt machine"
+	select RISCV_ISA_M
+	select RISCV_ISA_A
+	select RISCV_ISA_C
+	select RISCV_EXT_SSTC
+	select SERIAL_UART8250

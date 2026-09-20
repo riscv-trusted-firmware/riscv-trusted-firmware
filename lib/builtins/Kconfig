@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+config LIB_BUILTINS
+	bool "Always build the compiler runtime helpers"
+	help
+	  64-bit division helpers (__udivdi3 and friends) the compiler may
+	  call on RV32. They are built automatically when the toolchain ships
+	  no libgcc/compiler-rt for the target; enable this to build them
+	  regardless.

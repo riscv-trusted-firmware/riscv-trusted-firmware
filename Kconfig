@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+#
+# Top-level Kconfig. Order matters: platforms are sourced first so that a
+# platform can provide defaults for symbols owned by drivers, services, etc.
+# (a 'default' listed first wins).
+
+mainmenu "$(PROJECT_NAME) $(PROJECT_VERSION) configuration"
+
+source "platform/Kconfig"
+source "arch/Kconfig"
+
+menu "General"
+
+choice
+	prompt "Optimisation level"
+	default OPTIMIZE_SIZE
+
+config OPTIMIZE_SIZE
+	bool "Size (-Os)"
+
+config OPTIMIZE_SPEED
+	bool "Speed (-O2)"
+
+config OPTIMIZE_DEBUG
+	bool "Debug (-Og)"
+
+endchoice
+
+config DEBUG_INFO
+	bool "Compile with debug info (-g3)"
+	default y
+
+config WERROR
+	bool "Treat warnings as errors"
+	default y
+
+config STACK_USAGE
+	bool "Emit per-function stack usage (.su files)"
+
+config STACK_SIZE
+	hex "Per-hart stack size"
+	default 0x2000
+
+config LOG_LEVEL
+	int "Log level (0=none, 1=error, 2=warn, 3=info, 4=debug)"
+	range 0 4
+	default 3
+
+endmenu
+
+source "images/Kconfig"
+source "lib/Kconfig"
+source "drivers/Kconfig"
+source "services/Kconfig"

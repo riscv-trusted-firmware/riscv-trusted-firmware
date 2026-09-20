@@ -1,0 +1,142 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+#
+# RISC-V ISA configuration.
+#
+#  RISCV_ISA_*  extensions the compiler may use (they form -march)
+#  RISCV_EXT_*  privileged / runtime extensions the firmware drives
+#               (no compiler impact; only ratified specifications)
+#
+# A platform normally 'select's what its SoC implements from
+# platform/<vendor>/<board>/Kconfig.
+
+choice
+	prompt "Base ISA"
+	default RISCV_RV64I
+
+config RISCV_RV64I
+	bool "RV64I"
+
+config RISCV_RV32I
+	bool "RV32I"
+
+endchoice
+
+config 64BIT
+	bool
+	default RISCV_RV64I
+
+config RISCV_XLEN
+	int
+	default 64 if RISCV_RV64I
+	default 32
+
+menu "Compiler ISA extensions (-march)"
+
+config RISCV_ISA_M
+	bool "M: integer multiply/divide"
+	default y
+
+config RISCV_ISA_A
+	bool "A: atomics"
+	default y
+	help
+	  Required for SMP boot (boot-hart lottery, spinlocks).
+
+config RISCV_ISA_F
+	bool "F: single-precision floating point"
+
+config RISCV_ISA_D
+	bool "D: double-precision floating point"
+	depends on RISCV_ISA_F
+
+config RISCV_ISA_C
+	bool "C: compressed instructions"
+	default y
+
+config RISCV_ISA_ZICSR
+	bool
+	default y
+
+config RISCV_ISA_ZIFENCEI
+	bool
+	default y
+
+config RISCV_ISA_ZICBOM
+	bool "Zicbom: cache-block management"
+
+config RISCV_ISA_ZICBOZ
+	bool "Zicboz: cache-block zero"
+
+config RISCV_ISA_ZIHINTPAUSE
+	bool "Zihintpause: PAUSE hint"
+
+config RISCV_ISA_ZBA
+	bool "Zba: address generation"
+
+config RISCV_ISA_ZBB
+	bool "Zbb: basic bit manipulation"
+
+config RISCV_ISA_ZBC
+	bool "Zbc: carry-less multiply"
+
+config RISCV_ISA_ZBS
+	bool "Zbs: single-bit operations"
+
+config RISCV_ISA_EXTRA
+	string "Extra -march suffix"
+	default ""
+	help
+	  Appended verbatim to the generated -march string, e.g. "_zkr_zkt".
+
+config RISCV_HARD_FLOAT_ABI
+	bool "Use a hard-float calling convention inside the firmware"
+	depends on RISCV_ISA_F
+	help
+	  Off by default: the firmware itself never touches FP registers,
+	  so it does not have to save/restore them around traps.
+
+config RISCV_ABI
+	string
+	default "lp64d" if 64BIT && RISCV_HARD_FLOAT_ABI && RISCV_ISA_D
+	default "lp64f" if 64BIT && RISCV_HARD_FLOAT_ABI
+	default "lp64" if 64BIT
+	default "ilp32d" if RISCV_HARD_FLOAT_ABI && RISCV_ISA_D
+	default "ilp32f" if RISCV_HARD_FLOAT_ABI
+	default "ilp32"
+
+config RISCV_STRICT_ALIGN
+	bool "Never emit misaligned accesses (-mstrict-align)"
+
+config RISCV_NO_RELAX
+	bool "Disable linker relaxation"
+
+endmenu
+
+menu "Privileged and runtime extensions"
+
+config RISCV_EXT_SMEPMP
+	bool "Smepmp: PMP enhancements for memory access and execution prevention"
+
+config RISCV_EXT_SSTC
+	bool "Sstc: supervisor timer compare (stimecmp)"
+
+config RISCV_EXT_SMSTATEEN
+	bool "Smstateen: state enable"
+
+config RISCV_EXT_SMAIA
+	bool "Smaia/Ssaia: advanced interrupt architecture CSRs"
+
+config RISCV_EXT_SSCOFPMF
+	bool "Sscofpmf: count overflow and mode-based filtering"
+
+config RISCV_EXT_SVPBMT
+	bool "Svpbmt: page-based memory types"
+
+config RISCV_PMP_COUNT
+	int "Number of implemented PMP entries"
+	range 0 64
+	default 16
+
+endmenu

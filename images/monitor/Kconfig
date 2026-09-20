@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+config IMAGE_MONITOR
+	bool "M-mode runtime monitor"
+	default y
+	help
+	  The resident M-mode firmware: trap handling, drivers and services
+	  (SBI and, later, the security services).
+
+if IMAGE_MONITOR
+
+config MONITOR_LOAD_ADDR
+	hex "Monitor link/load address"
+	default LOADER_NEXT_STAGE_ADDR if IMAGE_LOADER
+	default PLATFORM_FW_START
+
+config MONITOR_SIZE
+	hex "Memory reserved for the monitor"
+	default PLATFORM_FW_SIZE
+
+endif

@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+if PLAT_QEMU_VIRT
+
+config PLATFORM_DIR
+	default "qemu/virt"
+
+config PLATFORM_NAME
+	default "QEMU virt"
+
+config PLATFORM_HART_COUNT
+	default 8
+
+config PLATFORM_FW_START
+	default 0x80000000
+
+config LOADER_NEXT_STAGE_ADDR
+	default 0x80200000
+
+config QEMU_VIRT_RAM_SIZE
+	hex "RAM size passed to QEMU (bytes)"
+	default 0x8000000
+
+# Defaults for symbols owned by drivers.
+config SERIAL_UART8250_BASE
+	default 0x10000000
+
+config SERIAL_UART8250_CLOCK
+	default 3686400
+
+config SERIAL_UART8250_REG_SHIFT
+	default 0
+
+config SERIAL_UART8250_REG_WIDTH
+	default 1
+
+endif

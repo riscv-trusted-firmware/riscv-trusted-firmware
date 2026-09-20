@@ -1,0 +1,25 @@
+name: build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        defconfig: [qemu_virt_rv64_defconfig, qemu_virt_rv32_defconfig, qemu_virt_rv64_2stage_defconfig]
+        toolchain: [gcc, llvm]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchains and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-riscv64-unknown-elf clang lld llvm qemu-system-misc
+          pip install kconfiglib
+      - name: Configure
+        run: make ${{ matrix.defconfig }}
+      - name: Build
+        run: make -j"$(nproc)" W=1 ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}
+      - name: Boot test
+        run: MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" scripts/boot-test.sh build

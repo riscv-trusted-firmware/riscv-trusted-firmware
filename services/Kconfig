@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+#
+# Services: what the monitor exposes to lower privilege levels. Each
+# services/<name>/ has a Kconfig and a sub.mk; the directory is discovered
+# automatically (services/sub.mk), the Kconfig decides what gets built.
+
+menu "Services"
+
+source "services/*/Kconfig"
+
+endmenu

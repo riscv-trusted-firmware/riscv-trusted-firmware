@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+#
+# Images: each images/<name>/ is a separately linked binary with its own
+# image.mk (source directories, linker script, flags) and Kconfig.
+
+menu "Images"
+
+source "images/*/Kconfig"
+
+endmenu
