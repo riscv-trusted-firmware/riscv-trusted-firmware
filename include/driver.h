@@ -14,6 +14,7 @@
  */
 
 #include <compiler.h>
+#include <linker_table.h>
 
 struct driver {
 	const char *name;
@@ -26,8 +27,7 @@ struct driver {
 extern const struct driver __driver_table_start[];
 extern const struct driver __driver_table_end[];
 
-#define for_each_driver(d) \
-	for ((d) = __driver_table_start; (d) < __driver_table_end; (d)++)
+#define for_each_driver(d) LINKER_TABLE_FOREACH(d, driver)
 
 void drivers_init(void);
 

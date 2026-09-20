@@ -13,5 +13,7 @@ timeout 10 make -s O="$O" $MAKEARGS run QEMU_ARGS="-serial file:$LOG -monitor no
 if grep -q "$EXPECT" "$LOG"; then
 	echo "boot-test: OK ($O)"; sed 's/^/  | /' "$LOG"
 else
-	echo "boot-test: FAILED ($O), expected '$EXPECT'"; sed 's/^/  | /' "$LOG"; exit 1
+	echo "boot-test: FAILED ($O), expected '$EXPECT'"
+	sed 's/^/  | /' "$LOG"
+	exit 1
 fi

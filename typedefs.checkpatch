@@ -1,0 +1,11 @@
+# Note: please keep the entries in this file sorted in reverse alphabetical
+# order (sort -r)
+vaddr_t
+uaddr_t
+rpmi_event_sink_t
+paddr_t
+paddr_size_t
+fdt64_t
+fdt32_t
+fdt16_t
+bitstr_t

@@ -19,6 +19,7 @@
 
 #include <arch/trap.h>
 #include <compiler.h>
+#include <linker_table.h>
 
 struct service_ret {
 	long error;
@@ -43,8 +44,7 @@ struct service {
 extern const struct service __service_table_start[];
 extern const struct service __service_table_end[];
 
-#define for_each_service(s) \
-	for ((s) = __service_table_start; (s) < __service_table_end; (s)++)
+#define for_each_service(s) LINKER_TABLE_FOREACH(s, service)
 
 void services_init(void);
 const struct service *service_lookup(unsigned long eid);

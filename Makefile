@@ -67,6 +67,15 @@ clean:
 distclean:
 	$(call cmd,CLEAN,$(O)) rm -rf $(O)
 
+# Coding style, with the Linux kernel's checkpatch.pl (CHECKPATCH=<path>):
+# the working tree, the staging area, or commits (scripts/checkpatch.sh).
+.PHONY: checkpatch checkpatch-staging checkpatch-working
+checkpatch: checkpatch-staging checkpatch-working
+checkpatch-working:
+	$(Q)$(SRCTREE)/scripts/checkpatch.sh
+checkpatch-staging:
+	$(Q)$(SRCTREE)/scripts/checkpatch.sh --cached
+
 .PHONY: help
 help:
 	@echo "Configuration:"
@@ -78,4 +87,5 @@ help:
 	@echo "  run              run on the platform simulator (if the platform provides one)"
 	@echo "  check-toolchain  print the resolved toolchain and target"
 	@echo "  clean / distclean"
+	@echo "  checkpatch       coding style of the working tree and the staging area"
 	@echo "Options: O=<dir> V=1 W=1 LLVM=1 CROSS_COMPILE=<prefix>"

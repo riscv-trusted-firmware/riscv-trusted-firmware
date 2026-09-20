@@ -10,7 +10,9 @@
 
 #include <console.h>
 #include <drivers/serial/uart8250.h>
+#include <io.h>
 #include <stdint.h>
+#include <types_ext.h>
 
 #define UART_RBR 0 /* receive buffer (read) */
 #define UART_THR 0 /* transmit holding (write) */
@@ -41,21 +43,21 @@ static struct uart8250 uart = {
 
 static uint32_t reg_read(const struct uart8250 *u, unsigned int reg)
 {
-	uintptr_t addr = u->base + ((uintptr_t)reg << u->reg_shift);
+	vaddr_t addr = u->base + ((vaddr_t)reg << u->reg_shift);
 
 	if (u->reg_width == 4)
-		return *(volatile uint32_t *)addr;
-	return *(volatile uint8_t *)addr;
+		return io_read32(addr);
+	return io_read8(addr);
 }
 
 static void reg_write(const struct uart8250 *u, unsigned int reg, uint32_t val)
 {
-	uintptr_t addr = u->base + ((uintptr_t)reg << u->reg_shift);
+	vaddr_t addr = u->base + ((vaddr_t)reg << u->reg_shift);
 
 	if (u->reg_width == 4)
-		*(volatile uint32_t *)addr = val;
+		io_write32(addr, val);
 	else
-		*(volatile uint8_t *)addr = (uint8_t)val;
+		io_write8(addr, (uint8_t)val);
 }
 
 static void uart8250_putc(char c)

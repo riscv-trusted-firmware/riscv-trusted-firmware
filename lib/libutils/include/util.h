@@ -17,6 +17,7 @@
 
 #ifdef __ASSEMBLER__
 
+#define U(x) x
 #define UL(x) x
 #define ULL(x) x
 
@@ -36,6 +37,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define U(x) x##U
 #define UL(x) x##UL
 #define ULL(x) x##ULL
 
