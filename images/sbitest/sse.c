@@ -378,6 +378,31 @@ void test_sse_remote(unsigned long other)
 	CHECK_RET(sse_call(FID_UNREGISTER, GLOBAL), SBI_SUCCESS);
 }
 
+static struct sse_ctx watch_ctx;
+static bool watch_unmasked;
+
+bool sse_watch(unsigned long event)
+{
+	if (sse_setup(event, &watch_ctx).error ||
+	    sse_call(FID_ENABLE, event).error)
+		return false;
+	watch_unmasked = !sbi_call0(SBI_EXT_SSE, FID_UNMASK).error;
+	return true;
+}
+
+unsigned long sse_watch_runs(void)
+{
+	return watch_ctx.runs;
+}
+
+void sse_unwatch(void)
+{
+	if (watch_unmasked)
+		sbi_call0(SBI_EXT_SSE, FID_MASK);
+	sse_call(FID_DISABLE, watch_ctx.event);
+	sse_call(FID_UNREGISTER, watch_ctx.event);
+}
+
 void test_sse(unsigned long self)
 {
 	struct sse_ctx *ctx = &local_ctx[self];
@@ -400,6 +425,20 @@ void test_sse(unsigned long self)
 }
 
 #else
+
+bool sse_watch(unsigned long event)
+{
+	return false;
+}
+
+unsigned long sse_watch_runs(void)
+{
+	return 0;
+}
+
+void sse_unwatch(void)
+{
+}
 
 void sse_secondary_setup(unsigned long hartid)
 {

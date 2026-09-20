@@ -12,6 +12,19 @@ config MPXY
 
 if MPXY
 
+config MPXY_SSE_EVENTS
+	int "Channels that can signal notification events through SSE"
+	range 0 64
+	default 8 if SBI_SSE
+	default 0
+	help
+	  Each such channel gets a platform specific global software event
+	  (0x0010c000 up), in the order the channels are found, which is
+	  raised when the channel has notification events to fetch. S-mode
+	  reads the event id from the channel's SSE_EVENT_ID attribute. An
+	  MSI, which S-mode sets up through the channel attributes and which
+	  takes no support from the platform, is preferred when both are on.
+
 config MPXY_RPMI
 	bool "RPMI service groups as MPXY channels"
 	depends on RPMI

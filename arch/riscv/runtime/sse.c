@@ -50,14 +50,20 @@ static const uint32_t local_ids[] = {
 	SSE_EVENT_LOCAL_SOFTWARE,
 };
 
-static const uint32_t global_ids[] = { SSE_EVENT_GLOBAL_SOFTWARE };
+#define NR_GLOBAL (1 + SSE_MPXY_EVENTS)
+
+static uint32_t global_id(unsigned int i)
+{
+	return i ? (uint32_t)SSE_EVENT_MPXY(i - 1) :
+		   (uint32_t)SSE_EVENT_GLOBAL_SOFTWARE;
+}
 
 static unsigned long sse_lock = SPINLOCK_UNLOCK;
 /* The events are a domain's own (<domain.h>), global ones included. */
 static struct sse_domain {
 	struct sse_event local[CONFIG_PLATFORM_HART_COUNT]
 			      [ARRAY_SIZE(local_ids)];
-	struct sse_event global[ARRAY_SIZE(global_ids)];
+	struct sse_event global[NR_GLOBAL];
 	bool unmasked[CONFIG_PLATFORM_HART_COUNT];
 	bool globals_ready;
 } sse_domains[DOMAIN_KEYS];
@@ -112,8 +118,8 @@ static long event_find(unsigned long event_id, unsigned int hart,
 			*e = &this_sse()->local[hart][i];
 			return SBI_SUCCESS;
 		}
-	for (unsigned int i = 0; i < ARRAY_SIZE(global_ids); i++)
-		if (event_id == global_ids[i]) {
+	for (unsigned int i = 0; i < NR_GLOBAL; i++)
+		if (event_id == global_id(i)) {
 			*e = &this_sse()->global[i];
 			return SBI_SUCCESS;
 		}
@@ -149,9 +155,8 @@ void sse_hart_init(void)
 	for (unsigned int i = 0; i < ARRAY_SIZE(local_ids); i++)
 		event_reset(&d->local[self][i], local_ids[i], self);
 	/* The first hart of the domain to get here: its boot hart. */
-	for (unsigned int i = 0;
-	     i < ARRAY_SIZE(global_ids) && !d->globals_ready; i++)
-		event_reset(&d->global[i], global_ids[i], self);
+	for (unsigned int i = 0; i < NR_GLOBAL && !d->globals_ready; i++)
+		event_reset(&d->global[i], global_id(i), self);
 	d->globals_ready = true;
 	spin_unlock(&sse_lock);
 }
@@ -184,8 +189,7 @@ static struct sse_event *top_event(unsigned long self, unsigned long state)
 {
 	struct sse_event *best = NULL, *e = NULL;
 
-	for (unsigned int i = 0;
-	     i < ARRAY_SIZE(local_ids) + ARRAY_SIZE(global_ids); i++) {
+	for (unsigned int i = 0; i < ARRAY_SIZE(local_ids) + NR_GLOBAL; i++) {
 		e = i < ARRAY_SIZE(local_ids) ?
 			    &this_sse()->local[self][i] :
 			    &this_sse()->global[i - ARRAY_SIZE(local_ids)];
@@ -348,37 +352,56 @@ bool sse_complete(struct trap_regs *regs)
 }
 
 /*
- * Where a global event goes: the preferred hart if it listens, else anyone who
- * does.
+ * Where a global event of domain 'key' goes: the preferred hart if it
+ * listens, else anyone of the domain who does.
  */
-static unsigned int global_target(const struct sse_event *e)
+static unsigned int global_target(const struct sse_event *e, unsigned int key)
 {
 	int pref = hart_index(e->attr[SSE_ATTR_PREFERRED_HART]);
 	unsigned int self = this_hart_index();
-	const struct sse_domain *d = this_sse();
+	const struct sse_domain *d = &sse_domains[key];
 	struct hartmask running = {};
 
+#ifdef CONFIG_DOMAINS
+	hsm_interruptible_mask_of(domain_by_index(key), &running);
+#else
 	hsm_interruptible_mask(&running);
+#endif
 	if (pref >= 0 && d->unmasked[pref] &&
 	    hartmask_test(&running, (unsigned int)pref))
 		return (unsigned int)pref;
-	if (d->unmasked[self])
+	if (d->unmasked[self] && hartmask_test(&running, self))
 		return self;
 	for (unsigned int h = 0; h < CONFIG_PLATFORM_HART_COUNT; h++)
 		if (d->unmasked[h] && hartmask_test(&running, h))
 			return h;
-	return pref >= 0 ? (unsigned int)pref : self;
+	return pref >= 0		? (unsigned int)pref :
+	       key == this_domain_key() ? self :
+					  e->hart;
 }
 
-static void make_pending(struct sse_event *e)
+static void make_pending(struct sse_event *e, unsigned int key)
 {
 	e->pending = true;
 	if (is_global(e->id) && e->attr[SSE_ATTR_STATUS] != SSE_STATE_RUNNING)
-		e->hart = global_target(e);
+		e->hart = global_target(e, key);
 	atomic_store_ulong(&kick[e->hart], 1);
 	/* Our own trap exit is on its way; another hart needs to take one. */
 	if (e->hart != this_hart_index())
 		ipi_send(e->hart, IPI_EVENT_SSE);
+}
+
+void sse_raise_global(uint32_t event_id, unsigned int key)
+{
+	struct sse_domain *d = &sse_domains[key];
+
+	spin_lock(&sse_lock);
+	/* An event nobody has registered is nobody's to find pending later. */
+	for (unsigned int i = 0; i < NR_GLOBAL && d->globals_ready; i++)
+		if (global_id(i) == event_id &&
+		    d->global[i].attr[SSE_ATTR_STATUS] != SSE_STATE_UNUSED)
+			make_pending(&d->global[i], key);
+	spin_unlock(&sse_lock);
 }
 
 /*
@@ -396,7 +419,7 @@ bool sse_raise_local(uint32_t event_id)
 	spin_lock(&sse_lock);
 	taken = this_sse()->unmasked[self] &&
 		e->attr[SSE_ATTR_STATUS] >= SSE_STATE_ENABLED;
-	make_pending(e);
+	make_pending(e, this_domain_key());
 	spin_unlock(&sse_lock);
 	return taken;
 }
@@ -422,7 +445,7 @@ long sse_inject(unsigned long event_id, unsigned long hartid)
 		return SBI_ERR_INVALID_PARAM;
 
 	spin_lock(&sse_lock);
-	make_pending(e);
+	make_pending(e, this_domain_key());
 	spin_unlock(&sse_lock);
 	return SBI_SUCCESS;
 }
@@ -444,7 +467,7 @@ static long transition(unsigned long event_id, unsigned long from,
 		event_source_update(e);
 		/* Newly enabled and already pending: deliver. */
 		if (to == SSE_STATE_ENABLED && e->pending)
-			make_pending(e);
+			make_pending(e, this_domain_key());
 		if (to == SSE_STATE_UNUSED)
 			event_reset(e, e->id, e->hart);
 	}

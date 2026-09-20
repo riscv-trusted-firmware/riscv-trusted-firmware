@@ -13,9 +13,14 @@
 
 #include <arch/hart.h>
 #include <arch/pmp.h>
+#include <arch/sse.h>
+#include <atomic.h>
+#include <domain.h>
+#include <io.h>
 #include <mpxy.h>
 #include <sbi/sbi.h>
 #include <string.h>
+#include <types_ext.h>
 #include <util.h>
 
 #define SHMEM_NONE MPXY_SHMEM_NONE
@@ -38,6 +43,8 @@ unsigned long mpxy_hart_shmem_swap(unsigned long addr)
 	return old;
 }
 
+static unsigned int nr_sse_events;
+
 long mpxy_channel_register(struct mpxy_channel *ch)
 {
 	struct mpxy_channel **p = &channels;
@@ -46,10 +53,60 @@ long mpxy_channel_register(struct mpxy_channel *ch)
 	for (; *p && (*p)->id <= ch->id; p = &(*p)->next)
 		if ((*p)->id == ch->id)
 			return SBI_ERR_ALREADY_AVAILABLE;
+	/*
+	 * Events can be signalled: by an MSI always, by SSE while events last.
+	 */
+	if (ch->capability & MPXY_CAP_GET_NOTIFICATIONS) {
+		ch->capability |= MPXY_CAP_MSI;
+		if (nr_sse_events < SSE_MPXY_EVENTS) {
+			ch->sse_event_id =
+				(uint32_t)SSE_EVENT_MPXY(nr_sse_events++);
+			ch->capability |= MPXY_CAP_SSE;
+		}
+	}
 	ch->next = *p;
 	*p = ch;
 	nr_channels++;
 	return SBI_SUCCESS;
+}
+
+/* Set when any channel's events_due is: the common case costs one load. */
+static unsigned long indications_due;
+
+void mpxy_channel_events_due(struct mpxy_channel *ch)
+{
+	if (!(ch->capability & (MPXY_CAP_MSI | MPXY_CAP_SSE)))
+		return;
+	atomic_store_ulong(&ch->events_due, 1);
+	atomic_store_ulong(&indications_due, 1);
+}
+
+void mpxy_indicate(void)
+{
+	if (!atomic_load_ulong(&indications_due) ||
+	    !atomic_swap_ulong(&indications_due, 0))
+		return;
+	for (struct mpxy_channel *ch = channels; ch; ch = ch->next) {
+		if (!atomic_swap_ulong(&ch->events_due, 0))
+			continue;
+		/* The MSI if there is one, as the specification prefers. */
+		if (ch->msi_control) {
+			uint64_t addr = reg_pair_to_64(ch->msi_addr_high,
+						       ch->msi_addr_low);
+			vaddr_t msi =
+				(vaddr_t)smode_access_begin((unsigned long)addr,
+							    4);
+
+			io_write32(msi, ch->msi_data);
+			smode_access_end();
+		} else if (ch->capability & MPXY_CAP_SSE) {
+			/*
+			 * Whoever has the event registered: it is per domain.
+			 */
+			for (unsigned int key = 0; key < DOMAIN_KEYS; key++)
+				sse_raise_global(ch->sse_event_id, key);
+		}
+	}
 }
 
 unsigned int mpxy_channel_count(void)
@@ -150,33 +207,66 @@ static uint32_t std_attr_read(const struct mpxy_channel *ch, uint32_t id)
 		return ch->capability;
 	case MPXY_ATTR_EVENTS_STATE_CONTROL:
 		return ch->events_state_control;
+	case MPXY_ATTR_SSE_EVENT_ID:
+		return ch->sse_event_id;
+	case MPXY_ATTR_MSI_CONTROL:
+		return ch->msi_control;
+	case MPXY_ATTR_MSI_ADDR_LOW:
+		return ch->msi_addr_low;
+	case MPXY_ATTR_MSI_ADDR_HIGH:
+		return ch->msi_addr_high;
+	case MPXY_ATTR_MSI_DATA:
+		return ch->msi_data;
 	default:
-		/* No MSI or SSE indication: those attributes read as zero. */
 		return 0;
 	}
 }
 
-/* Validates before anything is written: a bad range changes nothing. */
-static long std_attr_write(struct mpxy_channel *ch, uint32_t id, uint32_t val,
-			   bool commit)
+/* A write goes to a copy of the channel: a bad one changes nothing. */
+static long std_attr_write(struct mpxy_channel *ch, uint32_t id, uint32_t val)
 {
+	/* Writes are ignored without the capability. */
+	bool msi = ch->capability & MPXY_CAP_MSI;
+
 	switch (id) {
 	case MPXY_ATTR_MSI_CONTROL:
+		if (val > 1)
+			return SBI_ERR_INVALID_PARAM;
+		ch->msi_control = msi ? val : 0;
+		return SBI_SUCCESS;
 	case MPXY_ATTR_MSI_ADDR_LOW:
+		ch->msi_addr_low = msi ? val : 0;
+		return SBI_SUCCESS;
 	case MPXY_ATTR_MSI_ADDR_HIGH:
+		ch->msi_addr_high = msi ? val : 0;
+		return SBI_SUCCESS;
 	case MPXY_ATTR_MSI_DATA:
-		/* Writes are ignored without MSI support. */
+		ch->msi_data = msi ? val : 0;
 		return SBI_SUCCESS;
 	case MPXY_ATTR_EVENTS_STATE_CONTROL:
 		if (val > 1)
 			return SBI_ERR_INVALID_PARAM;
-		if (commit && (ch->capability & MPXY_CAP_EVENTS_STATE))
+		if (ch->capability & MPXY_CAP_EVENTS_STATE)
 			ch->events_state_control = val;
 		return SBI_SUCCESS;
 	default:
 		/* Read-only. */
 		return SBI_ERR_BAD_RANGE;
 	}
+}
+
+/*
+ * An MSI that is enabled is a write of the monitor's to an address of
+ * S-mode's choosing: a word the caller's domain could write itself, which
+ * its interrupt files are and the monitor's memory is not.
+ */
+static bool msi_target_ok(const struct mpxy_channel *ch)
+{
+	uint64_t addr = reg_pair_to_64(ch->msi_addr_high, ch->msi_addr_low);
+
+	return !ch->msi_control ||
+	       (IS_ALIGNED(addr, 4) && addr == (unsigned long)addr &&
+		smode_range_ok((unsigned long)addr, 4));
 }
 
 /* Common checks of the attribute calls; *prot: message protocol range. */
@@ -232,8 +322,7 @@ long mpxy_write_attributes(unsigned long channel_id, unsigned long base,
 			   unsigned long count)
 {
 	uint32_t *mem = this_shmem();
-	uint32_t vals[MPXY_ATTR_STD_COUNT] = {};
-	struct mpxy_channel *ch = NULL;
+	struct mpxy_channel *ch = NULL, staged = {};
 	bool prot = false;
 	long rc = 0;
 
@@ -256,16 +345,25 @@ long mpxy_write_attributes(unsigned long channel_id, unsigned long base,
 		return SBI_SUCCESS;
 	}
 
-	/* Standard attributes: snapshot, validate all, then commit all. */
-	for (unsigned long i = 0; i < count; i++)
-		vals[i] = mem[i];
-	for (int commit = 0; commit <= 1; commit++)
-		for (unsigned long i = 0; i < count; i++) {
-			rc = std_attr_write(ch, (uint32_t)(base + i), vals[i],
-					    commit);
-			if (rc)
-				return rc;
-		}
+	/*
+	 * Standard attributes: all of them valid, and as a whole, or none
+	 * written.
+	 */
+	staged = *ch;
+	for (unsigned long i = 0; i < count; i++) {
+		rc = std_attr_write(&staged, (uint32_t)(base + i), mem[i]);
+		if (rc)
+			return rc;
+	}
+	if (!msi_target_ok(&staged))
+		return SBI_ERR_INVALID_PARAM;
+	ch->msi_control = 0;
+	ch->msi_addr_low = staged.msi_addr_low;
+	ch->msi_addr_high = staged.msi_addr_high;
+	ch->msi_data = staged.msi_data;
+	ch->msi_domain = this_domain_key();
+	ch->msi_control = staged.msi_control;
+	ch->events_state_control = staged.events_state_control;
 	return SBI_SUCCESS;
 }
 

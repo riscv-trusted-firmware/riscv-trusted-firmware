@@ -207,6 +207,7 @@ static void mpxy_rpmi_event_sink(void *ctx, const void *events, size_t len)
 		off += sz;
 	}
 	spin_unlock(&r->lock);
+	mpxy_channel_events_due(&r->ch);
 }
 
 static long mpxy_rpmi_get_events(struct mpxy_channel *ch, void *buf,
@@ -287,7 +288,8 @@ static long mpxy_rpmi_channel_add(struct rpmi_context *puc, uint32_t channel_id,
 		return rc;
 	if (rpmi_event_sink_register(puc, group, mpxy_rpmi_event_sink, r))
 		r->ch.capability &= ~(uint32_t)(MPXY_CAP_GET_NOTIFICATIONS |
-						MPXY_CAP_EVENTS_STATE);
+						MPXY_CAP_EVENTS_STATE |
+						MPXY_CAP_MSI | MPXY_CAP_SSE);
 	pool_used++;
 	return SBI_SUCCESS;
 }

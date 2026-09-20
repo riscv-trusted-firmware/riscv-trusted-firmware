@@ -18,6 +18,7 @@
 #include <domain.h>
 #include <ipi.h>
 #include <log.h>
+#include <mpxy.h>
 #include <sbi/sbi.h>
 #include <service.h>
 #include <timer.h>
@@ -193,6 +194,11 @@ void trap_handler(struct trap_regs *regs)
 	/* Its domain is being stopped: this is as far as S-mode got. */
 	if (domain_stop_pending())
 		domain_stop_self(regs);
+	/*
+	 * Notification events that came in meanwhile: S-mode is told on its way
+	 * back.
+	 */
+	mpxy_indicate();
 	/*
 	 * Whatever the return to S-mode looks like now, an event goes on top.
 	 */

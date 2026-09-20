@@ -140,7 +140,9 @@ static void test_attributes(void)
 	      "timeouts");
 	CHECK(page_a.w[MPXY_ATTR_CHANNEL_CAPABILITY] ==
 	      (MPXY_CAP_SEND_WITH_RESP | MPXY_CAP_SEND_WITHOUT_RESP |
-	       MPXY_CAP_GET_NOTIFICATIONS | MPXY_CAP_EVENTS_STATE),
+	       MPXY_CAP_GET_NOTIFICATIONS | MPXY_CAP_EVENTS_STATE |
+	       MPXY_CAP_MSI |
+	       (CONFIG_MPXY_SSE_EVENTS ? MPXY_CAP_SSE : 0)),
 	      "capability %x", page_a.w[MPXY_ATTR_CHANNEL_CAPABILITY]);
 	CHECK(page_a.w[MPXY_ATTR_EVENTS_STATE_CONTROL] == 0,
 	      "events state on at reset");
@@ -185,13 +187,14 @@ static void test_attributes(void)
 	CHECK_RET(send(CH_VOLTAGE, 0x02, 0), SBI_ERR_NOT_SUPPORTED);
 
 	/*
-	 * Writes: events state is the one standard attribute that takes them.
+	 * Writes: events state and the MSI are the standard attributes that
+	 * take them.
 	 */
 	page_a.w[0] = 1;
 	CHECK_RET(sbi_call3(SBI_EXT_MPXY, FID_WRITE_ATTRS, CH_CLOCK,
 			    MPXY_ATTR_EVENTS_STATE_CONTROL, 1),
 		  SBI_SUCCESS);
-	page_a.w[0] = 0x1234; /* MSI data: ignored without MSI support */
+	page_a.w[0] = 0x1234; /* MSI data: fine as such */
 	/* not a valid events state: nothing is written */
 	page_a.w[1] = 7;
 	CHECK_RET(sbi_call3(SBI_EXT_MPXY, FID_WRITE_ATTRS, CH_CLOCK,
@@ -421,6 +424,109 @@ static void make_events(uint32_t count)
 	CHECK_RET(send(CH_TEST, PUC_TEST_NOTIFY, 4), SBI_SUCCESS);
 }
 
+/* An MSI is a write of 4 bytes: a word of ours will do for a target. */
+static uint32_t msi_word;
+#define MSI_DATA UL(0xd00d)
+
+static struct sbiret msi_setup(unsigned long addr, uint32_t control)
+{
+	page_a.w[0] = control;
+	page_a.w[1] = (uint32_t)addr;
+	page_a.w[2] = (uint32_t)((uint64_t)addr >> 32);
+	page_a.w[3] = MSI_DATA;
+	return sbi_call3(SBI_EXT_MPXY, FID_WRITE_ATTRS, CH_TEST,
+			 MPXY_ATTR_MSI_CONTROL, 4);
+}
+
+/* Being told of events, rather than asking: by MSI, then by SSE. */
+static void test_indication(void)
+{
+	const unsigned int ev_size = RPMI_EVENT_HDR_SIZE + PUC_EVENT_DATALEN;
+	unsigned long event = 0;
+	struct sbiret ret = {};
+
+	/*
+	 * An MSI that is on goes where the caller could write itself, a word.
+	 */
+	CHECK_RET(msi_setup(monitor_addr, 1), SBI_ERR_INVALID_PARAM);
+	CHECK_RET(msi_setup((unsigned long)&msi_word + 1, 1),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(msi_setup(monitor_addr, 0), SBI_SUCCESS);
+	CHECK_RET(msi_setup((unsigned long)&msi_word, 1), SBI_SUCCESS);
+	CHECK_RET(sbi_call3(SBI_EXT_MPXY, FID_READ_ATTRS, CH_TEST,
+			    MPXY_ATTR_SSE_EVENT_ID, 5),
+		  SBI_SUCCESS);
+	event = page_a.w[0];
+	CHECK(page_a.w[1] == 1 &&
+	      page_a.w[2] == (uint32_t)(unsigned long)&msi_word &&
+	      page_a.w[4] == MSI_DATA,
+	      "MSI attributes: %x %x %x", page_a.w[1], page_a.w[2],
+	      page_a.w[4]);
+
+	/*
+	 * Events that come with the answer to a request are found right then.
+	 */
+	WRITE_ONCE(msi_word, 0);
+	make_events(1);
+	CHECK(WAIT_FOR(READ_ONCE(msi_word) == MSI_DATA),
+	      "no MSI for a notification event");
+	ret = get_events();
+	CHECK(ret.error == 0 && ret.value == (long)ev_size,
+	      "the event: %ld, %ld bytes", ret.error, ret.value);
+
+	/*
+	 * Events that come by themselves take the P2A doorbell to be noticed:
+	 * where the PuC has one to ring (the monitor asked for it, which takes
+	 * interrupt files at machine level) the MSI follows unasked. Without,
+	 * the monitor finds them when it next talks to the PuC.
+	 */
+	WRITE_ONCE(msi_word, 0);
+	page_a.w[0] = 2;
+	CHECK_RET(send(CH_TEST, PUC_TEST_NOTIFY_LATER, 4), SBI_SUCCESS);
+	CHECK(!READ_ONCE(msi_word), "an MSI before there was an event");
+	if (READ_ONCE(puc_doorbell_rings)) {
+		CHECK(WAIT_FOR(READ_ONCE(msi_word) == MSI_DATA),
+		      "the P2A doorbell brought no MSI");
+	} else {
+		CHECK(!WAIT_FOR(READ_ONCE(msi_word)),
+		      "an MSI without anybody looking at the queue");
+		send(CH_TEST, PUC_TEST_ECHO, 0);
+		CHECK(READ_ONCE(msi_word) == MSI_DATA,
+		      "events found late brought no MSI");
+	}
+	printf("  P2A doorbell: %s\n",
+	       READ_ONCE(puc_doorbell_rings) ? "interrupt" : "none, polled");
+	ret = get_events();
+	CHECK(ret.error == 0 && ret.value == (long)(2 * ev_size),
+	      "the events: %ld, %ld bytes", ret.error, ret.value);
+
+	/*
+	 * Without the MSI it is the channel's SSE event, for who has it
+	 * enabled.
+	 */
+	CHECK_RET(msi_setup(0, 0), SBI_SUCCESS);
+	WRITE_ONCE(msi_word, 0);
+	if (CONFIG_MPXY_SSE_EVENTS && sse_watch(event)) {
+		/* Not for what came before anybody had the event. */
+		CHECK(sse_watch_runs() == 0,
+		      "an SSE event for old notification events");
+		make_events(1);
+		CHECK(WAIT_FOR(sse_watch_runs() == 1),
+		      "no SSE event %lx for a notification event", event);
+		CHECK(!READ_ONCE(msi_word), "an MSI that was turned off");
+		make_events(1);
+		CHECK(WAIT_FOR(sse_watch_runs() == 2), "no second SSE event");
+		sse_unwatch();
+		get_events();
+	} else {
+		CHECK(!CONFIG_MPXY_SSE_EVENTS ||
+		      !sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION,
+				 SBI_EXT_SSE)
+				       .value,
+		      "SSE event %lx cannot be taken", event);
+	}
+}
+
 static void test_notifications(void)
 {
 	const unsigned int ev_size = RPMI_EVENT_HDR_SIZE + PUC_EVENT_DATALEN;
@@ -485,6 +591,8 @@ static void test_notifications(void)
 
 	CHECK_RET(sbi_call1(SBI_EXT_MPXY, FID_GET_NOTIFICATIONS, CH_BOGUS),
 		  SBI_ERR_NOT_SUPPORTED);
+
+	test_indication();
 }
 
 void test_mpxy(void)

@@ -82,6 +82,17 @@ struct mpxy_channel {
 	uint32_t completion_timeout_us;
 	uint32_t capability;
 	uint32_t events_state_control;
+	/*
+	 * How S-mode hears of notification events: an MSI it set up (the
+	 * attributes below, with MPXY_CAP_MSI), else the channel's SSE event
+	 * (MPXY_CAP_SSE, given out by mpxy_channel_register()), else not at
+	 * all, and it polls.
+	 */
+	uint32_t msi_control, msi_addr_low, msi_addr_high, msi_data;
+	uint32_t sse_event_id;
+	/* whose MSI it is: the SSE event's too */
+	unsigned int msi_domain;
+	unsigned long events_due; /* atomic */
 	const struct mpxy_channel_ops *ops;
 	struct mpxy_channel *next;
 };
@@ -89,6 +100,13 @@ struct mpxy_channel {
 /* Boot time only. SBI_ERR_ALREADY_AVAILABLE when the id is taken. */
 long mpxy_channel_register(struct mpxy_channel *ch);
 unsigned int mpxy_channel_count(void);
+
+/*
+ * The channel has new notification events: S-mode is to be told. From any
+ * context; the telling happens in mpxy_indicate(), which the monitor calls
+ * where a hart is about to leave it or to wait, nothing else going on.
+ */
+void mpxy_channel_events_due(struct mpxy_channel *ch);
 
 /*
  * M-mode access to the calling hart's shared memory, around the calls below
@@ -112,6 +130,7 @@ long mpxy_get_notifications(unsigned long channel_id, unsigned long *bytes);
 #define MPXY_SHMEM_NONE (~UL(0))
 
 #ifdef CONFIG_MPXY
+void mpxy_indicate(void);
 void mpxy_hart_init(void);
 /*
  * The calling hart's shared memory goes with what runs on the hart: a domain
@@ -119,6 +138,10 @@ void mpxy_hart_init(void);
  */
 unsigned long mpxy_hart_shmem_swap(unsigned long addr);
 #else
+static inline void mpxy_indicate(void)
+{
+}
+
 static inline void mpxy_hart_init(void)
 {
 }

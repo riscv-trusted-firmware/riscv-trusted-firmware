@@ -9,6 +9,7 @@
 #include <atomic.h>
 #include <domain.h>
 #include <ipi.h>
+#include <mpxy.h>
 #include <sbi/sbi.h>
 #include <spinlock.h>
 #include <suspend.h>
@@ -74,6 +75,8 @@ static void hsm_wait_loop(void)
 	       SBI_HSM_STATE_START_PENDING) {
 		wfi();
 		ipi_process();
+		/* A stopped hart still takes the monitor's interrupts. */
+		mpxy_indicate();
 	}
 	hsm_hart_enter(false);
 }
@@ -201,6 +204,7 @@ static void hsm_wait_for_wakeup(void)
 			ipi_process();
 		if (pending & MIP_MTIP)
 			timer_process();
+		mpxy_indicate();
 		/* S-mode has work: an interrupt it enabled, or an event. */
 		if ((csr_read(mip) & csr_read(mie) & csr_read(mideleg)) ||
 		    sse_pending())
@@ -342,12 +346,16 @@ long hsm_hart_state(unsigned long hartid)
 
 void hsm_interruptible_mask(struct hartmask *mask)
 {
+	hsm_interruptible_mask_of(this_domain(), mask);
+}
+
+void hsm_interruptible_mask_of(const struct domain *dom, struct hartmask *mask)
+{
 	hartmask_clear_all(mask);
 	for (unsigned int i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++) {
 		unsigned long state = 0;
 
-		if (!hart_index_valid(i) ||
-		    !domain_hart_assigned(this_domain(), i))
+		if (!hart_index_valid(i) || !domain_hart_assigned(dom, i))
 			continue;
 		state = atomic_load_ulong(&hart_by_index(i)->hsm_state);
 		if (state == SBI_HSM_STATE_STARTED ||

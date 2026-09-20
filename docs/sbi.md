@@ -19,7 +19,7 @@ and what is still missing.
 | FWFT      | `FWFT` | misaligned exception delegation; landing pad, shadow stack, double trap, PTE A/D updating and pointer masking where the hart has them; lock flag |
 | SSE       | `SSE`  | all ten functions; sources: the software injected local and global events, PMU counter overflow (Sscofpmf), double trap (Ssdbltrp) |
 | DBTR      | `DBTR` | all eight functions, on harts with Sdtrig; address / data match triggers (mcontrol, mcontrol6), chains included |
-| MPXY      | `MPXY` | all eight functions; channels carry RPMI service groups (see below); no MSI / SSE indication, notifications are polled |
+| MPXY      | `MPXY` | all eight functions; channels carry RPMI service groups (see below); notification events signalled by MSI or SSE, or polled |
 | PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart, `event_get_info`, counter snapshots |
 | DBCN      | `DBCN` | write, read, write_byte (`CONFIG_SBI_DBCN`) |
 | Legacy    | `0x00`-`0x08` | all v0.1 calls (`CONFIG_SBI_LEGACY`) |
@@ -282,7 +282,18 @@ with its token arrives or `CONFIG_RPMI_TIMEOUT_US` expires, and polls for it
 (serving its own IPIs meanwhile, like every M-mode wait). Acknowledgments
 with another token are leftovers and dropped. `rpmi_poll()` drains the P2A
 request queue: notifications go to the event sink of their service group,
-requests from the PuC are answered `RPMI_ERR_NOT_SUPPORTED`. The shared
+requests from the PuC are answered `RPMI_ERR_NOT_SUPPORTED`. That happens
+when somebody asks for the events, after every request to the PuC, and
+when the PuC rings the P2A doorbell. The doorbell is an MSI: where the
+harts have interrupt files at machine level (an IMSIC, whose first
+identity carries the monitor's IPIs and the next ones are MSIs of its
+drivers, `irqchip_msi_request()`) and the transport node names the system
+MSI that is its doorbell (`riscv,p2a-doorbell-sysmsi-index`), the monitor
+points that system MSI at an identity of the hart that first heard from
+the PuC and enables it, through the SYSTEM_MSI group. The interrupt is
+taken wherever that hart is, stopped or in another domain as well; when
+it finds the transport busy, whoever holds it drains the queue before
+letting go. A wired doorbell interrupt is not supported. The shared
 memory transport follows the specification's queue layout, takes its
 geometry from the node, and checks every index and length it reads, since the
 other side is not this firmware. The queues can be hidden from S-mode with a
@@ -301,6 +312,20 @@ channel attributes) are asked through the BASE group on first use, then
 cached; a group the PuC does not implement makes its channel
 `SBI_ERR_NOT_SUPPORTED`. Notification events are buffered per channel with
 the events state (returned / remaining / lost).
+
+S-mode can be told of new events instead of asking. Every channel with
+notifications has the MSI attributes: once `MSI_CONTROL` is on, the monitor
+writes `MSI_DATA` to the MSI address when events arrive. That is a write
+of the monitor's on S-mode's behalf, so the address has to be a word the
+caller's domain can write itself (its interrupt files; not the monitor's
+memory), or the attribute write is refused as a whole. Without an MSI the
+channel's SSE event is raised, a platform specific global event
+(`SSE_EVENT_ID`, 0x0010c000 up, `CONFIG_MPXY_SSE_EVENTS` of them, per
+domain like all SSE state) for whoever has it registered. Events are found
+by the doorbell interrupt, or else whenever the monitor talks to the PuC;
+the telling itself happens where a hart is about to return to S-mode or
+waits in the monitor (`mpxy_indicate()`), never from inside another
+service's work.
 
 The monitor knows the groups of RPMI v1.0 that are S-mode's to use
 (`services/mpxy/mpxy_rpmi_groups.c`): SYSTEM_MSI, VOLTAGE, CLOCK,
@@ -404,8 +429,8 @@ with `IMAGE_SBITEST` disabled.
 1. SSE RAS events (no source yet); DBTR trigger types other than address /
    data match.
 2. **RPMI**: service groups implemented by the firmware itself behind the
-   same MPXY channels; MSI / SSE indication of notifications and the P2A
-   doorbell as an interrupt (the P2A queue is polled).
+   same MPXY channels; a wired P2A doorbell interrupt (an MSI one is
+   there).
 3. The maximum number of harts and domains and the monitor's size are
    build-time constants.
 4. More timer / IPI / reset / serial drivers.

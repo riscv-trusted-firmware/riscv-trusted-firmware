@@ -24,6 +24,16 @@
 #define SSE_EVENT_LOCAL_PMU_OVERFLOW UL(0x00010000)
 #define SSE_EVENT_LOCAL_SOFTWARE UL(0xffff0000)
 #define SSE_EVENT_GLOBAL_SOFTWARE UL(0xffff8000)
+/*
+ * Platform specific global events, of the low priority kind: an MPXY
+ * channel has notification events to fetch (<mpxy.h>).
+ */
+#ifdef CONFIG_MPXY
+#define SSE_MPXY_EVENTS CONFIG_MPXY_SSE_EVENTS
+#else
+#define SSE_MPXY_EVENTS 0
+#endif
+#define SSE_EVENT_MPXY(n) (UL(0x0010c000) + (n))
 
 #define SSE_ATTR_STATUS 0
 #define SSE_ATTR_PRIORITY 1
@@ -66,6 +76,11 @@ void sse_domain_reset(unsigned int key);
 void sse_process(struct trap_regs *regs);
 /* For event sources in the monitor: raise a local event on the calling hart. */
 bool sse_raise_local(uint32_t event_id);
+/*
+ * The same for a global event of domain 'key' (<domain.h>), from any hart:
+ * the event goes to a hart of that domain that takes events.
+ */
+void sse_raise_global(uint32_t event_id, unsigned int key);
 /* Is an event waiting for this hart to return to S-mode? */
 bool sse_pending(void);
 
@@ -105,6 +120,10 @@ static inline void sse_process(struct trap_regs *regs)
 static inline bool sse_raise_local(uint32_t event_id)
 {
 	return false;
+}
+
+static inline void sse_raise_global(uint32_t event_id, unsigned int key)
+{
 }
 
 static inline bool sse_pending(void)

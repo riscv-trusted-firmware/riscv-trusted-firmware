@@ -81,5 +81,8 @@ long hsm_hart_state(unsigned long hartid);
  * and of the caller's domain.
  */
 void hsm_interruptible_mask(struct hartmask *mask);
+/* The same of any domain (<domain.h>). */
+struct domain;
+void hsm_interruptible_mask_of(const struct domain *dom, struct hartmask *mask);
 
 #endif
