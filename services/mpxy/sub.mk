@@ -3,3 +3,4 @@
 
 srcs-$(CONFIG_MPXY) += mpxy.c
 srcs-$(CONFIG_MPXY_RPMI) += mpxy_rpmi.c
+srcs-$(CONFIG_MPXY_RPMI) += mpxy_rpmi_groups.c

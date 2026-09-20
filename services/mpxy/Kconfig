@@ -18,14 +18,25 @@ config MPXY_RPMI
 	default y
 	help
 	  One channel per RPMI service group the platform opens to S-mode
-	  (clock, voltage, device power, ...), forwarded to the platform
-	  microcontroller. The channels are the "riscv,rpmi-mpxy-*" nodes of
-	  the device tree.
+	  (system MSI, voltage, clock, device power, performance, management
+	  mode, RAS agent, request forward, or a group of the platform's
+	  own), forwarded to the platform microcontroller once the request
+	  is a well-formed one of the group. The channels are the
+	  "riscv,rpmi-mpxy-*" nodes of the device tree.
 
 config MPXY_RPMI_MAX_CHANNELS
 	int "Maximum number of RPMI channels"
 	depends on MPXY_RPMI
 	default 8
+
+config MPXY_RPMI_MAX_SYSMSI
+	int "Most system MSIs of a PuC"
+	depends on MPXY_RPMI
+	default 128
+	help
+	  The SYSTEM_MSI service group: the monitor keeps the MSIs that are
+	  M-mode's, and the transport's P2A doorbell, away from S-mode. MSIs
+	  beyond this number are out of S-mode's reach.
 
 config MPXY_RPMI_EVENT_BUF_SIZE
 	int "Notification event buffer per RPMI channel (bytes)"

@@ -36,6 +36,7 @@ uint32_t puc_hsm_refuse;
 uint32_t puc_reset_queries;
 uint32_t puc_posted_value;
 uint32_t puc_notifications_enabled;
+uint32_t puc_sysmsi_requests;
 
 static uint32_t event_seq;
 
@@ -113,7 +114,9 @@ static unsigned int serve_base(const struct rpmi_hdr *hdr, const uint32_t *req,
 		return 2;
 	case RPMI_BASE_PROBE_SERVICE_GROUP:
 		resp[1] = req[0] == RPMI_GROUP_BASE ||
-					  req[0] == RPMI_GROUP_CLOCK ?
+					  req[0] == RPMI_GROUP_CLOCK ||
+					  req[0] == RPMI_GROUP_SYSTEM_MSI ||
+					  req[0] == PUC_GROUP_TEST ?
 				  RPMI_VERSION(1, 0) :
 				  0;
 		return 2;
@@ -130,8 +133,8 @@ static unsigned int serve_base(const struct rpmi_hdr *hdr, const uint32_t *req,
 }
 
 #define CLOCK_GET_NUM_CLOCKS 0x02
-#define CLOCK_SET_RATE 0x06
-#define CLOCK_GET_RATE 0x07
+#define CLOCK_SET_RATE 0x07
+#define CLOCK_GET_RATE 0x08
 
 static unsigned int serve_clock(const struct rpmi_hdr *hdr, const uint32_t *req,
 				uint32_t *resp)
@@ -141,16 +144,6 @@ static unsigned int serve_clock(const struct rpmi_hdr *hdr, const uint32_t *req,
 
 	resp[0] = RPMI_SUCCESS;
 	switch (hdr->service) {
-	case RPMI_SERVICE_ENABLE_NOTIFICATION:
-		/* (EVENT_ID, REQ_STATE: 0 disable, 1 enable, 2 query) */
-		if (words < 2 || req[0] != PUC_EVENT_ID || req[1] > 2) {
-			resp[0] = (uint32_t)RPMI_ERR_INVALID_PARAM;
-			return 1;
-		}
-		if (req[1] < 2)
-			WRITE_ONCE(puc_notifications_enabled, req[1]);
-		resp[1] = READ_ONCE(puc_notifications_enabled);
-		return 2;
 	case CLOCK_GET_NUM_CLOCKS:
 		resp[1] = PUC_NUM_CLOCKS;
 		return 2;
@@ -174,6 +167,88 @@ static unsigned int serve_clock(const struct rpmi_hdr *hdr, const uint32_t *req,
 		resp[1] = (uint32_t)rates[req[0]];
 		resp[2] = high32_from_64(rates[req[0]]);
 		return 3;
+	default:
+		resp[0] = (uint32_t)RPMI_ERR_NOT_SUPPORTED;
+		return 1;
+	}
+}
+
+/*
+ * SYSTEM_MSI: PUC_NUM_SYSMSI of them, state and target kept as they are
+ * set. PUC_SYSMSI_MMODE prefers M-mode; the device tree makes another one
+ * the P2A doorbell. What the monitor lets through shows in puc_sysmsi_*.
+ */
+static unsigned int serve_sysmsi(const struct rpmi_hdr *hdr,
+				 const uint32_t *req, uint32_t *resp)
+{
+	static uint32_t state[PUC_NUM_SYSMSI], target[PUC_NUM_SYSMSI][3];
+
+	resp[0] = RPMI_SUCCESS;
+	if (hdr->service == RPMI_SYSMSI_GET_ATTRIBUTES) {
+		resp[1] = PUC_NUM_SYSMSI;
+		resp[2] = 0;
+		resp[3] = 0;
+		return 4;
+	}
+	if (hdr->service < RPMI_SYSMSI_GET_MSI_ATTRIBUTES ||
+	    hdr->service > RPMI_SYSMSI_GET_MSI_TARGET) {
+		resp[0] = (uint32_t)RPMI_ERR_NOT_SUPPORTED;
+		return 1;
+	}
+	if (hdr->datalen < 4 || req[0] >= PUC_NUM_SYSMSI) {
+		resp[0] = (uint32_t)RPMI_ERR_INVALID_PARAM;
+		return 1;
+	}
+	atomic_or_u32(&puc_sysmsi_requests, BIT32(req[0]));
+
+	switch (hdr->service) {
+	case RPMI_SYSMSI_GET_MSI_ATTRIBUTES:
+		resp[1] = req[0] == PUC_SYSMSI_MMODE ?
+				  RPMI_SYSMSI_FLAGS0_PREF_MMODE :
+				  0;
+		resp[2] = 0;
+		resp[3] = 0x2d69736d; /* "msi-" */
+		resp[4] = 0x30 + req[0];
+		resp[5] = 0;
+		resp[6] = 0;
+		return 7;
+	case RPMI_SYSMSI_SET_MSI_STATE:
+		state[req[0]] = req[1];
+		return 1;
+	case RPMI_SYSMSI_GET_MSI_STATE:
+		resp[1] = state[req[0]];
+		return 2;
+	case RPMI_SYSMSI_SET_MSI_TARGET:
+		target[req[0]][0] = req[1];
+		target[req[0]][1] = req[2];
+		target[req[0]][2] = req[3];
+		return 1;
+	default:
+		resp[1] = target[req[0]][0];
+		resp[2] = target[req[0]][1];
+		resp[3] = target[req[0]][2];
+		return 4;
+	}
+}
+
+/* The model's own group: services that make it misbehave on request. */
+static unsigned int serve_test(const struct rpmi_hdr *hdr, const uint32_t *req,
+			       uint32_t *resp)
+{
+	unsigned int words = hdr->datalen / U(4);
+
+	resp[0] = RPMI_SUCCESS;
+	switch (hdr->service) {
+	case RPMI_SERVICE_ENABLE_NOTIFICATION:
+		/* (EVENT_ID, REQ_STATE: 0 disable, 1 enable, 2 query) */
+		if (words < 2 || req[0] != PUC_EVENT_ID || req[1] > 2) {
+			resp[0] = (uint32_t)RPMI_ERR_INVALID_PARAM;
+			return 1;
+		}
+		if (req[1] < 2)
+			WRITE_ONCE(puc_notifications_enabled, req[1]);
+		resp[1] = READ_ONCE(puc_notifications_enabled);
+		return 2;
 	case PUC_TEST_POSTED:
 		WRITE_ONCE(puc_posted_value, words ? req[0] : 0);
 		return 0;
@@ -312,6 +387,10 @@ void puc_poll(void)
 		words = serve_base(&hdr, req, resp);
 	} else if (hdr.group == RPMI_GROUP_CLOCK) {
 		words = serve_clock(&hdr, req, resp);
+	} else if (hdr.group == RPMI_GROUP_SYSTEM_MSI) {
+		words = serve_sysmsi(&hdr, req, resp);
+	} else if (hdr.group == PUC_GROUP_TEST) {
+		words = serve_test(&hdr, req, resp);
 	} else if (hdr.group == RPMI_GROUP_SYSTEM_RESET) {
 		words = serve_sysreset(&hdr, req, resp);
 	} else if (hdr.group == RPMI_GROUP_HSM) {
@@ -333,8 +412,7 @@ void puc_poll(void)
 
 	hdr.flags = RPMI_MSG_ACKNOWLEDGEMENT;
 	hdr.datalen = (uint16_t)(words * 4);
-	if (hdr.group == RPMI_GROUP_CLOCK &&
-	    hdr.service == PUC_TEST_STALE_ACK) {
+	if (hdr.group == PUC_GROUP_TEST && hdr.service == PUC_TEST_STALE_ACK) {
 		struct rpmi_hdr stale = hdr;
 
 		stale.token = (uint16_t)(hdr.token + 1000);

@@ -30,14 +30,16 @@
 
 #define CH_CLOCK CONFIG_QEMU_VIRT_RPMI_CHANNEL_BASE
 #define CH_VOLTAGE (CONFIG_QEMU_VIRT_RPMI_CHANNEL_BASE + 1)
+#define CH_SYSMSI (CONFIG_QEMU_VIRT_RPMI_CHANNEL_BASE + 2)
+#define CH_TEST (CONFIG_QEMU_VIRT_RPMI_CHANNEL_BASE + 3)
 #define CH_BOGUS UL(0xdead)
 
 #define MAX_DATA (CONFIG_QEMU_VIRT_RPMI_SLOT_SIZE - RPMI_MSG_HDR_SIZE)
 #define RPMI_ATTR_BASE UL(0x80000000)
 
 #define CLOCK_GET_NUM_CLOCKS 0x02
-#define CLOCK_SET_RATE 0x06
-#define CLOCK_GET_RATE 0x07
+#define CLOCK_SET_RATE 0x07
+#define CLOCK_GET_RATE 0x08
 
 /* Two shared memory pages; as 32-bit words and as XLEN words. */
 static union {
@@ -108,14 +110,16 @@ static void test_channels(void)
 
 	ret = sbi_call1(SBI_EXT_MPXY, FID_GET_CHANNEL_IDS, 0);
 	CHECK_RET(ret, SBI_SUCCESS);
-	CHECK(page_a.w[0] == 0 && page_a.w[1] == 2, "remaining %u returned %u",
+	CHECK(page_a.w[0] == 0 && page_a.w[1] == 4, "remaining %u returned %u",
 	      page_a.w[0], page_a.w[1]);
-	CHECK(page_a.w[2] == CH_CLOCK && page_a.w[3] == CH_VOLTAGE,
-	      "channel ids %x %x", page_a.w[2], page_a.w[3]);
-	CHECK_RET(sbi_call1(SBI_EXT_MPXY, FID_GET_CHANNEL_IDS, 1), SBI_SUCCESS);
-	CHECK(page_a.w[0] == 0 && page_a.w[1] == 1 && page_a.w[2] == CH_VOLTAGE,
-	      "from index 1: %u %u %x", page_a.w[0], page_a.w[1], page_a.w[2]);
-	CHECK_RET(sbi_call1(SBI_EXT_MPXY, FID_GET_CHANNEL_IDS, 2),
+	CHECK(page_a.w[2] == CH_CLOCK && page_a.w[3] == CH_VOLTAGE &&
+	      page_a.w[4] == CH_SYSMSI && page_a.w[5] == CH_TEST,
+	      "channel ids %x %x %x %x", page_a.w[2], page_a.w[3], page_a.w[4],
+	      page_a.w[5]);
+	CHECK_RET(sbi_call1(SBI_EXT_MPXY, FID_GET_CHANNEL_IDS, 3), SBI_SUCCESS);
+	CHECK(page_a.w[0] == 0 && page_a.w[1] == 1 && page_a.w[2] == CH_TEST,
+	      "from index 3: %u %u %x", page_a.w[0], page_a.w[1], page_a.w[2]);
+	CHECK_RET(sbi_call1(SBI_EXT_MPXY, FID_GET_CHANNEL_IDS, 4),
 		  SBI_ERR_INVALID_PARAM);
 }
 
@@ -242,14 +246,27 @@ static void test_messages(void)
 	ret = send(CH_CLOCK, CLOCK_GET_RATE, 4);
 	CHECK(ret.error == 0 && (int)page_a.w[0] == RPMI_ERR_INVALID_PARAM,
 	      "bad clock: error %ld status %d", ret.error, (int)page_a.w[0]);
-	ret = send(CH_CLOCK, 0x7f, 0);
+	/*
+	 * So does a service that is not there, where the monitor knows nothing
+	 * of the group. Of a group it knows, it lets no such thing through, nor
+	 * a request that is not as long as the service's requests are.
+	 */
+	ret = send(CH_TEST, 0x7f, 0);
 	CHECK(ret.error == 0 && (int)page_a.w[0] == RPMI_ERR_NOT_SUPPORTED,
 	      "bad service: error %ld status %d", ret.error, (int)page_a.w[0]);
+	CHECK_RET(send(CH_CLOCK, 0x7f, 0), SBI_ERR_NOT_SUPPORTED);
+	CHECK_RET(send(CH_CLOCK, PUC_TEST_ECHO, 4), SBI_ERR_NOT_SUPPORTED);
+	CHECK_RET(send(CH_CLOCK, CLOCK_GET_RATE, 0), SBI_ERR_INVALID_PARAM);
+	CHECK_RET(send(CH_CLOCK, CLOCK_GET_RATE, 8), SBI_ERR_INVALID_PARAM);
+	CHECK_RET(send(CH_CLOCK, CLOCK_SET_RATE, 12), SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sbi_call3(SBI_EXT_MPXY, FID_SEND_WITHOUT_RESP, CH_CLOCK,
+			    PUC_TEST_POSTED, 4),
+		  SBI_ERR_NOT_SUPPORTED);
 
 	/* The largest message both ways: the echo adds its STATUS word. */
 	for (unsigned int i = 0; i < MAX_DATA / 4 - 1; i++)
 		page_a.w[i] = 0xa5a50000 + i;
-	ret = send(CH_CLOCK, PUC_TEST_ECHO, MAX_DATA - 4);
+	ret = send(CH_TEST, PUC_TEST_ECHO, MAX_DATA - 4);
 	CHECK(ret.error == 0 && ret.value == MAX_DATA,
 	      "echo: error %ld, %ld bytes", ret.error, ret.value);
 	for (unsigned int i = 0; i < MAX_DATA / 4 - 1; i++)
@@ -267,7 +284,7 @@ static void test_messages(void)
 
 	/* Posted request: no response, the PuC model shows that it arrived. */
 	page_a.w[0] = 0xfeed;
-	CHECK_RET(sbi_call3(SBI_EXT_MPXY, FID_SEND_WITHOUT_RESP, CH_CLOCK,
+	CHECK_RET(sbi_call3(SBI_EXT_MPXY, FID_SEND_WITHOUT_RESP, CH_TEST,
 			    PUC_TEST_POSTED, 4),
 		  SBI_SUCCESS);
 	CHECK(WAIT_FOR(READ_ONCE(puc_posted_value) == 0xfeed),
@@ -275,27 +292,133 @@ static void test_messages(void)
 
 	/* A leftover acknowledgment in the queue is skipped. */
 	page_a.w[0] = 0x57a1e;
-	ret = send(CH_CLOCK, PUC_TEST_STALE_ACK, 4);
+	ret = send(CH_TEST, PUC_TEST_STALE_ACK, 4);
 	CHECK(ret.error == 0 && ret.value == 8 && page_a.w[1] == 0x57a1e,
 	      "stale acknowledgment: error %ld, %ld bytes, %x", ret.error,
 	      ret.value, page_a.w[1]);
 
 	/* A PuC that does not answer: timeout, and the channel still works. */
-	CHECK_RET(send(CH_CLOCK, PUC_TEST_SILENT, 0), SBI_ERR_TIMEOUT);
+	CHECK_RET(send(CH_TEST, PUC_TEST_SILENT, 0), SBI_ERR_TIMEOUT);
 	ret = send(CH_CLOCK, CLOCK_GET_NUM_CLOCKS, 0);
 	CHECK(ret.error == 0 && page_a.w[1] == PUC_NUM_CLOCKS,
 	      "after a timeout");
 }
 
+/*
+ * SYSTEM_MSI: what is M-mode's is not S-mode's to touch, and an MSI cannot
+ * be aimed at the monitor.
+ */
+static struct sbiret sysmsi(unsigned long service, uint32_t index,
+			    unsigned long len)
+{
+	page_a.w[0] = index;
+	return send(CH_SYSMSI, service, len);
+}
+
+static void test_sysmsi(void)
+{
+	struct sbiret ret = {};
+
+	ret = send(CH_SYSMSI, RPMI_SYSMSI_GET_ATTRIBUTES, 0);
+	CHECK(ret.error == 0 && ret.value == 16 && page_a.w[0] == 0 &&
+	      page_a.w[1] == PUC_NUM_SYSMSI,
+	      "attributes: error %ld, %ld bytes, %u MSIs", ret.error, ret.value,
+	      page_a.w[1]);
+
+	/* One of S-mode's: state and target go to the PuC and come back. */
+	ret = sysmsi(RPMI_SYSMSI_GET_MSI_ATTRIBUTES, 0, 4);
+	CHECK(ret.error == 0 && ret.value == 28 && page_a.w[0] == 0 &&
+	      page_a.w[1] == 0,
+	      "MSI 0 attributes: error %ld, %ld bytes, status %d", ret.error,
+	      ret.value, (int)page_a.w[0]);
+	page_a.w[1] = 1;
+	ret = sysmsi(RPMI_SYSMSI_SET_MSI_STATE, 0, 8);
+	CHECK(ret.error == 0 && page_a.w[0] == 0, "set state");
+	ret = sysmsi(RPMI_SYSMSI_GET_MSI_STATE, 0, 4);
+	CHECK(ret.error == 0 && page_a.w[0] == 0 && page_a.w[1] == 1,
+	      "state read back");
+	/* Somewhere in RAM will do for a target: the model sends nothing. */
+	page_a.w[1] = (uint32_t)(unsigned long)&page_b;
+	page_a.w[2] = (uint32_t)((uint64_t)(unsigned long)&page_b >> 32);
+	page_a.w[3] = 0x2a;
+	ret = sysmsi(RPMI_SYSMSI_SET_MSI_TARGET, 0, 16);
+	CHECK(ret.error == 0 && ret.value == 4 && page_a.w[0] == 0,
+	      "set target: %ld %d", ret.error, (int)page_a.w[0]);
+	ret = sysmsi(RPMI_SYSMSI_GET_MSI_TARGET, 0, 4);
+	CHECK(ret.error == 0 && ret.value == 16 && page_a.w[0] == 0 &&
+	      page_a.w[1] == (uint32_t)(unsigned long)&page_b &&
+	      page_a.w[3] == 0x2a,
+	      "target read back: %x %x", page_a.w[1], page_a.w[3]);
+
+	/*
+	 * Not at the monitor, which the PuC would write to on S-mode's behalf.
+	 */
+	page_a.w[1] = (uint32_t)monitor_addr;
+	page_a.w[2] = (uint32_t)((uint64_t)monitor_addr >> 32);
+	page_a.w[3] = 0;
+	ret = sysmsi(RPMI_SYSMSI_SET_MSI_TARGET, 0, 16);
+	CHECK(ret.error == 0 && ret.value == 4 &&
+	      (int)page_a.w[0] == RPMI_ERR_INVALID_ADDR,
+	      "MSI aimed at the monitor: error %ld status %d", ret.error,
+	      (int)page_a.w[0]);
+	ret = sysmsi(RPMI_SYSMSI_GET_MSI_TARGET, 0, 4);
+	CHECK(page_a.w[1] == (uint32_t)(unsigned long)&page_b,
+	      "the target changed all the same");
+
+	/*
+	 * The MSI that prefers M-mode and the P2A doorbell: denied, and not
+	 * passed on.
+	 */
+	WRITE_ONCE(puc_sysmsi_requests, 0);
+	for (unsigned long svc = RPMI_SYSMSI_GET_MSI_ATTRIBUTES;
+	     svc <= RPMI_SYSMSI_GET_MSI_TARGET; svc++) {
+		static const uint8_t len[] = { 4, 8, 4, 16, 4 };
+
+		ret = sysmsi(svc, PUC_SYSMSI_MMODE,
+			     len[svc - RPMI_SYSMSI_GET_MSI_ATTRIBUTES]);
+		CHECK(ret.error == 0 && ret.value == 4 &&
+		      (int)page_a.w[0] == RPMI_ERR_DENIED,
+		      "M-mode MSI, service %lu: error %ld status %d", svc,
+		      ret.error, (int)page_a.w[0]);
+		ret = sysmsi(svc, CONFIG_QEMU_VIRT_RPMI_DOORBELL_SYSMSI,
+			     len[svc - RPMI_SYSMSI_GET_MSI_ATTRIBUTES]);
+		CHECK(ret.error == 0 && (int)page_a.w[0] == RPMI_ERR_DENIED,
+		      "doorbell MSI, service %lu: status %d", svc,
+		      (int)page_a.w[0]);
+	}
+	ret = sysmsi(RPMI_SYSMSI_GET_MSI_STATE, PUC_NUM_SYSMSI, 4);
+	CHECK(ret.error == 0 && (int)page_a.w[0] == RPMI_ERR_INVALID_PARAM,
+	      "MSI out of range");
+	CHECK(READ_ONCE(puc_sysmsi_requests) == 0,
+	      "the PuC was asked about MSIs %x",
+	      READ_ONCE(puc_sysmsi_requests));
+	/*
+	 * Posted requests have nowhere to put a status: the verdict is the
+	 * call's.
+	 */
+	page_a.w[0] = 0;
+	page_a.w[1] = 0;
+	CHECK_RET(sbi_call3(SBI_EXT_MPXY, FID_SEND_WITHOUT_RESP, CH_SYSMSI,
+			    RPMI_SYSMSI_SET_MSI_STATE, 8),
+		  SBI_SUCCESS);
+	page_a.w[0] = PUC_SYSMSI_MMODE;
+	CHECK_RET(sbi_call3(SBI_EXT_MPXY, FID_SEND_WITHOUT_RESP, CH_SYSMSI,
+			    RPMI_SYSMSI_SET_MSI_STATE, 8),
+		  SBI_ERR_DENIED);
+	ret = sysmsi(RPMI_SYSMSI_GET_MSI_STATE, 2, 4);
+	CHECK(ret.error == 0 && page_a.w[0] == 0,
+	      "an MSI of S-mode's after all that");
+}
+
 static struct sbiret get_events(void)
 {
-	return sbi_call1(SBI_EXT_MPXY, FID_GET_NOTIFICATIONS, CH_CLOCK);
+	return sbi_call1(SBI_EXT_MPXY, FID_GET_NOTIFICATIONS, CH_TEST);
 }
 
 static void make_events(uint32_t count)
 {
 	page_a.w[0] = count;
-	CHECK_RET(send(CH_CLOCK, PUC_TEST_NOTIFY, 4), SBI_SUCCESS);
+	CHECK_RET(send(CH_TEST, PUC_TEST_NOTIFY, 4), SBI_SUCCESS);
 }
 
 static void test_notifications(void)
@@ -303,6 +426,15 @@ static void test_notifications(void)
 	const unsigned int ev_size = RPMI_EVENT_HDR_SIZE + PUC_EVENT_DATALEN;
 	const unsigned int room = CONFIG_MPXY_RPMI_EVENT_BUF_SIZE / ev_size;
 	struct sbiret ret = {};
+
+	/*
+	 * The events come with their counts: test_attributes() has that on for
+	 * CH_CLOCK.
+	 */
+	page_a.w[0] = 1;
+	CHECK_RET(sbi_call3(SBI_EXT_MPXY, FID_WRITE_ATTRS, CH_TEST,
+			    MPXY_ATTR_EVENTS_STATE_CONTROL, 1),
+		  SBI_SUCCESS);
 
 	ret = get_events();
 	CHECK(ret.error == 0 && ret.value == 0 && page_a.w[1] == 0,
@@ -317,7 +449,7 @@ static void test_notifications(void)
 	CHECK(ret.error == 0 && ret.value == 0, "events while disabled");
 	page_a.w[0] = PUC_EVENT_ID;
 	page_a.w[1] = 1;
-	ret = send(CH_CLOCK, RPMI_SERVICE_ENABLE_NOTIFICATION, 8);
+	ret = send(CH_TEST, RPMI_SERVICE_ENABLE_NOTIFICATION, 8);
 	CHECK(ret.error == 0 && page_a.w[0] == 0 && page_a.w[1] == 1,
 	      "enable_notification");
 
@@ -369,6 +501,8 @@ void test_mpxy(void)
 	test_attributes();
 	printf("mpxy messages\n");
 	test_messages();
+	printf("mpxy system MSIs\n");
+	test_sysmsi();
 	printf("mpxy notifications\n");
 	test_notifications();
 

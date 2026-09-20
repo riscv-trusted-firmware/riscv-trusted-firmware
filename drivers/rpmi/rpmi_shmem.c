@@ -190,6 +190,9 @@ static int rpmi_shmem_probe(const void *fdt, int node)
 	t->ctx.max_data_len = slot - RPMI_MSG_HDR_SIZE;
 	t->ctx.has_p2a = t->queue[RPMI_QUEUE_P2A_REQ] &&
 			 t->queue[RPMI_QUEUE_A2P_ACK];
+	t->ctx.p2a_doorbell_sysmsi =
+		fdt_prop_u32(fdt, node, "riscv,p2a-doorbell-sysmsi-index",
+			     RPMI_NO_SYSMSI);
 	t->ctx.priv = t;
 	t->ctx.send = rpmi_shmem_send;
 	t->ctx.recv = rpmi_shmem_recv;

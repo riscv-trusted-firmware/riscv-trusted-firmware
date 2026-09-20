@@ -25,6 +25,8 @@
 #include <string.h>
 #include <util.h>
 
+#include "mpxy_rpmi.h"
+
 #define MPXY_RPMI_ATTR_SERVICEGROUP_ID U(0x80000000)
 #define MPXY_RPMI_ATTR_SERVICEGROUP_VERSION U(0x80000001)
 #define MPXY_RPMI_ATTR_IMPL_ID U(0x80000002)
@@ -37,6 +39,11 @@ struct mpxy_rpmi {
 	uint16_t group;
 	bool probed;
 	uint32_t group_version, impl_id, impl_version;
+	/*
+	 * NULL for a group the monitor knows nothing of: passed on as it comes.
+	 */
+	const struct rpmi_group_rules *rules;
+	struct rpmi_group_state state;
 
 	/* Whole events, back to back. */
 	unsigned long lock;
@@ -66,6 +73,10 @@ static long rpmi_to_sbi(int rc)
 		return SBI_ERR_INVALID_PARAM;
 	case RPMI_ERR_NOT_SUPPORTED:
 		return SBI_ERR_NOT_SUPPORTED;
+	case RPMI_ERR_DENIED:
+		return SBI_ERR_DENIED;
+	case RPMI_ERR_INVALID_ADDR:
+		return SBI_ERR_INVALID_ADDRESS;
 	default:
 		return SBI_ERR_FAILED;
 	}
@@ -89,6 +100,8 @@ static long mpxy_rpmi_ask_puc(struct mpxy_rpmi *r)
 	if (!rc)
 		rc = rpmi_base_get(r->puc, RPMI_BASE_GET_IMPL_VERSION,
 				   &impl_version);
+	if (!rc && r->rules && r->rules->setup)
+		rc = r->rules->setup(r->puc, &r->state);
 	if (rc)
 		return rpmi_to_sbi(rc);
 
@@ -136,9 +149,31 @@ static long mpxy_rpmi_send(struct mpxy_channel *ch, uint32_t msg_id, void *buf,
 		return SBI_ERR_NOT_SUPPORTED;
 	if (!IS_ALIGNED(len, 4))
 		return SBI_ERR_INVALID_PARAM;
+	if (r->rules) {
+		const struct rpmi_service_rule *rule =
+			rpmi_service_rule_find(r->rules, (uint8_t)msg_id);
+
+		if (!rule)
+			return SBI_ERR_NOT_SUPPORTED;
+		if (len < rule->req_min ||
+		    (rule->req_max != RPMI_RULE_ANY_LEN && len > rule->req_max))
+			return SBI_ERR_INVALID_PARAM;
+	}
 	rc = mpxy_rpmi_ask_puc(r);
 	if (rc)
 		return rc;
+
+	/* A request the monitor answers itself, the way the PuC would have. */
+	rc = r->rules && r->rules->filter ?
+		     r->rules->filter(&r->state, (uint8_t)msg_id, buf) :
+		     0;
+	if (rc) {
+		if (!resp_len || resp_max < 4)
+			return rpmi_to_sbi((int)rc);
+		*(uint32_t *)buf = (uint32_t)rc;
+		*resp_len = 4;
+		return SBI_SUCCESS;
+	}
 
 	if (!resp_len)
 		return rpmi_to_sbi(rpmi_post(r->puc, r->group, (uint8_t)msg_id,
@@ -232,6 +267,7 @@ static long mpxy_rpmi_channel_add(struct rpmi_context *puc, uint32_t channel_id,
 	r = &pool[pool_used];
 	r->puc = puc;
 	r->group = group;
+	r->rules = rpmi_group_rules_find(group);
 	r->ch = (struct mpxy_channel){
 		.id = channel_id,
 		.msg_prot_id = MPXY_MSG_PROT_RPMI,
@@ -278,10 +314,22 @@ static int mpxy_rpmi_probe(const void *fdt, int node)
 }
 
 static const char *const mpxy_rpmi_compatible[] = {
-	"riscv,rpmi-mpxy-clock",       "riscv,rpmi-mpxy-device-power",
-	"riscv,rpmi-mpxy-performance", "riscv,rpmi-mpxy-system-msi",
-	"riscv,rpmi-mpxy-voltage",     "riscv,rpmi-mpxy-mm",
-	"riscv,rpmi-mpxy-logging",     NULL,
+	"riscv,rpmi-mpxy-clock",
+	"riscv,rpmi-mpxy-device-power",
+	"riscv,rpmi-mpxy-performance",
+	"riscv,rpmi-mpxy-system-msi",
+	"riscv,rpmi-mpxy-voltage",
+	"riscv,rpmi-mpxy-mm",
+	"riscv,rpmi-mpxy-logging",
+	/* No binding names these yet: after the pattern of the others. */
+	"riscv,rpmi-mpxy-ras-agent",
+	"riscv,rpmi-mpxy-request-forward",
+	/*
+	 * An experimental or implementation specific group: "mboxes" says
+	 * which.
+	 */
+	"riscv-tf,rpmi-mpxy-group",
+	NULL,
 };
 
 DRIVER_DEFINE(mpxy_rpmi) = {

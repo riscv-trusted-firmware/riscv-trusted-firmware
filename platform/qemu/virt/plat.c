@@ -30,9 +30,10 @@ void plat_init(void)
 /*
  * QEMU virt has no platform microcontroller, and says nothing about one.
  * For the SBI test payload's PuC model, describe an RPMI shared memory
- * transport in RAM, MPXY channels for the clock and voltage groups (the
- * latter is there to be probed and found missing) and the M-mode users of
- * the transport, the way a platform with a PuC would.
+ * transport in RAM, MPXY channels for the clock, voltage (there to be
+ * probed and found missing), system MSI and the model's own service group,
+ * and the M-mode users of the transport, the way a platform with a PuC
+ * would.
  */
 #define SHMEM_BASE CONFIG_QEMU_VIRT_RPMI_SHMEM_BASE
 #define QUEUE_SIZE CONFIG_QEMU_VIRT_RPMI_QUEUE_SIZE
@@ -102,6 +103,14 @@ static int rpmi_fdt_prepare(void *fdt)
 				     CONFIG_QEMU_VIRT_RPMI_SLOT_SIZE);
 	if (!rc)
 		rc = fdt_setprop_u32(fdt, node, "#mbox-cells", 1);
+	/*
+	 * The model has a few system MSIs; this one is said to be the P2A
+	 * doorbell.
+	 */
+	if (!rc)
+		rc = fdt_setprop_u32(fdt, node,
+				     "riscv,p2a-doorbell-sysmsi-index",
+				     CONFIG_QEMU_VIRT_RPMI_DOORBELL_SYSMSI);
 	if (!rc)
 		rc = fdt_setprop_u32(fdt, node, "phandle", phandle);
 
@@ -119,6 +128,11 @@ static int rpmi_fdt_prepare(void *fdt)
 	USER("rpmi-clock", "riscv,rpmi-mpxy-clock", RPMI_GROUP_CLOCK, channel);
 	USER("rpmi-voltage", "riscv,rpmi-mpxy-voltage", RPMI_GROUP_VOLTAGE,
 	     channel + 1);
+	USER("rpmi-system-msi", "riscv,rpmi-mpxy-system-msi",
+	     RPMI_GROUP_SYSTEM_MSI, channel + 2);
+	/* The model's own group, for the tests that need a PuC to misbehave. */
+	USER("rpmi-test", "riscv-tf,rpmi-mpxy-group",
+	     CONFIG_QEMU_VIRT_RPMI_TEST_GROUP, channel + 3);
 	USER("rpmi-system-reset", "riscv,rpmi-system-reset",
 	     RPMI_GROUP_SYSTEM_RESET, 0);
 	USER("rpmi-system-suspend", "riscv,rpmi-system-suspend",

@@ -302,6 +302,25 @@ cached; a group the PuC does not implement makes its channel
 `SBI_ERR_NOT_SUPPORTED`. Notification events are buffered per channel with
 the events state (returned / remaining / lost).
 
+The monitor knows the groups of RPMI v1.0 that are S-mode's to use
+(`services/mpxy/mpxy_rpmi_groups.c`): SYSTEM_MSI, VOLTAGE, CLOCK,
+DEVICE_POWER, PERFORMANCE, MANAGEMENT_MODE, RAS_AGENT and REQUEST_FORWARD.
+Of those only a service the group has, with request data as long as that
+service's, reaches the PuC: anything else is `SBI_ERR_NOT_SUPPORTED` or
+`SBI_ERR_INVALID_PARAM` for the caller. A group the monitor does not know
+(experimental, 0x7C00 up, or implementation specific, 0x8000 up; any
+compatible above, or `riscv-tf,rpmi-mpxy-group`) is passed on as it comes.
+
+SYSTEM_MSI is the one group where a request can be the monitor's business,
+and those it answers itself, with the status the PuC would have used. The
+system MSIs that prefer M-mode (the PuC says which, when the channel is
+first used) and the one the transport node names as its P2A doorbell
+(`riscv,p2a-doorbell-sysmsi-index`) are denied to S-mode, whatever the
+service. And `SET_MSI_TARGET` has the PuC write to an address of the
+caller's choosing: it must be one the caller's domain can write itself,
+which the monitor's memory and its interrupt files are not
+(`RPMI_ERR_INVALID_ADDR`).
+
 **RPMI in M-mode.** The service groups the specification keeps for M-mode
 back the monitor's own services: SYSTEM_RESET is a reset backend (the best
 rated one that supports a reset type is used, so the PuC comes before a
@@ -324,9 +343,10 @@ hart, trap redirection, the PMP fence around the monitor, legacy return
 convention and unprivileged hart-mask reads). QEMU virt has no platform
 microcontroller: the platform adds the nodes of one to the device tree
 (`CONFIG_QEMU_VIRT_RPMI`), and one of the secondary harts serves a
-PuC model (`images/sbitest/puc.c`: BASE and clock service groups, plus test
-services that stay silent, send a stale acknowledgment or fire
-notifications, and the reset, HSM and CPPC groups as the monitor's backends
+PuC model (`images/sbitest/puc.c`: BASE, clock and system MSI service
+groups, a group of its own with services that stay silent, send a stale
+acknowledgment or fire notifications, and the reset, HSM and CPPC groups as
+the monitor's backends
 use them; the run ends with a shutdown that reaches the model over RPMI)
 over the real shared memory queues. It prints `sbitest: PASS` or
 `sbitest: FAIL` and powers off through SRST; `scripts/boot-test.sh` greps
@@ -370,9 +390,9 @@ with `IMAGE_SBITEST` disabled.
 1. SSE RAS events (no source yet); DBTR trigger types other than address /
    data match.
 2. **RPMI**: service groups implemented by the firmware itself behind the
-   same MPXY channels; MSI / SSE indication of notifications; the P2A
-   doorbell and the SYSTEM_MSI group; CPPC fast channels and the PuC's HSM
-   suspend types.
+   same MPXY channels; MSI / SSE indication of notifications and the P2A
+   doorbell as an interrupt (the P2A queue is polled); CPPC fast channels
+   and the PuC's HSM suspend types.
 3. The maximum number of harts and domains and the monitor's size are
    build-time constants.
 4. More timer / IPI / reset / serial drivers.

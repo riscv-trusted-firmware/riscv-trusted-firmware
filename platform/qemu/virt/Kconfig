@@ -96,6 +96,20 @@ if QEMU_VIRT_RPMI
 config QEMU_VIRT_RPMI_CHANNEL_BASE
 	hex "First MPXY channel id"
 	default 0x1000
+	help
+	  Clock, voltage, system MSI and the PuC model's own service group, in
+	  this order.
+
+config QEMU_VIRT_RPMI_TEST_GROUP
+	hex "Service group of the PuC model's own services"
+	default 0x8000
+	help
+	  An implementation specific group (0x8000 and up): services that make
+	  the model misbehave on request.
+
+config QEMU_VIRT_RPMI_DOORBELL_SYSMSI
+	int "System MSI the device tree calls the P2A doorbell"
+	default 3
 
 # Clear of everything QEMU loads with at least 128 MiB of RAM.
 config QEMU_VIRT_RPMI_SHMEM_BASE

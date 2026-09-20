@@ -92,7 +92,16 @@ static inline uint64_t puc_clock_rate(uint32_t id)
 	return ULL(1000000) * (id + 1) + SHIFT_U64(id, 32);
 }
 
-/* Services the model adds to the clock group, for the sake of testing. */
+/* System MSIs of the model, and the one that prefers M-mode. */
+#define PUC_NUM_SYSMSI 5
+#define PUC_SYSMSI_MMODE 1
+/*
+ * Bit per system MSI the model was asked about: what the monitor let through.
+ */
+extern uint32_t puc_sysmsi_requests;
+
+/* The model's own service group, for the sake of testing. */
+#define PUC_GROUP_TEST CONFIG_QEMU_VIRT_RPMI_TEST_GROUP
 #define PUC_TEST_POSTED 0xe0 /* posted: remember word 0 of the data */
 #define PUC_TEST_SILENT 0xe1 /* never acknowledged */
 #define PUC_TEST_STALE_ACK 0xe2 /* a foreign acknowledgment first */

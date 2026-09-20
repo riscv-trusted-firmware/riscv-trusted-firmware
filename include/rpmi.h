@@ -101,6 +101,16 @@ struct rpmi_hdr {
 #define RPMI_CPPC_READ_REG 0x03
 #define RPMI_CPPC_WRITE_REG 0x04
 
+/* SYSTEM_MSI service group. */
+#define RPMI_SYSMSI_GET_ATTRIBUTES 0x02
+#define RPMI_SYSMSI_GET_MSI_ATTRIBUTES 0x03
+#define RPMI_SYSMSI_SET_MSI_STATE 0x04
+#define RPMI_SYSMSI_GET_MSI_STATE 0x05
+#define RPMI_SYSMSI_SET_MSI_TARGET 0x06
+#define RPMI_SYSMSI_GET_MSI_TARGET 0x07
+/* GET_MSI_ATTRIBUTES FLAGS0: M-mode is where this MSI wants to be handled. */
+#define RPMI_SYSMSI_FLAGS0_PREF_MMODE 0x1
+
 /* Event header inside a notification: EVENT_ID[23:16] EVENT_DATALEN[15:0] */
 #define RPMI_EVENT_HDR_SIZE 4
 #define RPMI_EVENT_DATALEN(hdr) ((hdr) & 0xffff)
@@ -128,6 +138,7 @@ enum rpmi_queue {
 };
 
 #define RPMI_MAX_EVENT_SINKS 8
+#define RPMI_NO_SYSMSI (~U(0))
 
 typedef void (*rpmi_event_sink_t)(void *ctx, const void *events, size_t len);
 
@@ -137,6 +148,8 @@ struct rpmi_context {
 	uint32_t phandle; /* of the device tree node behind it */
 	uint32_t max_data_len;
 	bool has_p2a;
+	/* The system MSI that is the P2A doorbell, RPMI_NO_SYSMSI without. */
+	uint32_t p2a_doorbell_sysmsi;
 	void *priv;
 	/*
 	 * 0, RPMI_ERR_BUSY when the queue is full, RPMI_ERR_NO_DATA when it
