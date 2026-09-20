@@ -10,6 +10,7 @@
 
 #include <arch/hart.h>
 #include <arch/pmp.h>
+#include <arch/pmu.h>
 #include <atomic.h>
 #include <ipi.h>
 #include <log.h>
@@ -79,6 +80,10 @@ void hart_detect_features(void)
 	/* stimecmp exists when Sstc does; menvcfg.STCE then sticks. */
 	if (features[HART_FEAT_MENVCFG] && csr_probe(CSR_STIMECMP, &val))
 		features[HART_FEAT_SSTC] = true;
+#endif
+#ifdef CONFIG_RISCV_EXT_SSCOFPMF
+	/* scountovf exists when Sscofpmf does. */
+	features[HART_FEAT_SSCOFPMF] = csr_probe(CSR_SCOUNTOVF, &val);
 #endif
 }
 
@@ -155,7 +160,10 @@ void hart_runtime_init(void)
 			 BIT(CAUSE_VIRTUAL_INSN) |
 			 BIT(CAUSE_STORE_GUEST_PAGE_FAULT);
 	csr_write(medeleg, deleg);
-	csr_write(mideleg, MIP_SSIP | MIP_STIP | MIP_SEIP);
+	deleg = MIP_SSIP | MIP_STIP | MIP_SEIP;
+	if (hart_has(HART_FEAT_SSCOFPMF))
+		deleg |= BIT(IRQ_PMU_OVF);
+	csr_write(mideleg, deleg);
 
 	/*
 	 * Counters: all of them, 'time' only when it does not need emulation.
@@ -166,6 +174,7 @@ void hart_runtime_init(void)
 
 	envcfg_init();
 	pmp_init();
+	pmu_hart_init();
 
 	/* Nothing stale pending when the next stage (re)starts on this hart. */
 	csr_clear(mip, MIP_SSIP | MIP_STIP);

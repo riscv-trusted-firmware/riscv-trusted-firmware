@@ -4,9 +4,11 @@
  */
 
 #include <arch/hart.h>
+#include <arch/pmu.h>
 #include <arch/rfence.h>
 #include <atomic.h>
 #include <ipi.h>
+#include <sbi/sbi.h>
 #include <util.h>
 
 static const struct ipi_ops *ipi;
@@ -49,6 +51,8 @@ void ipi_send(unsigned long hartid, enum ipi_event event)
 
 	if (!ipi || !h)
 		return;
+	if (event == IPI_EVENT_SMODE)
+		pmu_fw_event(SBI_PMU_FW_IPI_SENT);
 	atomic_or_ulong(&h->ipi_pending, BIT(event));
 	ipi->send(hartid);
 }
@@ -79,6 +83,8 @@ void ipi_process(void)
 		hart_halt();
 	if (pending & BIT(IPI_EVENT_RFENCE))
 		rfence_process();
-	if (pending & BIT(IPI_EVENT_SMODE))
+	if (pending & BIT(IPI_EVENT_SMODE)) {
+		pmu_fw_event(SBI_PMU_FW_IPI_RECEIVED);
 		csr_set(mip, MIP_SSIP);
+	}
 }

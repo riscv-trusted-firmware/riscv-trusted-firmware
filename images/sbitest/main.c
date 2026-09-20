@@ -274,8 +274,8 @@ static void test_base(void)
 	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, BOGUS_EID);
 	CHECK_RET(ret, SBI_SUCCESS);
 	CHECK(ret.value == 0, "bogus extension probed");
-	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_PMU);
-	CHECK(ret.value == 0, "PMU probed but not implemented");
+	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_SUSP);
+	CHECK(ret.value == 0, "SUSP probed but not implemented");
 
 	CHECK_RET(sbi_call0(SBI_EXT_BASE, SBI_BASE_GET_MVENDORID), SBI_SUCCESS);
 	CHECK_RET(sbi_call0(SBI_EXT_BASE, SBI_BASE_GET_MARCHID), SBI_SUCCESS);
@@ -817,6 +817,184 @@ static void test_fdt(unsigned long addr)
 }
 #endif
 
+#ifdef CONFIG_SBI_PMU
+#define FW_EVENT(code) ((SBI_PMU_EVENT_TYPE_FW << 16) | (code))
+#define PMU_CFG_START \
+	(SBI_PMU_CFG_FLAG_CLEAR_VALUE | SBI_PMU_CFG_FLAG_AUTO_START)
+
+static struct sbiret pmu_config(unsigned long base, unsigned long mask,
+				unsigned long flags, unsigned long event)
+{
+	/* event_data is 64 bits wide: one register on RV64, two on RV32. */
+	return sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_CONFIG_MATCHING, base,
+			mask, flags, event, 0);
+}
+
+static uint64_t pmu_fw_read(unsigned long idx)
+{
+	struct sbiret lo = sbi_call1(SBI_EXT_PMU, SBI_PMU_COUNTER_FW_READ, idx);
+	struct sbiret hi =
+		sbi_call1(SBI_EXT_PMU, SBI_PMU_COUNTER_FW_READ_HI, idx);
+
+	CHECK_RET(lo, SBI_SUCCESS);
+	CHECK_RET(hi, SBI_SUCCESS);
+#if __RISCV_XLEN__ == 32
+	return ((uint64_t)(unsigned long)hi.value << 32) |
+	       (unsigned long)lo.value;
+#else
+	CHECK(hi.value == 0, "fw_read_hi %lx on RV64", hi.value);
+	return (uint64_t)lo.value;
+#endif
+}
+
+static void pmu_stop_reset(unsigned long idx)
+{
+	sbi_call3(SBI_EXT_PMU, SBI_PMU_COUNTER_STOP, idx, 1,
+		  SBI_PMU_STOP_FLAG_RESET);
+}
+
+static void test_pmu(void)
+{
+	unsigned long total = 0, fw_first = ~UL(0), fw_mask = 0, hw = 0, fw = 0,
+		      idx = 0, val = 0;
+	struct sbiret ret = {};
+	uint64_t c0 = 0, c1 = 0;
+
+	printf("pmu\n");
+	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_PMU);
+	CHECK(ret.value != 0, "PMU not probed");
+
+	ret = sbi_call0(SBI_EXT_PMU, SBI_PMU_NUM_COUNTERS);
+	CHECK_RET(ret, SBI_SUCCESS);
+	total = (unsigned long)ret.value;
+	for (unsigned long i = 0; i < total; i++) {
+		ret = sbi_call1(SBI_EXT_PMU, SBI_PMU_COUNTER_GET_INFO, i);
+		if (ret.error)
+			continue;
+		if ((unsigned long)ret.value >> (__RISCV_XLEN__ - 1)) {
+			fw++;
+			if (fw_first == ~UL(0))
+				fw_first = i;
+		} else {
+			hw++;
+			CHECK(((unsigned long)ret.value & 0xfff) == 0xc00 + i,
+			      "counter %lu: info %lx", i, ret.value);
+		}
+	}
+	printf("  %lu hardware, %lu firmware counters\n", hw, fw);
+	CHECK(fw > 0 && fw < __RISCV_XLEN__, "%lu firmware counters", fw);
+	fw_mask = BIT(fw) - 1;
+	/* A counter set that reaches past the last counter is invalid. */
+	CHECK_RET(pmu_config(fw_first, ~UL(0), 0,
+			     FW_EVENT(SBI_PMU_FW_SET_TIMER)),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sbi_call1(SBI_EXT_PMU, SBI_PMU_COUNTER_GET_INFO, total),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sbi_call1(SBI_EXT_PMU, SBI_PMU_COUNTER_GET_INFO, 1),
+		  SBI_ERR_INVALID_PARAM);
+
+	/* A firmware counter on set_timer calls. */
+	ret = pmu_config(fw_first, fw_mask, PMU_CFG_START,
+			 FW_EVENT(SBI_PMU_FW_SET_TIMER));
+	CHECK_RET(ret, SBI_SUCCESS);
+	idx = (unsigned long)ret.value;
+	CHECK(idx >= fw_first && idx < total, "firmware counter index %lu",
+	      idx);
+	for (int i = 0; i < 3; i++)
+		sbi_set_timer(~ULL(0));
+	CHECK(pmu_fw_read(idx) == 3, "counted %lu set_timer calls",
+	      (unsigned long)pmu_fw_read(idx));
+	CHECK_RET(sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_START, idx, 1, 0, 0, 0),
+		  SBI_ERR_ALREADY_STARTED);
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_COUNTER_STOP, idx, 1, 0),
+		  SBI_SUCCESS);
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_COUNTER_STOP, idx, 1, 0),
+		  SBI_ERR_ALREADY_STOPPED);
+	sbi_set_timer(~ULL(0));
+	CHECK(pmu_fw_read(idx) == 3, "stopped counter moved");
+	/* Restart from an initial value (64 bits: a3, plus a4 on RV32). */
+	ret = sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_START, idx, 1,
+		       SBI_PMU_START_FLAG_SET_INIT_VALUE, UL(0xffffffff), 0);
+	CHECK_RET(ret, SBI_SUCCESS);
+	sbi_set_timer(~ULL(0));
+	CHECK(pmu_fw_read(idx) == ULL(0x100000000),
+	      "no carry into the upper half");
+
+	/* A second one, on the traps the monitor hands back to us. */
+	ret = pmu_config(fw_first, fw_mask, PMU_CFG_START,
+			 FW_EVENT(SBI_PMU_FW_ILLEGAL_INSN));
+	CHECK_RET(ret, SBI_SUCCESS);
+	CHECK((unsigned long)ret.value != idx, "counter %lu handed out twice",
+	      idx);
+	WRITE_ONCE(trap_expected, true);
+	PROBE_INSN("csrr %0, mstatus", : "=r"(val) : : "memory");
+	PROBE_INSN("csrr %0, mstatus", : "=r"(val) : : "memory");
+	WRITE_ONCE(trap_expected, false);
+	CHECK(pmu_fw_read((unsigned long)ret.value) == 2,
+	      "illegal instruction count");
+	pmu_stop_reset((unsigned long)ret.value);
+	pmu_stop_reset(idx);
+	CHECK_RET(sbi_call1(SBI_EXT_PMU, SBI_PMU_COUNTER_FW_READ, idx),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sbi_call1(SBI_EXT_PMU, SBI_PMU_COUNTER_FW_READ, 0),
+		  SBI_ERR_INVALID_PARAM);
+
+	if (hw) {
+		/*
+		 * Cycles: on a counter we can read, running only when started.
+		 */
+		ret = pmu_config(0, 0x5, PMU_CFG_START, SBI_PMU_HW_CPU_CYCLES);
+		CHECK_RET(ret, SBI_SUCCESS);
+		CHECK(ret.value == 0, "cycles on counter %ld", ret.value);
+		c0 = csr_read(cycle);
+		for (int i = 0; i < 1000; i++)
+			cpu_relax();
+		c1 = csr_read(cycle);
+		CHECK(c1 > c0, "cycle counter does not count");
+		CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_COUNTER_STOP, 0, 1, 0),
+			  SBI_SUCCESS);
+		/* QEMU before 9.1 only notices the stop on the next read. */
+		(void)csr_read(cycle);
+		c0 = csr_read(cycle);
+		for (int i = 0; i < 1000; i++)
+			cpu_relax();
+		CHECK(csr_read(cycle) == c0, "stopped cycle counter moved");
+		/* Taken: a second request cannot have it. */
+		CHECK_RET(pmu_config(0, 0x1, 0, SBI_PMU_HW_CPU_CYCLES),
+			  SBI_ERR_NOT_SUPPORTED);
+		pmu_stop_reset(0);
+		c0 = csr_read(cycle);
+		CHECK(csr_read(cycle) > c0,
+		      "released cycle counter does not run");
+
+		ret = pmu_config(0, 0x5, PMU_CFG_START,
+				 SBI_PMU_HW_INSTRUCTIONS);
+		CHECK_RET(ret, SBI_SUCCESS);
+		CHECK(ret.value == 2, "instructions on counter %ld", ret.value);
+		pmu_stop_reset(2);
+	}
+
+	CHECK_RET(pmu_config(fw_first, fw_mask, 0, FW_EVENT(1000)),
+		  SBI_ERR_NOT_SUPPORTED);
+	CHECK_RET(pmu_config(0, 0, 0, SBI_PMU_HW_CPU_CYCLES),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(pmu_config(total, 1, 0, SBI_PMU_HW_CPU_CYCLES),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(pmu_config(fw_first, 1, SBI_PMU_CFG_FLAG_SKIP_MATCH,
+			     FW_EVENT(SBI_PMU_FW_SET_TIMER)),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_START, fw_first, 1, 0,
+			   0, 0),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_SNAPSHOT_SET_SHMEM, 0, 0, 0),
+		  SBI_ERR_NOT_SUPPORTED);
+}
+#else
+static void test_pmu(void)
+{
+}
+#endif
+
 static void test_srst_errors(void)
 {
 	printf("srst\n");
@@ -849,6 +1027,7 @@ void test_main(unsigned long hartid, unsigned long fdt)
 	test_ipi_self();
 	test_legacy();
 	test_traps();
+	test_pmu();
 	test_smp();
 	test_srst_errors();
 

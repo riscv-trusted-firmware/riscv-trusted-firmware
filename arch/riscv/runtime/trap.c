@@ -12,9 +12,11 @@
  */
 
 #include <arch/hart.h>
+#include <arch/pmu.h>
 #include <arch/trap.h>
 #include <ipi.h>
 #include <log.h>
+#include <sbi/sbi.h>
 #include <service.h>
 #include <timer.h>
 #include <util.h>
@@ -131,8 +133,20 @@ void trap_handler(struct trap_regs *regs)
 	case CAUSE_ILLEGAL_INSN:
 		trap_illegal_insn(regs, &info);
 		return;
+	case CAUSE_MISALIGNED_LOAD:
+		pmu_fw_event(SBI_PMU_FW_MISALIGNED_LOAD);
+		break;
+	case CAUSE_MISALIGNED_STORE:
+		pmu_fw_event(SBI_PMU_FW_MISALIGNED_STORE);
+		break;
+	case CAUSE_LOAD_ACCESS:
+		pmu_fw_event(SBI_PMU_FW_ACCESS_LOAD);
+		break;
+	case CAUSE_STORE_ACCESS:
+		pmu_fw_event(SBI_PMU_FW_ACCESS_STORE);
+		break;
 	default:
-		trap_redirect(regs, &info);
-		return;
+		break;
 	}
+	trap_redirect(regs, &info);
 }

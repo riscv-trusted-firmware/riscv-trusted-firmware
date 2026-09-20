@@ -23,6 +23,15 @@ config SBI_IMPL_VERSION
 	hex "SBI implementation version"
 	default 0x00000100
 
+config SBI_PMU
+	bool "Performance monitoring unit extension (PMU)"
+	default y
+	select LIBFDT
+	help
+	  Hardware counters (cycles and instructions; the programmable ones
+	  as far as the "riscv,pmu" device tree node maps events to them) and
+	  firmware counters for what the monitor does on S-mode's behalf.
+
 config SBI_DBCN
 	bool "Debug console extension (DBCN)"
 	default y

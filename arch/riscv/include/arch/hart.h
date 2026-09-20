@@ -55,6 +55,7 @@ enum hart_feature {
 	HART_FEAT_TIME_CSR, /* 'time' readable without trapping */
 	HART_FEAT_MENVCFG, /* privileged spec 1.12 menvcfg */
 	HART_FEAT_SSTC,
+	HART_FEAT_SSCOFPMF,
 	HART_FEAT_H,
 	HART_FEAT_COUNT,
 };
@@ -85,18 +86,24 @@ bool hart_has(enum hart_feature feat);
 /* Every hart: delegation, counters, envcfg, PMP, interrupt enables. */
 void hart_runtime_init(void);
 
-/* Read a CSR that may not exist: false when the access trapped. */
-#define csr_probe(csr, valp)                            \
+/*
+ * Run a statement that may trap (an access to a CSR that may not exist):
+ * false when it did. Every instruction that can trap must be 4 bytes long.
+ */
+#define may_trap(stmt)                                  \
 	({                                              \
 		struct hart *__h = this_hart();         \
 		unsigned long __ms = csr_read(mstatus); \
 		__h->trap_taken = 0;                    \
 		__h->trap_expected = 1;                 \
-		*(valp) = csr_read(csr);                \
+		stmt;                                   \
 		__h->trap_expected = 0;                 \
 		csr_write(mstatus, __ms);               \
 		!__h->trap_taken;                       \
 	})
+
+/* Read a CSR that may not exist: false when the access trapped. */
+#define csr_probe(csr, valp) may_trap(*(valp) = csr_read(csr))
 
 /* Is [addr, addr + size) memory the next stage may be given or may name? */
 bool smode_range_ok(paddr_t addr, paddr_size_t size);

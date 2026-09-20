@@ -9,6 +9,7 @@ srcs-y += hart.c
 srcs-y += hsm.c
 srcs-y += illegal_insn.c
 srcs-y += pmp.c
+srcs-$(CONFIG_SBI_PMU) += pmu.c
 srcs-y += rfence.c
 srcs-y += switch.S
 srcs-y += trap.c

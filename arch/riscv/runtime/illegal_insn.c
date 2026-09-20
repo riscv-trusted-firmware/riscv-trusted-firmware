@@ -12,8 +12,10 @@
  */
 
 #include <arch/hart.h>
+#include <arch/pmu.h>
 #include <arch/trap.h>
 #include <arch/unpriv.h>
+#include <sbi/sbi.h>
 #include <timer.h>
 
 #define INSN_OPCODE(i) ((i) & 0x7f)
@@ -64,6 +66,7 @@ void trap_illegal_insn(struct trap_regs *regs, const struct trap_info *info)
 	unsigned long insn = info->tval;
 	struct trap_info fault = {};
 
+	pmu_fw_event(SBI_PMU_FW_ILLEGAL_INSN);
 	/* mtval may legally be zero: fetch the instruction ourselves. */
 	if (!insn && !unpriv_fetch_insn(regs, &insn, &fault)) {
 		trap_redirect(regs, &fault);

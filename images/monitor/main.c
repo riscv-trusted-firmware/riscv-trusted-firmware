@@ -13,6 +13,7 @@
 
 #include <arch/hart.h>
 #include <arch/hsm.h>
+#include <arch/pmu.h>
 #include <boot.h>
 #include <driver.h>
 #include <generated/version.h>
@@ -32,6 +33,7 @@ static void print_features(void)
 		[HART_FEAT_TIME_CSR] = "time",
 		[HART_FEAT_MENVCFG] = "menvcfg",
 		[HART_FEAT_SSTC] = "sstc",
+		[HART_FEAT_SSCOFPMF] = "sscofpmf",
 		[HART_FEAT_H] = "h",
 	};
 
@@ -86,6 +88,7 @@ void image_main(unsigned long hartid, unsigned long fdt)
 	pr_info("timer: %s, ipi: %s, reset: %s, harts: %u\n", timer_name(),
 		ipi_name(), reset_name(), hart_count());
 	print_services();
+	pmu_init((const void *)fdt);
 
 	/* All-zero is no RISC-V instruction: nothing was loaded there. */
 	if (*(const uint32_t *)next == 0) {

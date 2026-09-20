@@ -8,5 +8,6 @@ srcs-$(CONFIG_SBI) += ipi.c
 srcs-$(CONFIG_SBI) += rfence.c
 srcs-$(CONFIG_SBI) += hsm.c
 srcs-$(CONFIG_SBI) += srst.c
+srcs-$(CONFIG_SBI_PMU) += pmu.c
 srcs-$(CONFIG_SBI_DBCN) += dbcn.c
 srcs-$(CONFIG_SBI_LEGACY) += legacy.c

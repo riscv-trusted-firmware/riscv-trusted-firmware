@@ -64,6 +64,7 @@
 #define IRQ_VS_EXT 10
 #define IRQ_M_EXT 11
 #define IRQ_S_GEXT 12
+#define IRQ_PMU_OVF 13
 
 #define MIP_SSIP BIT(IRQ_S_SOFT)
 #define MIP_MSIP BIT(IRQ_M_SOFT)
@@ -81,6 +82,14 @@
 #define ENVCFG_CBZE BIT(7)
 #define ENVCFG_PBMTE_BIT 62
 #define ENVCFG_STCE_BIT 63
+
+/* mhpmevent (Sscofpmf) */
+#define HPMEVENT_OF_BIT 63
+#define HPMEVENT_MINH_BIT 62
+#define HPMEVENT_SINH_BIT 61
+#define HPMEVENT_UINH_BIT 60
+#define HPMEVENT_VSINH_BIT 59
+#define HPMEVENT_VUINH_BIT 58
 
 /* mcounteren */
 #define COUNTEREN_TM BIT(1)
@@ -110,6 +119,12 @@
 #define CSR_MTVAL2 0x34b
 #define CSR_PMPCFG0 0x3a0
 #define CSR_PMPADDR0 0x3b0
+#define CSR_MCOUNTINHIBIT 0x320
+#define CSR_MHPMEVENT0 0x320 /* + n, n = 3..31 */
+#define CSR_MHPMEVENT0H 0x720
+#define CSR_MCYCLE 0xb00 /* mhpmcounter n = + n */
+#define CSR_MCYCLEH 0xb80
+#define CSR_SCOUNTOVF 0xda0
 #define CSR_TIME 0xc01
 #define CSR_TIMEH 0xc81
 

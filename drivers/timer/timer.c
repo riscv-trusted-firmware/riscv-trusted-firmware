@@ -4,6 +4,8 @@
  */
 
 #include <arch/hart.h>
+#include <arch/pmu.h>
+#include <sbi/sbi.h>
 #include <timer.h>
 #include <util.h>
 
@@ -38,6 +40,8 @@ void timer_hart_init(void)
 
 void timer_smode_set(uint64_t when)
 {
+	pmu_fw_event(SBI_PMU_FW_SET_TIMER);
+
 	if (hart_has(HART_FEAT_SSTC)) {
 #if __RISCV_XLEN__ == 32
 		/* No spurious match while the two halves are inconsistent. */

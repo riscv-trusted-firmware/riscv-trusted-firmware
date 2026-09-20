@@ -12,6 +12,7 @@
  */
 
 #include <arch/hart.h>
+#include <arch/pmu.h>
 #include <arch/rfence.h>
 #include <atomic.h>
 #include <ipi.h>
@@ -156,6 +157,8 @@ void rfence_process(void)
 
 	if (!hartmask_test(&rfence_pending, self))
 		return;
+	/* Sent/received event pairs follow enum rfence_type. */
+	pmu_fw_event(SBI_PMU_FW_FENCE_I_RECEIVED + 2 * rfence_cur.type);
 	fence_local(&rfence_cur);
 	hartmask_clear_atomic(&rfence_pending, self);
 }
@@ -179,9 +182,12 @@ int rfence_request(const struct hartmask *targets, const struct rfence_req *req)
 		atomic_or_ulong(&rfence_pending.bits[hartid / BITS_PER_LONG],
 				BIT(hartid % BITS_PER_LONG));
 	}
-	for_each_hart_in_mask(hartid, targets)
-		if (hartid != self)
-			ipi_send(hartid, IPI_EVENT_RFENCE);
+	for_each_hart_in_mask(hartid, targets) {
+		if (hartid == self)
+			continue;
+		pmu_fw_event(SBI_PMU_FW_FENCE_I_SENT + 2 * req->type);
+		ipi_send(hartid, IPI_EVENT_RFENCE);
+	}
 
 	if (local)
 		fence_local(req);

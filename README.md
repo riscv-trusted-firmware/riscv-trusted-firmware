@@ -7,7 +7,7 @@ Arm Trusted Firmware plays on Arm, on RISC-V.
 
 Status: the monitor boots on QEMU `virt` (RV32 and RV64, GCC or clang/lld),
 brings up every hart and starts an S-mode next stage behind a PMP fence. It
-implements SBI v2.0: Base, TIME, IPI, RFENCE, HSM, SRST, DBCN and the legacy
+implements SBI v2.0: Base, TIME, IPI, RFENCE, HSM, SRST, PMU, DBCN and the legacy
 calls, with time CSR emulation and trap redirection; an S-mode test payload
 checks all of it on every build. Linux boots on it (SMP, CPU hotplug,
 reboot/poweroff): `make run QEMU_KERNEL=<Image>`. What is implemented and

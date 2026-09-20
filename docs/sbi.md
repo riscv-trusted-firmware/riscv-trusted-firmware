@@ -14,10 +14,11 @@ and what is still missing.
 | RFENCE    | `RFNC` | all seven calls; the `hfence` ones need the H extension (`NOT_SUPPORTED` otherwise) |
 | HSM       | `HSM`  | start, stop, status, suspend (default retentive and non-retentive types) |
 | SRST      | `SRST` | shutdown, cold and warm reboot through the reset driver |
+| PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart; no snapshot shared memory |
 | DBCN      | `DBCN` | write, read, write_byte (`CONFIG_SBI_DBCN`) |
 | Legacy    | `0x00`-`0x08` | all v0.1 calls (`CONFIG_SBI_LEGACY`) |
 
-Not implemented yet: PMU, SUSP (system suspend), CPPC, NACL, STA, SSE,
+Not implemented yet: SUSP (system suspend), CPPC, NACL, STA, SSE,
 FWFT, DBTR, MPXY. They probe as absent.
 
 An extension whose backend is missing (no timer, IPI or reset driver)
@@ -39,6 +40,7 @@ arch/riscv/runtime/       hart.c    per-hart state, feature probing, S-mode entr
                           unpriv.c  memory access as the trapping context (MPRV)
                           illegal_insn.c  time/timeh CSR emulation
                           pmp.c     PMP programming
+                          pmu.c     hardware and firmware counters
 drivers/timer/            timer core + ACLINT MTIMER
 drivers/ipi/              IPI core (event multiplexing) + ACLINT MSWI
 drivers/reset/            reset core + SiFive test finisher
@@ -89,6 +91,20 @@ acknowledged by each target in a shared hart mask. A hart waiting for the
 lock, for a start, or in a suspend loop keeps processing its own IPIs, so
 harts fencing each other cannot deadlock.
 
+### Performance counters
+
+Hardware counter indices are the CSR offsets (0 = cycle, 2 = instret,
+3-31 = hpmcounterN; 1 does not exist), found by probing at boot. Which
+events a programmable counter can count, and the mhpmevent value for each,
+comes from the `riscv,pmu` device tree node (`riscv,event-to-mhpmcounters`,
+`riscv,event-to-mhpmevent`, `riscv,raw-event-to-mhpmcounters`); without it
+only cycles and instructions are offered, on their fixed counters. A counter
+is handed out stopped (mcountinhibit); cycle and instret run freely while
+nobody owns them. With Sscofpmf the overflow interrupt is delegated and the
+mode-filter flags of `counter_config_matching` are honoured; M-mode is
+always filtered out. Firmware counters count the events of the SBI
+specification where they happen (`pmu_fw_event()`).
+
 ## Testing
 
 `images/sbitest` (`CONFIG_IMAGE_SBITEST`, on in the defconfigs) is an S-mode
@@ -122,14 +138,15 @@ kernel allocates those pages and faults on the PMP fence. The tree is
 grown in place, or moved to `CONFIG_MONITOR_FDT_ADDR` first. Tested with
 Linux 6.19 and 7.3-rc on 4 harts, with and without Sstc: SMP bring-up, CPU
 hotplug (HSM stop/start), `reboot` and `poweroff` (SRST), `earlycon=sbi`
-(DBCN).
+(DBCN), and the `riscv-pmu-sbi` driver finding its counters.
 
 Any other payload: `make run QEMU_ARGS="-device loader,file=payload.bin,addr=<MONITOR_NEXT_STAGE_ADDR>"`
 with `IMAGE_SBITEST` disabled.
 
 ## Gaps
 
-1. **PMU**, then **SUSP**, **FWFT** and the rest of the list above.
+1. **SUSP**, **FWFT** and the rest of the list above; PMU counter
+   snapshots.
 2. **Misaligned load/store emulation** (redirected to S-mode today) and the
    other illegal-instruction emulations.
 3. **Device tree driven configuration.** libfdt is only used for the
