@@ -16,12 +16,13 @@ and what is still missing.
 | SRST      | `SRST` | shutdown, cold and warm reboot through the reset driver |
 | SUSP      | `SUSP` | suspend to RAM as an M-mode wait with all other harts stopped (`CONFIG_SBI_SUSP`, on for QEMU virt) |
 | FWFT      | `FWFT` | misaligned exception delegation; landing pad, shadow stack, double trap, PTE A/D updating and pointer masking where the hart has them; lock flag |
+| MPXY      | `MPXY` | all eight functions; channels carry RPMI service groups (see below); no MSI / SSE indication, notifications are polled |
 | PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart, `event_get_info`; no snapshot shared memory |
 | DBCN      | `DBCN` | write, read, write_byte (`CONFIG_SBI_DBCN`) |
 | Legacy    | `0x00`-`0x08` | all v0.1 calls (`CONFIG_SBI_LEGACY`) |
 
-Not implemented yet: SSE, DBTR, and the extensions that need a platform
-backend this tree does not have (CPPC, MPXY). They probe as absent. NACL and
+Not implemented yet: SSE, DBTR, and CPPC (it needs a platform backend,
+which RPMI can now provide). They probe as absent. NACL and
 STA are interfaces a hypervisor offers its guests, not M-mode firmware.
 
 An extension whose backend is missing (no timer, IPI or reset driver)
@@ -45,6 +46,9 @@ arch/riscv/runtime/       hart.c    per-hart state, feature probing, S-mode entr
                           pmp.c     PMP programming
                           pmu.c     hardware and firmware counters
                           fwft.c    firmware features (medeleg / menvcfg controls)
+services/mpxy/            MPXY core (shared memory, channels, attributes)
+                          and the RPMI message protocol for channels
+drivers/rpmi/             RPMI client + shared memory transport
 drivers/timer/            timer core + ACLINT MTIMER
 drivers/ipi/              IPI core (event multiplexing) + ACLINT MSWI
 drivers/reset/            reset core + SiFive test finisher
@@ -117,6 +121,50 @@ medeleg; the others are menvcfg fields, and a feature exists when its field
 can be written, so no extension list is needed. A pointer masking length
 the hart does not implement is `INVALID_PARAM`.
 
+### Message proxy (MPXY) and RPMI
+
+```
+S-mode driver --SBI MPXY--> services/sbi/mpxy.c      decoding
+                            services/mpxy/mpxy.c      per-hart shared memory, channel
+                                                      list, standard attributes
+                            services/mpxy/mpxy_rpmi.c one channel = one RPMI service group
+                            drivers/rpmi/rpmi.c       request / acknowledgment engine
+                            drivers/rpmi/rpmi_shmem.c four queues + doorbell --> PuC
+```
+
+**MPXY core.** A channel is a `struct mpxy_channel` with the standard
+attributes and ops for what its message protocol defines: protocol
+attributes, sending a message, fetching notification events. S-mode's shared
+memory page is validated like any address S-mode names, and is never trusted:
+values are read once, and standard attribute writes are validated as a whole
+before any of them is applied. The extension probes as present once a
+channel exists.
+
+**RPMI client** (`include/rpmi.h`). One transport, one request in flight:
+the requester holds the lock from the enqueue until the acknowledgment
+with its token arrives or `CONFIG_RPMI_TIMEOUT_US` expires, and polls for it
+(serving its own IPIs meanwhile, like every M-mode wait). Acknowledgments
+with another token are leftovers and dropped. `rpmi_poll()` drains the P2A
+request queue: notifications go to the event sink of their service group,
+requests from the PuC are answered `RPMI_ERR_NOT_SUPPORTED`. The shared
+memory transport follows the specification's queue layout, takes its
+geometry from Kconfig, and checks every index and length it reads, since the
+other side is not this firmware. The queues can be hidden from S-mode with a
+PMP entry (`RPMI_SHMEM_PROTECT`) and, when they live in RAM, are added to
+`/reserved-memory` (`RPMI_SHMEM_IN_RAM`).
+
+**RPMI over MPXY.** The platform binds channel ids to service groups with
+`mpxy_rpmi_channel_add()`; BASE, CPPC and the M-mode only groups (system
+reset, system suspend, HSM) are refused, as the RPMI specification demands.
+`message_id` is the RPMI service id, the message data is the RPMI request
+or acknowledgment data, so the service's own verdict is the STATUS word
+while `sbiret.error` reports the proxying (`SBI_ERR_TIMEOUT`, `SBI_ERR_IO`).
+The group version and the PuC's implementation id and version (the RPMI
+channel attributes) are asked through the BASE group on first use, then
+cached; a group the PuC does not implement makes its channel
+`SBI_ERR_NOT_SUPPORTED`. Notification events are buffered per channel with
+the events state (returned / remaining / lost).
+
 ## Testing
 
 `images/sbitest` (`CONFIG_IMAGE_SBITEST`, on in the defconfigs) is an S-mode
@@ -124,7 +172,12 @@ payload that runs as the next stage and checks every call above: results,
 error codes and side effects (pending and delivered interrupts, hart states
 across start / stop / both suspend types / restart, IPI accounting on every
 hart, trap redirection, the PMP fence around the monitor, legacy return
-convention and unprivileged hart-mask reads). It prints `sbitest: PASS` or
+convention and unprivileged hart-mask reads). QEMU virt has no platform
+microcontroller, so for MPXY and RPMI one of the secondary harts serves a
+PuC model (`images/sbitest/puc.c`: BASE and clock service groups, plus test
+services that stay silent, send a stale acknowledgment or fire
+notifications) over the real shared memory queues, set aside in RAM by
+`CONFIG_QEMU_VIRT_RPMI`. It prints `sbitest: PASS` or
 `sbitest: FAIL` and powers off through SRST; `scripts/boot-test.sh` greps
 for the verdict.
 
@@ -160,14 +213,19 @@ with `IMAGE_SBITEST` disabled.
 ## Gaps
 
 1. **SSE** and **DBTR**; PMU counter snapshots.
-2. **Misaligned load/store emulation** (redirected to S-mode today) and the
+2. **RPMI consumers in M-mode**: system reset, system suspend, HSM and
+   CPPC backends over RPMI; service groups implemented by the firmware
+   itself behind the same MPXY channels; MSI / SSE indication of
+   notifications; transport and channel discovery from the device tree
+   (`riscv,rpmi-shmem-mbox`, `riscv,rpmi-mpxy-*`).
+3. **Misaligned load/store emulation** (redirected to S-mode today) and the
    other illegal-instruction emulations.
-3. **Device tree driven configuration.** libfdt is only used for the
+4. **Device tree driven configuration.** libfdt is only used for the
    fix-up; device addresses and the hart count still come from Kconfig.
-4. **Smepmp.** PMP is programmed without `mseccfg.MML`.
-5. **Interrupt controller set-up** (PLIC/APLIC M-mode contexts), more
+5. **Smepmp.** PMP is programmed without `mseccfg.MML`.
+6. **Interrupt controller set-up** (PLIC/APLIC M-mode contexts), more
    timer / IPI / reset / serial drivers.
-6. **Scalability.** Remote fences are serialised system-wide; harts are
+7. **Scalability.** Remote fences are serialised system-wide; harts are
    indexed by hart id (`hartid < CONFIG_PLATFORM_HART_COUNT`).
 
 The H-extension paths (trap redirection from VS/VU-mode, `hfence` on a real
