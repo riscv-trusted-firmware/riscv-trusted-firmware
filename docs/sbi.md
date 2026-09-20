@@ -45,6 +45,7 @@ arch/riscv/runtime/       hart.c    per-hart state, feature probing, S-mode entr
                           rfence.c  remote fence requests
                           unpriv.c  memory access as the trapping context (MPRV)
                           illegal_insn.c  time/timeh CSR emulation
+                          misaligned.c    misaligned load / store emulation
                           pmp.c     PMP programming
                           pmu.c     hardware and firmware counters
                           fwft.c    firmware features (medeleg / menvcfg controls)
@@ -68,8 +69,11 @@ hart's M-mode stack for traps from below, so the monitor never runs on a
 stack S-mode controls.
 
 Traps from S/U-mode: ecalls go to the service dispatcher, the M-mode timer
-and software interrupts to the timer and IPI cores, illegal instructions to
-the emulator. Everything else, and whatever the emulator does not handle, is
+and software interrupts to the timer and IPI cores, illegal instructions
+and misaligned accesses to their emulators. A misaligned load or store
+(integer or floating-point, 32-bit or compressed encoding) is redone byte by
+byte with the privilege and translation of the trapping context, unless
+S-mode has taken misaligned exceptions for itself through FWFT. Everything else, and whatever the emulator does not handle, is
 redirected to S-mode (`trap_redirect()`, which also fills in the hypervisor
 CSRs when the H extension is present). A trap taken in M-mode is fatal
 unless the hart announced it (`trap_expected`): that is how optional CSRs
@@ -272,8 +276,8 @@ with `IMAGE_SBITEST` disabled.
    itself behind the same MPXY channels; MSI / SSE indication of
    notifications; transport and channel discovery from the device tree
    (`riscv,rpmi-shmem-mbox`, `riscv,rpmi-mpxy-*`).
-3. **Misaligned load/store emulation** (redirected to S-mode today) and the
-   other illegal-instruction emulations.
+3. Emulation beyond `time` and misaligned scalar accesses: Zcb and vector
+   misaligned accesses, atomics, missing counters.
 4. **Device tree driven configuration.** libfdt is only used for the
    fix-up; device addresses and the hart count still come from Kconfig.
 5. **Smepmp.** PMP is programmed without `mseccfg.MML`.

@@ -6,9 +6,9 @@
 /*
  * Monitor trap policy. From S/U-mode: ecalls go to the service layer,
  * M-mode timer and software interrupts to their cores, illegal
- * instructions to the emulator; every other exception is handed back to
- * S-mode. A trap from M-mode itself is fatal unless the hart announced it
- * (CSR probing, unprivileged access).
+ * instructions and misaligned accesses to their emulators; every other
+ * exception is handed back to S-mode. A trap from M-mode itself is fatal unless
+ * the hart announced it (CSR probing, unprivileged access).
  */
 
 #include <arch/hart.h>
@@ -125,10 +125,12 @@ static void trap_from_below(struct trap_regs *regs)
 		return;
 	case CAUSE_MISALIGNED_LOAD:
 		pmu_fw_event(SBI_PMU_FW_MISALIGNED_LOAD);
-		break;
+		trap_misaligned(regs, &info);
+		return;
 	case CAUSE_MISALIGNED_STORE:
 		pmu_fw_event(SBI_PMU_FW_MISALIGNED_STORE);
-		break;
+		trap_misaligned(regs, &info);
+		return;
 	case CAUSE_LOAD_ACCESS:
 		pmu_fw_event(SBI_PMU_FW_ACCESS_LOAD);
 		break;

@@ -85,6 +85,8 @@ void __noreturn trap_fatal(const struct trap_regs *regs, const char *what);
 /* Deliver 'info' to S-mode (HS-mode) as if it had been delegated. */
 void trap_redirect(struct trap_regs *regs, const struct trap_info *info);
 void trap_illegal_insn(struct trap_regs *regs, const struct trap_info *info);
+/* Emulate a misaligned load or store, or hand it to S-mode. */
+void trap_misaligned(struct trap_regs *regs, const struct trap_info *info);
 
 #endif /* !__ASSEMBLY__ */
 

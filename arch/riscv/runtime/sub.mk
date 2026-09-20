@@ -10,6 +10,7 @@ srcs-y += fwft.c
 srcs-y += hart.c
 srcs-y += hsm.c
 srcs-y += illegal_insn.c
+srcs-y += misaligned.c
 srcs-y += pmp.c
 srcs-$(CONFIG_SBI_PMU) += pmu.c
 srcs-y += rfence.c

@@ -89,6 +89,33 @@ bool unpriv_read(const struct trap_regs *regs, unsigned long addr,
 	return unpriv_load(regs, addr, width, false, val, fault);
 }
 
+bool unpriv_write_byte(const struct trap_regs *regs, unsigned long addr,
+		       uint8_t val, struct trap_info *fault)
+{
+	struct hart *h = this_hart();
+	unsigned long saved = csr_read(mstatus), v = val;
+
+	h->trap_taken = 0;
+	h->trap_expected = 1;
+	csr_write(mstatus, regs->mstatus | MSTATUS_MPRV);
+	__asm__ __volatile__(".option push\n.option norvc\n"
+			     "sb %0, 0(%1)\n.option pop"
+			     :
+			     : "r"(v), "r"(addr)
+			     : "memory");
+	csr_write(mstatus, saved);
+	h->trap_expected = 0;
+
+	if (h->trap_taken) {
+		*fault = (struct trap_info){
+			.cause = h->trap_cause,
+			.tval = h->trap_tval,
+		};
+		return false;
+	}
+	return true;
+}
+
 bool unpriv_fetch_insn(const struct trap_regs *regs, unsigned long *insn,
 		       struct trap_info *fault)
 {
