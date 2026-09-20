@@ -35,6 +35,7 @@
 #define MSTATUS_TVM BIT(20)
 #define MSTATUS_TW BIT(21)
 #define MSTATUS_TSR BIT(22)
+#define MSTATUS_SDT BIT(24) /* Ssdbltrp: S-mode disable trap */
 /* Hypervisor extension: in mstatus on RV64, in mstatush on RV32. */
 #if __RISCV_XLEN__ == 64
 #define MSTATUS_GVA BIT(38)
@@ -43,6 +44,9 @@
 #define MSTATUSH_GVA BIT(6)
 #define MSTATUSH_MPV BIT(7)
 #endif
+/* Smdbltrp: M-mode disable trap. mstatus bit 42, mstatush bit 10. */
+#define MSTATUS_MDT_SHIFT 42
+#define MSTATUSH_MDT_SHIFT 10
 
 #define PRV_U 0
 #define PRV_S 1
@@ -156,6 +160,7 @@
 #define CAUSE_FETCH_PAGE_FAULT 12
 #define CAUSE_LOAD_PAGE_FAULT 13
 #define CAUSE_STORE_PAGE_FAULT 15
+#define CAUSE_DOUBLE_TRAP 16
 #define CAUSE_FETCH_GUEST_PAGE_FAULT 20
 #define CAUSE_LOAD_GUEST_PAGE_FAULT 21
 #define CAUSE_VIRTUAL_INSN 22

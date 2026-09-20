@@ -16,7 +16,7 @@ and what is still missing.
 | SRST      | `SRST` | shutdown, cold and warm reboot through the reset driver |
 | SUSP      | `SUSP` | suspend to RAM as an M-mode wait with all other harts stopped (`CONFIG_SBI_SUSP`, on for QEMU virt) |
 | FWFT      | `FWFT` | misaligned exception delegation; landing pad, shadow stack, double trap, PTE A/D updating and pointer masking where the hart has them; lock flag |
-| SSE       | `SSE`  | all ten functions; sources: the software injected local and global events, PMU counter overflow (Sscofpmf) |
+| SSE       | `SSE`  | all ten functions; sources: the software injected local and global events, PMU counter overflow (Sscofpmf), double trap (Ssdbltrp) |
 | DBTR      | `DBTR` | all eight functions, on harts with Sdtrig; address / data match triggers (mcontrol, mcontrol6), chains included |
 | MPXY      | `MPXY` | all eight functions; channels carry RPMI service groups (see below); no MSI / SSE indication, notifications are polled |
 | PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart, `event_get_info`, counter snapshots |
@@ -176,10 +176,20 @@ dispatcher writes no return value for it (`service_ret.keep_regs`).
 Events come from a table (`local_ids`, `global_ids` in `sse.c`); a source
 in the monitor raises its event with `sse_raise_local()` and follows the
 event's state through `event_source_update()`. Today: the software injected
-local and global events, and the PMU overflow event. Only the software
-events can be injected by S-mode. The standard events without a source here
-(RAS, double trap) are `SBI_ERR_NOT_SUPPORTED`, reserved ids
+local and global events, the PMU overflow event, and the double trap event.
+Only the software events can be injected by S-mode. The RAS events have no
+source here and are `SBI_ERR_NOT_SUPPORTED`, reserved ids
 `SBI_ERR_INVALID_PARAM`.
+
+**Double traps.** With Smdbltrp the trap entry clears `mstatus.MDT` once
+the interrupted state is saved, since the monitor takes traps in M-mode on
+purpose (CSR probing, unprivileged accesses). With Ssdbltrp turned on by
+S-mode (FWFT `DOUBLE_TRAP`), a trap redirected to S-mode sets `sstatus.SDT`
+as the hardware would, and an S-mode trap taken with SDT set, whether the
+hart reports it (cause 16) or a redirection finds it, goes to the SSE double
+trap event; without a handler for it the hart is halted. SSE injection and
+completion save and restore SDT. None of this could be run: QEMU 8.2 has
+neither extension.
 
 ### Debug triggers
 
@@ -295,8 +305,8 @@ with `IMAGE_SBITEST` disabled.
 
 ## Gaps
 
-1. SSE event sources (double trap, RAS); DBTR trigger types other than
-   address / data match.
+1. SSE RAS events (no source yet); DBTR trigger types other than address /
+   data match.
 2. **RPMI consumers in M-mode**: system reset, system suspend, HSM and
    CPPC backends over RPMI; service groups implemented by the firmware
    itself behind the same MPXY channels; MSI / SSE indication of

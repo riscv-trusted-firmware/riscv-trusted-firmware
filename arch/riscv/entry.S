@@ -22,6 +22,10 @@ _start:
 	csrw	mie, zero
 	csrw	mip, zero
 	csrw	mstatus, zero
+#if __RISCV_XLEN__ == 32
+	/* with Smdbltrp, MDT is set out of reset */
+	csrw	CSR_MSTATUSH, zero
+#endif
 	csrw	mscratch, zero
 	mv	tp, zero
 

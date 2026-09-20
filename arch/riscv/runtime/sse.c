@@ -38,10 +38,13 @@ struct sse_event {
 #define INT_FLAGS_SPIE BIT(1)
 #define INT_FLAGS_SPV BIT(2)
 #define INT_FLAGS_SPVP BIT(3)
-#define INT_FLAGS_VALID \
-	(INT_FLAGS_SPP | INT_FLAGS_SPIE | INT_FLAGS_SPV | INT_FLAGS_SPVP)
+#define INT_FLAGS_SDT BIT(5)
+#define INT_FLAGS_VALID                                                    \
+	(INT_FLAGS_SPP | INT_FLAGS_SPIE | INT_FLAGS_SPV | INT_FLAGS_SPVP | \
+	 INT_FLAGS_SDT)
 
 static const uint32_t local_ids[] = {
+	SSE_EVENT_LOCAL_DOUBLE_TRAP,
 	SSE_EVENT_LOCAL_PMU_OVERFLOW,
 	SSE_EVENT_LOCAL_SOFTWARE,
 };
@@ -63,7 +66,11 @@ static bool is_global(uint32_t id)
 
 static bool event_available(uint32_t id)
 {
-	return id != SSE_EVENT_LOCAL_PMU_OVERFLOW || pmu_sse_supported();
+	if (id == SSE_EVENT_LOCAL_PMU_OVERFLOW)
+		return pmu_sse_supported();
+	if (id == SSE_EVENT_LOCAL_DOUBLE_TRAP)
+		return hart_has(HART_FEAT_SSDBLTRP);
+	return true;
 }
 
 /* Only the software events are S-mode's to inject. */
@@ -102,7 +109,6 @@ static long event_find(unsigned long event_id, unsigned long hartid,
 
 	switch (event_id) {
 	case 0x00000000: /* local high priority RAS */
-	case 0x00000001: /* local double trap */
 	case 0x00008000: /* global high priority RAS */
 	case 0x00100000: /* local low priority RAS */
 	case 0x00108000: /* global low priority RAS */
@@ -194,6 +200,12 @@ static void inject(struct sse_event *e, struct trap_regs *regs)
 		mstatus &= ~MSTATUS_MPV;
 	}
 #endif
+	/* Ssdbltrp: the handler starts, like a trap handler, unable to trap. */
+	if (hart_smode_double_trap_enabled()) {
+		if (mstatus & MSTATUS_SDT)
+			flags |= INT_FLAGS_SDT;
+		mstatus |= MSTATUS_SDT;
+	}
 	e->attr[SSE_ATTR_INTERRUPTED_FLAGS] = flags;
 	e->attr[SSE_ATTR_INTERRUPTED_SEPC] = csr_read(sepc);
 	e->attr[SSE_ATTR_INTERRUPTED_A6] = regs->a6;
@@ -274,8 +286,14 @@ bool sse_complete(struct trap_regs *regs)
 		csr_write(CSR_HSTATUS, hstatus);
 	}
 #endif
+	if (hart_smode_double_trap_enabled()) {
+		mstatus &= ~MSTATUS_SDT;
+		if (flags & INT_FLAGS_SDT)
+			mstatus |= MSTATUS_SDT;
+	}
 	mstatus &= ~(MSTATUS_SIE | MSTATUS_SPP);
-	if (mstatus & MSTATUS_SPIE)
+	/* SIE cannot be set while SDT is. */
+	if ((mstatus & MSTATUS_SPIE) && !(mstatus & MSTATUS_SDT))
 		mstatus |= MSTATUS_SIE;
 	mstatus &= ~MSTATUS_SPIE;
 	if (flags & INT_FLAGS_SPIE)
@@ -336,16 +354,23 @@ static void make_pending(struct sse_event *e, unsigned long hartid)
 		ipi_send(hartid, IPI_EVENT_SSE);
 }
 
-/* An event source in the monitor: the event is due on the calling hart. */
-void sse_raise_local(uint32_t event_id)
+/*
+ * An event source in the monitor: the event is due on the calling hart.
+ * false: nobody will handle it (not enabled, or the hart takes no events).
+ */
+bool sse_raise_local(uint32_t event_id)
 {
+	unsigned long self = this_hartid();
 	struct sse_event *e = NULL;
+	bool taken = false;
 
-	if (event_find(event_id, this_hartid(), &e))
-		return;
+	if (event_find(event_id, self, &e))
+		return false;
 	spin_lock(&sse_lock);
-	make_pending(e, this_hartid());
+	taken = unmasked[self] && e->attr[SSE_ATTR_STATUS] >= SSE_STATE_ENABLED;
+	make_pending(e, self);
 	spin_unlock(&sse_lock);
+	return taken;
 }
 
 long sse_inject(unsigned long event_id, unsigned long hartid)

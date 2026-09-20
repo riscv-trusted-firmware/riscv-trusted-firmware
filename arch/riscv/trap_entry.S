@@ -17,6 +17,7 @@
 
 #include <arch/hart.h>
 #include <arch/trap.h>
+#include <util.h>
 
 	.section .text.trap, "ax", %progbits
 	.balign	4
@@ -76,6 +77,20 @@ _trap_entry:
 	REG_S	t0, TRAP_REGS_mepc(sp)
 	csrr	t0, mstatus
 	REG_S	t0, TRAP_REGS_mstatus(sp)
+
+	/*
+	 * Smdbltrp: the hart set mstatus.MDT on the way in, and a trap taken
+	 * with MDT set is a fatal double trap. The state is saved now, so
+	 * traps are survivable again, which the expected M-mode traps (CSR
+	 * probing, unprivileged accesses) rely on. mret clears MDT itself.
+	 */
+#if __RISCV_XLEN__ == 64
+	li	t0, BIT(MSTATUS_MDT_SHIFT)
+	csrc	mstatus, t0
+#else
+	li	t0, BIT(MSTATUSH_MDT_SHIFT)
+	csrc	CSR_MSTATUSH, t0
+#endif
 
 .option push
 .option norelax

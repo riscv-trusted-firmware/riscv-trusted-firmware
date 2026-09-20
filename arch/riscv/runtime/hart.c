@@ -139,6 +139,22 @@ void hart_detect_features(void)
 		features[HART_FEAT_SSTC] = true;
 #endif
 	features[HART_FEAT_SDTRIG] = csr_probe(CSR_TSELECT, &val);
+	if (features[HART_FEAT_MENVCFG]) {
+		/* menvcfg.DTE is writable where Ssdbltrp exists. */
+#if __RISCV_XLEN__ == 64
+		val = csr_read(CSR_MENVCFG);
+		csr_set(CSR_MENVCFG, BIT(ENVCFG_DTE_BIT));
+		features[HART_FEAT_SSDBLTRP] = csr_read(CSR_MENVCFG) &
+					       BIT(ENVCFG_DTE_BIT);
+		csr_write(CSR_MENVCFG, val);
+#else
+		val = csr_read(CSR_MENVCFGH);
+		csr_set(CSR_MENVCFGH, BIT(ENVCFG_DTE_BIT - 32));
+		features[HART_FEAT_SSDBLTRP] = csr_read(CSR_MENVCFGH) &
+					       BIT(ENVCFG_DTE_BIT - 32);
+		csr_write(CSR_MENVCFGH, val);
+#endif
+	}
 #ifdef CONFIG_RISCV_EXT_SMEPMP
 	/* mseccfg exists when Smepmp does. */
 	features[HART_FEAT_SMEPMP] = features[HART_FEAT_PMP] &&
@@ -167,6 +183,17 @@ bool smode_range_ok(paddr_t addr, paddr_size_t size)
 		    addr < memregions[i].base + memregions[i].size)
 			return false;
 	return true;
+}
+
+bool hart_smode_double_trap_enabled(void)
+{
+	if (!hart_has(HART_FEAT_SSDBLTRP))
+		return false;
+#if __RISCV_XLEN__ == 64
+	return csr_read(CSR_MENVCFG) & BIT(ENVCFG_DTE_BIT);
+#else
+	return csr_read(CSR_MENVCFGH) & BIT(ENVCFG_DTE_BIT - 32);
+#endif
 }
 
 static void envcfg_init(void)

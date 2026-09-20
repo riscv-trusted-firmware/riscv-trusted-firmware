@@ -59,6 +59,7 @@ enum hart_feature {
 	HART_FEAT_SSCOFPMF,
 	HART_FEAT_SMSTATEEN,
 	HART_FEAT_SDTRIG,
+	HART_FEAT_SSDBLTRP,
 	HART_FEAT_H,
 	HART_FEAT_COUNT,
 };
@@ -107,6 +108,9 @@ void hart_runtime_init(void);
 
 /* Read a CSR that may not exist: false when the access trapped. */
 #define csr_probe(csr, valp) may_trap(*(valp) = csr_read(csr))
+
+/* Ssdbltrp, and S-mode has turned it on (FWFT DOUBLE_TRAP: menvcfg.DTE). */
+bool hart_smode_double_trap_enabled(void);
 
 /* Is [addr, addr + size) memory the next stage may be given or may name? */
 bool smode_range_ok(paddr_t addr, paddr_size_t size);

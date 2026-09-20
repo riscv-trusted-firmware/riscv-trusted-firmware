@@ -44,6 +44,20 @@ static void trap_info_read(const struct trap_regs *regs, struct trap_info *info)
 #endif
 }
 
+/*
+ * A double trap in S-mode (Ssdbltrp): S-mode trapped while it could not
+ * take a trap (sstatus.SDT). Its only way out is the SSE double trap event,
+ * if it has one ready; otherwise this hart has nowhere to go.
+ */
+static void trap_double(struct trap_regs *regs)
+{
+	if (sse_raise_local(SSE_EVENT_LOCAL_DOUBLE_TRAP))
+		return;
+	pr_err("hart %lu: double trap in S-mode at %lx, no handler: halted\n",
+	       this_hartid(), regs->mepc);
+	hart_halt();
+}
+
 void trap_redirect(struct trap_regs *regs, const struct trap_info *info)
 {
 	unsigned long prev = get_field_ul(regs->mstatus, MSTATUS_MPP);
@@ -51,6 +65,15 @@ void trap_redirect(struct trap_regs *regs, const struct trap_info *info)
 
 	if (prev == PRV_M)
 		trap_fatal(regs, "cannot redirect an M-mode trap");
+
+	/* What the hardware does for a trap it delivers to S-mode itself. */
+	if (hart_smode_double_trap_enabled()) {
+		if (mstatus & MSTATUS_SDT) {
+			trap_double(regs);
+			return;
+		}
+		mstatus |= MSTATUS_SDT;
+	}
 
 	if (hart_has(HART_FEAT_H)) {
 		/*
@@ -126,6 +149,9 @@ static void trap_from_below(struct trap_regs *regs)
 		return;
 	case CAUSE_ILLEGAL_INSN:
 		trap_illegal_insn(regs, &info);
+		return;
+	case CAUSE_DOUBLE_TRAP:
+		trap_double(regs);
 		return;
 	case CAUSE_MISALIGNED_LOAD:
 		pmu_fw_event(SBI_PMU_FW_MISALIGNED_LOAD);

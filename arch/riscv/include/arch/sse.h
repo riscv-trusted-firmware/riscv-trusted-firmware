@@ -11,15 +11,16 @@
  * S-mode ahead of every trap and interrupt S-mode could mask. Semantics
  * and error codes are those of the SBI specification.
  *
- * Supported events: the software injected local and global events, and
- * the local PMU overflow event on harts with Sscofpmf. The other standard
- * events have no source in this firmware (RAS, double trap) and are
- * SBI_ERR_NOT_SUPPORTED.
+ * Supported events: the software injected local and global events, the
+ * local PMU overflow event on harts with Sscofpmf, and the local double
+ * trap event on harts with Ssdbltrp. The RAS events have no source in this
+ * firmware and are SBI_ERR_NOT_SUPPORTED.
  */
 
 #include <arch/trap.h>
 #include <util.h>
 
+#define SSE_EVENT_LOCAL_DOUBLE_TRAP UL(0x00000001)
 #define SSE_EVENT_LOCAL_PMU_OVERFLOW UL(0x00010000)
 #define SSE_EVENT_LOCAL_SOFTWARE UL(0xffff0000)
 #define SSE_EVENT_GLOBAL_SOFTWARE UL(0xffff8000)
@@ -60,7 +61,7 @@ void sse_hart_init(void);
  */
 void sse_process(struct trap_regs *regs);
 /* For event sources in the monitor: raise a local event on the calling hart. */
-void sse_raise_local(uint32_t event_id);
+bool sse_raise_local(uint32_t event_id);
 /* Is an event waiting for this hart to return to S-mode? */
 bool sse_pending(void);
 
@@ -89,8 +90,9 @@ static inline void sse_process(struct trap_regs *regs)
 {
 }
 
-static inline void sse_raise_local(uint32_t event_id)
+static inline bool sse_raise_local(uint32_t event_id)
 {
+	return false;
 }
 
 static inline bool sse_pending(void)
