@@ -18,6 +18,7 @@
 #include <atomic.h>
 #include <boot.h>
 #include <domain.h>
+#include <heap.h>
 #include <io.h>
 #include <ipi.h>
 #include <log.h>
@@ -28,9 +29,10 @@
 #include <types_ext.h>
 #include <util.h>
 
-extern char __stack_top[];
-
-static struct hart harts[CONFIG_PLATFORM_HART_COUNT];
+/*
+ * One per hart of the hart table, from the heap: the boot hart gets here first.
+ */
+static struct hart *harts;
 static bool features[HART_FEAT_COUNT];
 
 /*
@@ -103,6 +105,11 @@ bool hart_valid(unsigned long hartid)
 	return h && atomic_load_ulong(&h->present);
 }
 
+unsigned int hart_table_size(void)
+{
+	return _boot_hart_nr;
+}
+
 unsigned int hart_count(void)
 {
 	unsigned int n = 0;
@@ -116,11 +123,16 @@ void hart_init(unsigned long hartid)
 {
 	/* entry.S gave this hart a stack, so it is in the table. */
 	unsigned int index = (unsigned int)boot_hart_index(hartid);
-	struct hart *h = &harts[index];
+	struct hart *h = NULL;
+
+	if (!harts)
+		harts = heap_alloc_array(_boot_hart_nr, sizeof(*harts));
+	h = &harts[index];
 
 	h->hartid = hartid;
 	h->index = index;
-	h->m_sp = (unsigned long)__stack_top - index * CONFIG_STACK_SIZE;
+	h->m_sp = monitor_base() + CONFIG_MONITOR_SIZE -
+		  index * CONFIG_STACK_SIZE;
 	/*
 	 * Not its first time here: a hart the platform took down and brought
 	 * back.
@@ -502,10 +514,13 @@ void pmp_domain_set(void)
  */
 static struct {
 	unsigned long addr, size;
-} windows[CONFIG_PLATFORM_HART_COUNT];
+} *windows;
 
 void *smode_access_begin(paddr_t addr, paddr_size_t size)
 {
+	/* The console's is the first, on the boot hart. */
+	if (!windows)
+		windows = heap_alloc_array(_boot_hart_nr, sizeof(*windows));
 	windows[this_hart_index()].addr = addr;
 	windows[this_hart_index()].size = size;
 	if (hart_has(HART_FEAT_SMEPMP) && size) {
@@ -532,6 +547,37 @@ void smode_poke32(paddr_t addr, uint32_t val)
 	smode_access_end();
 	if (outer_size)
 		smode_access_begin(outer_addr, outer_size);
+}
+
+unsigned int domain_keys(void)
+{
+	return domain_count();
+}
+
+void *domain_hart_alloc(size_t size)
+{
+	if (!domain_keys())
+		panic("per-domain state wanted before the domains are known\n");
+	return heap_alloc_array((size_t)domain_keys() * _boot_hart_nr, size);
+}
+
+void *domain_hart_slot(void *base, size_t size, unsigned int key,
+		       unsigned int hart)
+{
+	return (char *)base + ((size_t)key * _boot_hart_nr + hart) * size;
+}
+
+void *this_domain_hart_slot(void *base, size_t size)
+{
+	return domain_hart_slot(base, size, this_domain_key(),
+				this_hart_index());
+}
+
+void hart_services_init(void)
+{
+	fwft_init();
+	dbtr_init();
+	sse_init();
 }
 
 void hart_services_switch_out(void)

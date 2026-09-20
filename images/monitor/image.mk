@@ -6,7 +6,7 @@ images-$(CONFIG_IMAGE_MONITOR) += monitor
 monitor-dirs     := arch/riscv arch/riscv/runtime lib drivers services \
 		    platform/$(CONFIG_PLATFORM_DIR) images/monitor
 monitor-ldscript := $(SRCTREE)/images/monitor/monitor.ld.S
-monitor-cppflags := -DIMAGE_MONITOR
+monitor-cppflags := -DIMAGE_MONITOR -DIMAGE_HEAP
 
 # Position-independent: linked for MONITOR_LOAD_ADDR, runs wherever it is put.
 ifneq ($(CONFIG_MONITOR_PIE),)

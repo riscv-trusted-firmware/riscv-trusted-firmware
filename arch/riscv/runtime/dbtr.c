@@ -65,11 +65,16 @@ struct dbtr_hart {
 };
 
 /* Per domain and hart, see <domain.h>. */
-static struct dbtr_hart dbtr_harts[DOMAIN_KEYS][CONFIG_PLATFORM_HART_COUNT];
+static struct dbtr_hart *dbtr_harts;
+
+void dbtr_init(void)
+{
+	dbtr_harts = domain_hart_alloc(sizeof(*dbtr_harts));
+}
 
 static struct dbtr_hart *this_dbtr(void)
 {
-	return &dbtr_harts[this_domain_key()][this_hart_index()];
+	return this_domain_hart_slot(dbtr_harts, sizeof(*dbtr_harts));
 }
 
 static unsigned long mode_bits(unsigned long tdata1)

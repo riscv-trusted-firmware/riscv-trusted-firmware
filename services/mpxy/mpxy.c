@@ -98,7 +98,7 @@ void mpxy_indicate(void)
 			/*
 			 * Whoever has the event registered: it is per domain.
 			 */
-			for (unsigned int key = 0; key < DOMAIN_KEYS; key++)
+			for (unsigned int key = 0; key < domain_keys(); key++)
 				if (ch->owner == MPXY_OWNER_ANY ||
 				    ch->owner == key + 1)
 					sse_raise_global(ch->sse_event_id, key);

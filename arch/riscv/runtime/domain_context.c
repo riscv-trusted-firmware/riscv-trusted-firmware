@@ -26,6 +26,7 @@
 #include <arch/sse.h>
 #include <atomic.h>
 #include <domain.h>
+#include <heap.h>
 #include <ipi.h>
 #include <log.h>
 #include <mpxy.h>
@@ -39,8 +40,6 @@
 #define MSTATUS_SUM BIT(18)
 #define CSR_VLENB 0xc22
 
-#define VEC_BYTES (CONFIG_DOMAIN_CONTEXT_VLEN / 8)
-
 enum context_state {
 	CONTEXT_NONE, /* never ran, or its domain was stopped since */
 	/* what the hart runs (or ran, when it stopped) */
@@ -50,9 +49,10 @@ enum context_state {
 	CONTEXT_IDLE, /* in domain_exit() until it is entered again */
 };
 
+/* As large as the boot hart's vector registers are (vec_bytes each). */
 struct vec_state {
 	unsigned long vstart, vcsr, vl, vtype;
-	uint8_t regs[32 * VEC_BYTES];
+	uint8_t regs[];
 };
 
 struct domain_context {
@@ -65,13 +65,14 @@ struct domain_context {
 	uint64_t timer;
 	unsigned long mpxy_shmem;
 	uint64_t fp[33]; /* f0..f31, fcsr */
-#if VEC_BYTES
-	struct vec_state vec;
-#endif
+	struct vec_state *vec; /* NULL: no vector unit */
 };
 
-static struct domain_context contexts[CONFIG_DOMAIN_MAX]
-				     [CONFIG_PLATFORM_HART_COUNT];
+/*
+ * Per domain and hart (domain_hart_alloc()), once domains_start() knows them
+ * all.
+ */
+static struct domain_context *contexts;
 /* Context states and links, the domains' hart masks, the harts' domain. */
 static unsigned long domain_lock = SPINLOCK_UNLOCK;
 /* One domain_stop() at a time: two that wait for each other would never end. */
@@ -80,13 +81,32 @@ static unsigned long stop_lock = SPINLOCK_UNLOCK;
 static struct domain_context *context_of(const struct domain *dom,
 					 unsigned int hart)
 {
-	return &contexts[dom->index][hart];
+	return domain_hart_slot(contexts, sizeof(*contexts), dom->index, hart);
 }
 
 static struct domain *domain_of(const struct domain_context *ctx)
 {
-	return domain_by_index((unsigned int)((ctx - contexts[0]) /
-					      CONFIG_PLATFORM_HART_COUNT));
+	size_t slot = (size_t)(ctx - contexts) / hart_table_size();
+
+	return domain_by_index((unsigned int)slot);
+}
+
+/* VLENB of the boot hart: what a context has room for. 0: no vector unit. */
+static unsigned long vec_bytes;
+
+void domain_contexts_init(void)
+{
+	size_t vec_size = 0;
+
+	if (csr_read(misa) & MISA_EXT('V')) {
+		csr_set(mstatus, MSTATUS_VS);
+		vec_bytes = csr_read(CSR_VLENB);
+		vec_size = sizeof(struct vec_state) + 32 * vec_bytes;
+	}
+	contexts = domain_hart_alloc(sizeof(*contexts));
+	for (unsigned int i = 0;
+	     vec_size && i < domain_keys() * hart_table_size(); i++)
+		contexts[i].vec = heap_alloc(vec_size);
 }
 
 /*
@@ -97,18 +117,14 @@ enum { VEC_NONE, VEC_SWITCHED, VEC_CLEARED };
 
 static unsigned int vector_unit(void)
 {
-	static unsigned long vlenb;
-
 	if (!(csr_read(misa) & MISA_EXT('V')))
 		return VEC_NONE;
 	csr_set(mstatus, MSTATUS_VS);
-	if (!vlenb) {
-		vlenb = csr_read(CSR_VLENB);
-		if (vlenb > VEC_BYTES)
-			pr_warn("domain: VLEN %lu is above DOMAIN_CONTEXT_VLEN, the vector state does not survive a domain switch\n",
-				8 * vlenb);
-	}
-	return vlenb <= VEC_BYTES ? VEC_SWITCHED : VEC_CLEARED;
+	/*
+	 * A hart with larger registers than the boot hart's: none known, but.
+	 */
+	return vec_bytes && csr_read(CSR_VLENB) <= vec_bytes ? VEC_SWITCHED :
+							       VEC_CLEARED;
 }
 
 /*
@@ -124,10 +140,8 @@ static void unit_state_save(struct domain_context *ctx)
 		csr_set(mstatus, MSTATUS_FS);
 		_fp_state_save(ctx->fp, misa & MISA_EXT('D'));
 	}
-#if VEC_BYTES
 	if (vector_unit() == VEC_SWITCHED)
-		_vec_state_save(&ctx->vec);
-#endif
+		_vec_state_save(ctx->vec);
 }
 
 static void unit_state_restore(const struct domain_context *ctx)
@@ -139,11 +153,9 @@ static void unit_state_restore(const struct domain_context *ctx)
 		_fp_state_restore(ctx->fp, misa & MISA_EXT('D'));
 	}
 	switch (vector_unit()) {
-#if VEC_BYTES
 	case VEC_SWITCHED:
-		_vec_state_restore(&ctx->vec);
+		_vec_state_restore(ctx->vec);
 		break;
-#endif
 	case VEC_CLEARED:
 		_vec_state_clear();
 		break;
@@ -233,10 +245,12 @@ static void context_fresh(struct domain_context *ctx,
 {
 	const struct domain *dom = domain_of(ctx);
 	struct domain_context *caller = ctx->caller;
+	struct vec_state *vec = ctx->vec;
 	unsigned long mstatus = regs->mstatus;
 
 	memset(ctx, 0, sizeof(*ctx));
 	ctx->caller = caller;
+	ctx->vec = vec;
 	mstatus &= ~(MSTATUS_MPP | MSTATUS_MPIE | MSTATUS_MPRV | MSTATUS_SIE |
 		     MSTATUS_SPIE | MSTATUS_SPP | MSTATUS_FS | MSTATUS_VS |
 		     MSTATUS_SUM | MSTATUS_MXR | MSTATUS_SDT);
@@ -250,10 +264,11 @@ static void context_fresh(struct domain_context *ctx,
 	ctx->stvec = dom->next_addr;
 	ctx->timer = ~ULL(0);
 	ctx->mpxy_shmem = MPXY_SHMEM_NONE;
-#if VEC_BYTES
-	/* vill, as out of reset */
-	ctx->vec.vtype = BIT(__RISCV_XLEN__ - 1);
-#endif
+	if (vec) {
+		memset(vec, 0, sizeof(*vec) + 32 * vec_bytes);
+		/* vill, as out of reset */
+		vec->vtype = BIT(__RISCV_XLEN__ - 1);
+	}
 }
 
 /*

@@ -14,13 +14,15 @@
 #include <arch/pmp.h>
 #include <domain.h>
 #include <fdt_util.h>
+#include <heap.h>
 #include <libfdt.h>
 #include <log.h>
 #include <string.h>
 #include <types_ext.h>
 #include <util.h>
 
-static struct domain domains[CONFIG_DOMAIN_MAX];
+/* The root domain and the instances of the device tree, from the heap. */
+static struct domain *domains;
 static unsigned int nr_domains;
 /* What a domain without a "next-arg1" of its own is given. */
 static unsigned long root_arg1;
@@ -94,13 +96,19 @@ static int add_region(struct domain *dom, unsigned long base,
 {
 	unsigned int i = 0;
 
-	if (dom->nr_regions == CONFIG_DOMAIN_MAX_REGIONS)
+	if (dom->nr_regions == dom->max_regions)
 		return -1;
 	/* By size: a region inside another one comes first, as it has to. */
 	for (i = dom->nr_regions++; i && dom->regions[i - 1].order > order; i--)
 		dom->regions[i] = dom->regions[i - 1];
 	dom->regions[i] = (struct domain_region){ base, order, perm, mmio };
 	return 0;
+}
+
+static void regions_alloc(struct domain *dom, unsigned int max)
+{
+	dom->regions = heap_alloc_array(max, sizeof(*dom->regions));
+	dom->max_regions = max;
 }
 
 static void root_domain_init(unsigned long next_addr, unsigned long next_mode)
@@ -118,6 +126,7 @@ static void root_domain_init(unsigned long next_addr, unsigned long next_mode)
 	/*
 	 * Everything; what is the monitor's is taken out before it gets here.
 	 */
+	regions_alloc(root, 1);
 	add_region(root, 0, __RISCV_XLEN__, DOMAIN_PERM_SU_RWX, false);
 	for (unsigned int i = 0; hart_by_index(i); i++) {
 		hartmask_set(&root->possible, i);
@@ -171,6 +180,10 @@ static int instance_parse(const void *fdt, int node, struct domain *dom)
 	};
 	name = fdt_get_name(fdt, node, NULL);
 	memcpy(dom->name, name, strnlen(name, sizeof(dom->name) - 1));
+
+	/* Its own regions, and maybe all of the root domain's. */
+	list = fdt_getprop(fdt, node, "regions", &len);
+	regions_alloc(dom, 1 + (list ? (unsigned int)len / 8 : 0));
 
 	list = fdt_getprop(fdt, node, "possible-harts", &len);
 	for (int i = 0; list && i < len / 4; i++) {
@@ -264,12 +277,18 @@ static void assign_harts(const void *fdt)
 void domains_init(const void *fdt, unsigned long next_addr,
 		  unsigned long next_mode)
 {
+	unsigned int instances = 0;
 	int config = 0, node = 0;
 
-	root_domain_init(next_addr, next_mode);
+	/* As many as the tree has. */
 	config = fdt ? fdt_node_offset_by_compatible(fdt, -1,
 						     "riscv,domain,config") :
 		       -1;
+	if (config >= 0)
+		fdt_for_each_subnode(node, fdt, config)
+			instances += instance_node(fdt, node);
+	domains = heap_alloc_array(1 + instances, sizeof(*domains));
+	root_domain_init(next_addr, next_mode);
 	if (config < 0)
 		return;
 
@@ -278,12 +297,9 @@ void domains_init(const void *fdt, unsigned long next_addr,
 
 		if (!instance_node(fdt, node))
 			continue;
-		if (nr_domains == CONFIG_DOMAIN_MAX ||
-		    instance_parse(fdt, node, dom)) {
-			pr_warn("domain %s: ignored (%s)\n",
-				fdt_get_name(fdt, node, NULL),
-				nr_domains == CONFIG_DOMAIN_MAX ? "too many" :
-				"bad node");
+		if (instance_parse(fdt, node, dom)) {
+			pr_warn("domain %s: ignored (bad node)\n",
+				fdt_get_name(fdt, node, NULL));
 			continue;
 		}
 		dom->index = nr_domains++;

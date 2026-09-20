@@ -19,6 +19,7 @@
 #include <driver.h>
 #include <fdt_util.h>
 #include <generated/version.h>
+#include <heap.h>
 #include <handover.h>
 #include <io.h>
 #include <ipi.h>
@@ -102,6 +103,11 @@ void image_main(unsigned long hartid, unsigned long fdt,
 
 	/* The hart table first: it is what gives a hart its per-hart state. */
 	boot_harts_init(fdt_valid((const void *)fdt), hartid);
+	/*
+	 * The harts have their stacks; the rest of the monitor's memory is the
+	 * heap.
+	 */
+	heap_init(_boot_hart_nr);
 	hart_init(hartid);
 	plat_early_init((const void *)fdt);
 
@@ -127,7 +133,13 @@ void image_main(unsigned long hartid, unsigned long fdt,
 		pr_warn("platform: could not complete the device tree\n");
 #ifdef CONFIG_DOMAINS
 	domains_init(tree, next, mode);
+	domain_contexts_init();
 #endif
+	/*
+	 * How many harts and domains there are is known: what is kept for each
+	 * of them.
+	 */
+	hart_services_init();
 	drivers_init(tree);
 	services_init();
 	plat_init();
@@ -146,6 +158,9 @@ void image_main(unsigned long hartid, unsigned long fdt,
 	pr_info("mpxy: %u channel(s)\n", mpxy_channel_count());
 #endif
 	print_services();
+	pr_info("memory: %lu KiB of %lu free\n",
+		(unsigned long)heap_free_bytes() >> 10,
+		(unsigned long)CONFIG_MONITOR_SIZE >> 10);
 	pmu_init(tree);
 
 	/* All-zero is no RISC-V instruction: nothing was loaded there. */

@@ -470,8 +470,9 @@ with `IMAGE_SBITEST` disabled.
    groups a firmware can serve itself, request forwarding between domains
    and the management mode built on it are there; the TEE group waits for
    its ratification.
-3. The maximum number of harts and domains and the monitor's size are
-   build-time constants.
+3. The monitor's size is a build-time constant, and so is the most harts
+   it can manage (a bit in a hart mask each). What there is
+   of harts, domains and regions is counted at boot.
 4. More timer / IPI / reset / serial drivers.
 5. **Scalability.** Remote fences are serialised system-wide.
 

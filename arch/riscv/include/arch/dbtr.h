@@ -18,6 +18,8 @@
 #ifdef CONFIG_SBI_DBTR
 
 /* Every hart, before it enters the next stage: find the triggers, all free. */
+/* Boot hart, once the domains are known. */
+void dbtr_init(void);
 void dbtr_hart_init(void);
 /* The calling hart changes domain, see <arch/hart.h>. */
 void dbtr_hart_switch_out(void);
@@ -34,6 +36,10 @@ long dbtr_enable(unsigned long base, unsigned long mask);
 long dbtr_disable(unsigned long base, unsigned long mask);
 
 #else
+
+static inline void dbtr_init(void)
+{
+}
 
 static inline void dbtr_hart_init(void)
 {

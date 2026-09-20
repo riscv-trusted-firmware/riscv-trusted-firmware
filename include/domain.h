@@ -51,14 +51,21 @@
 /*
  * S-mode software of different domains shares nothing through the monitor:
  * what a service keeps for S-mode per hart, it keeps per domain and hart,
- * DOMAIN_KEYS of them, the running one being this_domain_key(). What such
+ * domain_keys() of them, the running one being this_domain_key(). What such
  * state has in hardware moves at the domain switch, see <arch/hart.h>.
+ *
+ * How many domains and harts there are is the device tree's to say, so
+ * that state comes from the heap: domain_hart_alloc() once the domains are
+ * known, domain_hart_slot() to get at one.
  */
-#ifdef CONFIG_DOMAINS
-#define DOMAIN_KEYS CONFIG_DOMAIN_MAX
-#else
-#define DOMAIN_KEYS 1
-#endif
+#include <stddef.h>
+
+unsigned int domain_keys(void);
+void *domain_hart_alloc(size_t size);
+void *domain_hart_slot(void *base, size_t size, unsigned int key,
+		       unsigned int hart);
+/* The running domain's, on the calling hart. */
+void *this_domain_hart_slot(void *base, size_t size);
 
 #ifdef CONFIG_DOMAINS
 
@@ -81,8 +88,8 @@ struct domain {
 	struct hartmask parked;
 	/* atomic: domain_stop() is at work */
 	unsigned long stopping;
-	struct domain_region regions[CONFIG_DOMAIN_MAX_REGIONS];
-	unsigned int nr_regions; /* sorted, smallest first */
+	struct domain_region *regions; /* sorted, smallest first */
+	unsigned int nr_regions, max_regions;
 	int boot_hart; /* hart index, -1: none */
 	unsigned long next_addr;
 	unsigned long next_arg1;
@@ -192,6 +199,8 @@ long domain_stop(struct trap_regs *regs, struct domain *dom);
 /* Does any hart run it, or is to come back to it? */
 bool domain_running(const struct domain *dom);
 
+/* Boot hart, once the domains are known. */
+void domain_contexts_init(void);
 /* The HSM state machine starts S-mode on the calling hart. */
 void domain_context_started(void);
 /* The calling hart's domain is being stopped... */

@@ -29,7 +29,11 @@ config MONITOR_SIZE
 	default PLATFORM_FW_SIZE
 	help
 	  Hidden from S/U-mode with one PMP NAPOT entry: a power of two, and
-	  MONITOR_LOAD_ADDR a multiple of it.
+	  MONITOR_LOAD_ADDR a multiple of it. What the image does not take
+	  itself holds the harts' stacks and the heap, which the state kept
+	  per hart and per domain comes from: the more of those the device
+	  tree has, the more of this is needed, and the boot says when it is
+	  not enough.
 
 config MONITOR_NEXT_STAGE_ADDR
 	hex "Next stage entry point"
@@ -60,31 +64,5 @@ config DOMAINS
 	  system, per domain. A hart can move between domains and back. A
 	  tree without any of it gives the one root domain, which is what
 	  the monitor does without this option.
-
-if DOMAINS
-
-config DOMAIN_MAX
-	int "Most domains, the root domain included"
-	range 1 32
-	default 4
-
-config DOMAIN_MAX_REGIONS
-	int "Most memory regions of a domain"
-	range 1 32
-	default 8
-	help
-	  Each takes a PMP entry, after the ones the monitor needs for itself
-	  and its devices.
-
-config DOMAIN_CONTEXT_VLEN
-	int "Largest vector register a domain context holds (bits, 0: none)"
-	default 256
-	help
-	  A hart that moves between domains takes its vector registers
-	  along, 32 of them of VLEN bits for every domain and hart. On a
-	  hart with a larger VLEN the vector registers are cleared instead:
-	  nothing leaks, and nothing survives a call into another domain.
-
-endif
 
 endif

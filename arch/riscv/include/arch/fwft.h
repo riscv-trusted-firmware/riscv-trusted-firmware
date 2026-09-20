@@ -15,6 +15,8 @@
 /* Every hart, before it enters the next stage: reset values, nothing locked. */
 #include <stdbool.h>
 
+/* Boot hart, once the domains are known. */
+void fwft_init(void);
 void fwft_hart_init(void);
 /* The calling hart changes domain, see <arch/hart.h>. */
 void fwft_hart_switch_out(void);

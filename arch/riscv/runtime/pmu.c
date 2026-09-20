@@ -91,7 +91,7 @@ struct pmu_hart {
 };
 
 /* Per domain and hart, see <domain.h>. */
-static struct pmu_hart pmu_harts[DOMAIN_KEYS][CONFIG_PLATFORM_HART_COUNT];
+static struct pmu_hart *pmu_harts;
 
 /* Without Zbb the compiler builtins for these are library calls. */
 static unsigned int count_bits(uint32_t v)
@@ -116,7 +116,7 @@ static unsigned int lowest_bit(unsigned long v)
 
 static struct pmu_hart *this_pmu(void)
 {
-	return &pmu_harts[this_domain_key()][this_hart_index()];
+	return this_domain_hart_slot(pmu_harts, sizeof(*pmu_harts));
 }
 
 /* ---- CSR access by counter number -------------------------------------- */
@@ -1026,8 +1026,10 @@ static void pmu_parse_fdt(const void *fdt)
 
 void pmu_init(const void *fdt)
 {
-	bool writable = false;
 	unsigned long val = 0;
+	bool writable = false;
+
+	pmu_harts = domain_hart_alloc(sizeof(*pmu_harts));
 
 	/* Counters can only be handed out if they can be stopped. */
 	have_inhibit = csr_probe(CSR_MCOUNTINHIBIT, &val);
@@ -1148,9 +1150,13 @@ void pmu_hart_switch_in(bool fresh)
 
 void pmu_fw_event(unsigned int event)
 {
-	struct pmu_hart *p = this_pmu();
 	uint32_t idx = (SBI_PMU_EVENT_TYPE_FW << 16) | event;
+	struct pmu_hart *p = NULL;
 
+	/* Things happen at boot too, before anybody can count them. */
+	if (!pmu_harts)
+		return;
+	p = this_pmu();
 	if (!p->fw_started)
 		return;
 	for (unsigned int i = 0; i < PMU_FW_COUNTERS; i++)

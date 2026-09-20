@@ -21,6 +21,7 @@
 #include <arch/sse.h>
 #include <atomic.h>
 #include <domain.h>
+#include <heap.h>
 #include <ipi.h>
 #include <sbi/sbi.h>
 #include <spinlock.h>
@@ -60,21 +61,40 @@ static uint32_t global_id(unsigned int i)
 
 static unsigned long sse_lock = SPINLOCK_UNLOCK;
 /* The events are a domain's own (<domain.h>), global ones included. */
+#define NR_LOCAL ARRAY_SIZE(local_ids)
+
+struct sse_hart {
+	struct sse_event local[NR_LOCAL];
+	bool unmasked;
+};
+
 static struct sse_domain {
-	struct sse_event local[CONFIG_PLATFORM_HART_COUNT]
-			      [ARRAY_SIZE(local_ids)];
 	struct sse_event global[NR_GLOBAL];
-	bool unmasked[CONFIG_PLATFORM_HART_COUNT];
 	bool globals_ready;
-} sse_domains[DOMAIN_KEYS];
+} *sse_domains;
+/*
+ * Per domain and hart; and per hart: something may be deliverable, look under
+ * the lock.
+ */
+static struct sse_hart *sse_harts;
+static unsigned long *kick;
+
+void sse_init(void)
+{
+	sse_domains = heap_alloc_array(domain_keys(), sizeof(*sse_domains));
+	sse_harts = domain_hart_alloc(sizeof(*sse_harts));
+	kick = heap_alloc_array(hart_table_size(), sizeof(*kick));
+}
+
+static struct sse_hart *sse_hart(unsigned int key, unsigned int hart)
+{
+	return domain_hart_slot(sse_harts, sizeof(*sse_harts), key, hart);
+}
 
 static struct sse_domain *this_sse(void)
 {
 	return &sse_domains[this_domain_key()];
 }
-
-/* Something may be deliverable on the hart: look, under the lock. */
-static unsigned long kick[CONFIG_PLATFORM_HART_COUNT];
 
 static bool is_global(uint32_t id)
 {
@@ -115,7 +135,7 @@ static long event_find(unsigned long event_id, unsigned int hart,
 			/* Known, but only there with the hardware behind it. */
 			if (!event_available(local_ids[i]))
 				return SBI_ERR_NOT_SUPPORTED;
-			*e = &this_sse()->local[hart][i];
+			*e = &sse_hart(this_domain_key(), hart)->local[i];
 			return SBI_SUCCESS;
 		}
 	for (unsigned int i = 0; i < NR_GLOBAL; i++)
@@ -151,9 +171,10 @@ void sse_hart_init(void)
 	struct sse_domain *d = this_sse();
 
 	spin_lock(&sse_lock);
-	d->unmasked[self] = false;
+	sse_hart(this_domain_key(), self)->unmasked = false;
 	for (unsigned int i = 0; i < ARRAY_SIZE(local_ids); i++)
-		event_reset(&d->local[self][i], local_ids[i], self);
+		event_reset(&sse_hart(this_domain_key(), self)->local[i],
+			    local_ids[i], self);
 	/* The first hart of the domain to get here: its boot hart. */
 	for (unsigned int i = 0; i < NR_GLOBAL && !d->globals_ready; i++)
 		event_reset(&d->global[i], global_id(i), self);
@@ -191,7 +212,8 @@ static struct sse_event *top_event(unsigned long self, unsigned long state)
 
 	for (unsigned int i = 0; i < ARRAY_SIZE(local_ids) + NR_GLOBAL; i++) {
 		e = i < ARRAY_SIZE(local_ids) ?
-			    &this_sse()->local[self][i] :
+			    &sse_hart(this_domain_key(), (unsigned int)self)
+				     ->local[i] :
 			    &this_sse()->global[i - ARRAY_SIZE(local_ids)];
 		if (e->attr[SSE_ATTR_STATUS] != state || e->hart != self ||
 		    (state == SSE_STATE_ENABLED && !e->pending))
@@ -275,7 +297,7 @@ void sse_process(struct trap_regs *regs)
 	if (!next)
 		atomic_store_ulong(&kick[self], 0);
 	running = top_event(self, SSE_STATE_RUNNING);
-	if (next && this_sse()->unmasked[self] &&
+	if (next && sse_hart(this_domain_key(), self)->unmasked &&
 	    (!running || outranks(next, running)))
 		inject(next, regs);
 	spin_unlock(&sse_lock);
@@ -359,7 +381,6 @@ static unsigned int global_target(const struct sse_event *e, unsigned int key)
 {
 	int pref = hart_index(e->attr[SSE_ATTR_PREFERRED_HART]);
 	unsigned int self = this_hart_index();
-	const struct sse_domain *d = &sse_domains[key];
 	struct hartmask running = {};
 
 #ifdef CONFIG_DOMAINS
@@ -367,13 +388,13 @@ static unsigned int global_target(const struct sse_event *e, unsigned int key)
 #else
 	hsm_interruptible_mask(&running);
 #endif
-	if (pref >= 0 && d->unmasked[pref] &&
+	if (pref >= 0 && sse_hart(key, (unsigned int)pref)->unmasked &&
 	    hartmask_test(&running, (unsigned int)pref))
 		return (unsigned int)pref;
-	if (d->unmasked[self] && hartmask_test(&running, self))
+	if (sse_hart(key, self)->unmasked && hartmask_test(&running, self))
 		return self;
-	for (unsigned int h = 0; h < CONFIG_PLATFORM_HART_COUNT; h++)
-		if (d->unmasked[h] && hartmask_test(&running, h))
+	for (unsigned int h = 0; h < hart_table_size(); h++)
+		if (sse_hart(key, h)->unmasked && hartmask_test(&running, h))
 			return h;
 	return pref >= 0		? (unsigned int)pref :
 	       key == this_domain_key() ? self :
@@ -417,7 +438,7 @@ bool sse_raise_local(uint32_t event_id)
 	if (event_find(event_id, self, &e))
 		return false;
 	spin_lock(&sse_lock);
-	taken = this_sse()->unmasked[self] &&
+	taken = sse_hart(this_domain_key(), self)->unmasked &&
 		e->attr[SSE_ATTR_STATUS] >= SSE_STATE_ENABLED;
 	make_pending(e, this_domain_key());
 	spin_unlock(&sse_lock);
@@ -517,9 +538,9 @@ long sse_hart_unmask(void)
 {
 	unsigned int self = this_hart_index();
 
-	if (this_sse()->unmasked[self])
+	if (sse_hart(this_domain_key(), self)->unmasked)
 		return SBI_ERR_ALREADY_STARTED;
-	this_sse()->unmasked[self] = true;
+	sse_hart(this_domain_key(), self)->unmasked = true;
 	/* Events may have piled up meanwhile. */
 	atomic_store_ulong(&kick[self], 1);
 	return SBI_SUCCESS;
@@ -529,9 +550,9 @@ long sse_hart_mask(void)
 {
 	unsigned int self = this_hart_index();
 
-	if (!this_sse()->unmasked[self])
+	if (!sse_hart(this_domain_key(), self)->unmasked)
 		return SBI_ERR_ALREADY_STOPPED;
-	this_sse()->unmasked[self] = false;
+	sse_hart(this_domain_key(), self)->unmasked = false;
 	return SBI_SUCCESS;
 }
 

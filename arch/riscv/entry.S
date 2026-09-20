@@ -181,7 +181,17 @@ _setup_stack:
 	add	t1, t1, t0
 	addi	t2, t2, -1
 	j	1b
+#ifdef IMAGE_HEAP
+	/*
+	 * The stacks come down from the end of the image's memory
+	 * (image.lds.h).
+	 */
+2:	la	sp, __image_start
+	li	t0, CONFIG_MONITOR_SIZE
+	add	sp, sp, t0
+#else
 2:	la	sp, __stack_top
+#endif
 	sub	sp, sp, t1
 	ret
 

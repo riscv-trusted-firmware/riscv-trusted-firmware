@@ -63,6 +63,8 @@
  * Every hart, before it enters the next stage: events masked, local ones
  * unused.
  */
+/* Boot hart, once the domains are known. */
+void sse_init(void);
 void sse_hart_init(void);
 /* The calling hart has changed domain, see <arch/hart.h>. */
 void sse_hart_switch_in(bool fresh);
@@ -100,6 +102,10 @@ long sse_hart_unmask(void);
 long sse_hart_mask(void);
 
 #else
+
+static inline void sse_init(void)
+{
+}
 
 static inline void sse_hart_init(void)
 {

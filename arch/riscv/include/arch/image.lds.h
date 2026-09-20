@@ -80,6 +80,21 @@ SECTIONS {
 		__bss_end = .;
 	} > image
 
+#ifdef IMAGE_HEAP
+	/*
+	 * What is left of the image's memory: the stacks from the top down,
+	 * one per hart that shows up in the hart table, and from the bottom
+	 * up the heap (<heap.h>), for what is sized by the machine: the number
+	 * of harts and domains, which the device tree tells at boot.
+	 */
+	.heap (NOLOAD) : {
+		. = ALIGN(16);
+		__heap_start = .;
+	} > image
+	__image_end = __heap_start;
+	ASSERT(IMAGE_BASE + IMAGE_SIZE - __heap_start >= 4 * CONFIG_STACK_SIZE,
+	       "no room for stacks and heap")
+#else
 	.stacks (NOLOAD) : {
 		. = ALIGN(16);
 		__stack_bottom = .;
@@ -88,6 +103,7 @@ SECTIONS {
 	} > image
 
 	__image_end = .;
+#endif
 
 #ifndef IMAGE_PIE
 	/*

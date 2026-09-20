@@ -107,6 +107,10 @@ unsigned long hart_id_of(unsigned int index);
 bool hart_valid(unsigned long hartid);
 bool hart_index_valid(unsigned int index);
 unsigned int hart_count(void);
+/*
+ * Harts in the hart table, there yet or not: what per-hart storage is sized by.
+ */
+unsigned int hart_table_size(void);
 
 /* First C call on every hart: binds tp and the M-mode stack. */
 void hart_init(unsigned long hartid);
@@ -141,6 +145,11 @@ void hart_runtime_init(void);
  * (counters, triggers, feature bits) is taken out before the change and
  * put back, or set up anew for a domain that has not run here, after it.
  */
+/*
+ * Boot hart, once the domains are known: the services' state, per domain and
+ * hart.
+ */
+void hart_services_init(void);
 void hart_services_switch_out(void);
 void hart_services_switch_in(bool fresh);
 

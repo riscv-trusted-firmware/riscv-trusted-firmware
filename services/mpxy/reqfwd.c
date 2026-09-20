@@ -8,6 +8,7 @@
 #include <arch/hart.h>
 #include <atomic.h>
 #include <domain.h>
+#include <heap.h>
 #include <ipi.h>
 #include <mpxy.h>
 #include <reqfwd.h>
@@ -39,19 +40,26 @@ struct reqfwd_queue {
 	void *arg;
 };
 
-static struct reqfwd_queue queues[DOMAIN_KEYS];
+/* One per domain, from the heap when the first of them gets served. */
+static struct reqfwd_queue *queues;
 
 struct reqfwd_queue *reqfwd_queue_of(unsigned int key)
 {
-	return key < DOMAIN_KEYS && queues[key].served ? &queues[key] : NULL;
+	return queues && key < domain_keys() && queues[key].served ?
+		       &queues[key] :
+		       NULL;
 }
 
 struct reqfwd_queue *reqfwd_serve(unsigned int key, void (*notify)(void *arg),
 				  void *arg)
 {
-	struct reqfwd_queue *q = &queues[key];
+	struct reqfwd_queue *q = NULL;
 
-	if (key >= DOMAIN_KEYS || q->served)
+	/* Boot time: the channel drivers' probes. */
+	if (!queues)
+		queues = heap_alloc_array(domain_keys(), sizeof(*queues));
+	q = &queues[key];
+	if (key >= domain_keys() || q->served)
 		return NULL;
 	q->tail = &q->head;
 	q->notify = notify;

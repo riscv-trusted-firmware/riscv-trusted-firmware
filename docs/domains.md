@@ -79,8 +79,9 @@ cpus {
   every domain's reach ("m-only" inheritance, always). `"all"` inheritance
   adds the rest of the root domain, everything, for the domain's own
   regions to take away from. `order` is 3 to XLEN; a region takes one PMP
-  entry, `CONFIG_DOMAIN_MAX_REGIONS` at most, and the boot stops when a
-  domain needs more entries than the hart has left.
+  entry, and the boot stops when a domain needs more entries than the hart
+  has left. There is no other limit to the number of domains and regions:
+  they are counted at boot and kept on the monitor's heap.
 * `riscv,domain` in a cpu node assigns the hart at boot; it has to be one
   of the domain's `possible-harts`. Harts without it run the root domain.
 * `boot-hart` defaults to the monitor's boot hart. At the end of the boot
@@ -135,8 +136,9 @@ What is switched, per domain and hart: the register file; sstatus, sie, sip
 (SSIP), stvec, sscratch, sepc, scause, stval, satp, scounteren, senvcfg; the
 timer deadline (stimecmp, or the M-mode timer's); the floating-point
 registers and fcsr; the vector registers and CSRs up to
-`CONFIG_DOMAIN_CONTEXT_VLEN` bits (larger ones are cleared instead: nothing
-leaks, nothing survives the call); the MPXY shared memory. All of the
+the boot hart's VLEN, which is what a context has room for (a hart with
+larger ones has them cleared instead: nothing leaks, nothing survives the
+call); the MPXY shared memory. All of the
 floating-point and vector state is switched whether sstatus says it is in
 use or not, so that a domain never finds another one's values. The address
 translation caches are flushed.
@@ -146,7 +148,7 @@ is kept and delivered when it is back; remote fences skip it (it flushes on
 the way back anyway).
 
 The state of the SBI services moves with the hart as well. The software
-side is simply kept per domain and hart (`DOMAIN_KEYS`, `this_domain_key()`);
+side is simply kept per domain and hart (`domain_hart_alloc()`, `this_domain_key()`);
 the hardware side is taken out and put back by `hart_services_switch_out()`
 and `_in()`:
 

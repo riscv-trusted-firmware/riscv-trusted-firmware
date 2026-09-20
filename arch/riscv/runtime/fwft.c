@@ -18,11 +18,16 @@ static struct fwft_hart {
 	/* While the hart runs another domain: what the features were set to. */
 	uint64_t envcfg;
 	bool misaligned_deleg;
-} fwft_harts[DOMAIN_KEYS][CONFIG_PLATFORM_HART_COUNT];
+} *fwft_harts;
+
+void fwft_init(void)
+{
+	fwft_harts = domain_hart_alloc(sizeof(*fwft_harts));
+}
 
 static struct fwft_hart *this_fwft(void)
 {
-	return &fwft_harts[this_domain_key()][this_hart_index()];
+	return this_domain_hart_slot(fwft_harts, sizeof(*fwft_harts));
 }
 
 #define MISALIGNED_DELEG \

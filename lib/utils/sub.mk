@@ -3,3 +3,4 @@
 
 srcs-$(CONFIG_LIB_UTILS) += panic.c
 srcs-$(CONFIG_LIBFDT) += fdt_util.c
+srcs-$(CONFIG_IMAGE_MONITOR) += heap.c

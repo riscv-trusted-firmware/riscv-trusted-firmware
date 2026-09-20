@@ -34,6 +34,12 @@ config PLATFORM_HART_COUNT
 	int "Maximum number of harts"
 	range 1 4096
 	default 1
+	help
+	  The most harts the monitor manages: what the hart table and a hart
+	  mask have room for, a word or a bit each. How many there are is the
+	  device tree's to say at boot, and what takes real memory (stacks,
+	  state per hart and domain) is sized by that. Harts beyond the
+	  maximum are parked and hidden from the next stage.
 
 config PLATFORM_TIMEBASE_FREQUENCY
 	int "Platform timer frequency (Hz)"
