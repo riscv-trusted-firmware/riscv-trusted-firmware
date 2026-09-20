@@ -2,3 +2,4 @@
 # Copyright (c) 2026, The RISC-V Trusted Firmware contributors
 
 srcs-$(CONFIG_LIB_UTILS) += panic.c
+srcs-$(CONFIG_LIBFDT) += fdt_util.c

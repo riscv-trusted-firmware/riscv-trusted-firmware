@@ -8,9 +8,8 @@
 
 /*
  * Drivers are static descriptors in the .driver_table linker set. The core
- * probes them in table order on the boot hart. Device-tree matching
- * ('compatible' strings and per-node probe) is layered on top once libfdt
- * is integrated; the probe signature already leaves room for it.
+ * probes them in table order on the boot hart. A driver takes its
+ * configuration from Kconfig or looks its device up in the device tree.
  */
 
 #include <compiler.h>
@@ -18,7 +17,11 @@
 
 struct driver {
 	const char *name;
-	int (*probe)(void);
+	/*
+	 * 'fdt' is the device tree of the previous stage, NULL when there is
+	 * none.
+	 */
+	int (*probe)(const void *fdt);
 };
 
 #define DRIVER_DEFINE(_sym) \
@@ -29,6 +32,6 @@ extern const struct driver __driver_table_end[];
 
 #define for_each_driver(d) LINKER_TABLE_FOREACH(d, driver)
 
-void drivers_init(void);
+void drivers_init(const void *fdt);
 
 #endif

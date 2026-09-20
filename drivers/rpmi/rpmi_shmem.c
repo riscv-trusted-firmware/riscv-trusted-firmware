@@ -123,7 +123,7 @@ static const struct rpmi_transport rpmi_shmem_transport = {
 	.recv = rpmi_shmem_recv,
 };
 
-static int rpmi_shmem_probe(void)
+static int rpmi_shmem_probe(const void *fdt)
 {
 	rpmi_transport_register(&rpmi_shmem_transport);
 	return 0;

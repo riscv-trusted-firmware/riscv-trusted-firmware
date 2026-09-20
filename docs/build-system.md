@@ -163,7 +163,7 @@ platform/<vendor>/<board>/
 ## Drivers and services
 
 A driver is a `DRIVER_DEFINE()` descriptor in the `.driver_table` linker
-set, probed by `drivers_init()`. A service is a `SERVICE_DEFINE()`
+set, probed by `drivers_init()` with the previous stage's device tree. A service is a `SERVICE_DEFINE()`
 descriptor in `.service_table` owning an ecall EID range; `service_ecall()`
 routes S-mode ecalls (SBI convention: a7 = EID, a6 = FID) to it; an optional
 `probe` hook tells whether the service is usable on this platform. Timer,

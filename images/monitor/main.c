@@ -18,6 +18,9 @@
 #include <driver.h>
 #include <generated/version.h>
 #include <ipi.h>
+#ifdef CONFIG_LIBFDT
+#include <libfdt.h>
+#endif
 #include <log.h>
 #include <mpxy.h>
 #include <platform.h>
@@ -28,6 +31,16 @@
 
 #include "fdt_fixup.h"
 
+/* The previous stage's device tree, if it handed us one that holds up. */
+static const void *fdt_valid(const void *fdt)
+{
+#ifdef CONFIG_LIBFDT
+	if (fdt && !fdt_check_header(fdt))
+		return fdt;
+#endif
+	return NULL;
+}
+
 static void print_features(void)
 {
 	static const char *const names[HART_FEAT_COUNT] = {
@@ -36,6 +49,7 @@ static void print_features(void)
 		[HART_FEAT_MENVCFG] = "menvcfg",
 		[HART_FEAT_SSTC] = "sstc",
 		[HART_FEAT_SSCOFPMF] = "sscofpmf",
+		[HART_FEAT_SMSTATEEN] = "smstateen",
 		[HART_FEAT_H] = "h",
 	};
 
@@ -79,7 +93,7 @@ void image_main(unsigned long hartid, unsigned long fdt)
 		csr_read(mimpid));
 
 	hart_detect_features();
-	drivers_init();
+	drivers_init(fdt_valid((const void *)fdt));
 	services_init();
 	plat_init();
 

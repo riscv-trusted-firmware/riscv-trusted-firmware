@@ -36,7 +36,7 @@ static const struct ipi_ops aclint_mswi_ops = {
 	.clear = aclint_mswi_clear,
 };
 
-static int aclint_mswi_probe(void)
+static int aclint_mswi_probe(const void *fdt)
 {
 	ipi_register(&aclint_mswi_ops);
 	return 0;

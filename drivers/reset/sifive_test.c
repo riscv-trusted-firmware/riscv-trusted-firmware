@@ -36,7 +36,7 @@ static const struct reset_ops sifive_test_ops = {
 	.reset = sifive_test_reset,
 };
 
-static int sifive_test_probe(void)
+static int sifive_test_probe(const void *fdt)
 {
 	reset_register(&sifive_test_ops);
 	return 0;

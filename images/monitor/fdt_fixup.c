@@ -15,6 +15,7 @@
  */
 
 #include <arch/hart.h>
+#include <irqchip.h>
 #include <libfdt.h>
 #include <log.h>
 #include <stdio.h>
@@ -107,6 +108,8 @@ unsigned long fdt_fixup(unsigned long fdt)
 		rc = reserve((void *)dst, "rpmi-shmem", CONFIG_RPMI_SHMEM_BASE,
 			     4 * CONFIG_RPMI_SHMEM_QUEUE_SIZE);
 #endif
+	if (!rc)
+		rc = irqchip_fdt_fixup((void *)dst);
 	if (rc) {
 		pr_warn("fdt: fix-up failed: %s\n", fdt_strerror(rc));
 		return fdt;

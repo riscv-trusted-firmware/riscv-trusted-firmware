@@ -61,7 +61,7 @@ static const struct timer_ops aclint_mtimer_ops = {
 	.stop_event = aclint_mtimer_stop_event,
 };
 
-static int aclint_mtimer_probe(void)
+static int aclint_mtimer_probe(const void *fdt)
 {
 	timer_register(&aclint_mtimer_ops);
 	return 0;

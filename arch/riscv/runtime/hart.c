@@ -14,6 +14,7 @@
 #include <arch/pmu.h>
 #include <atomic.h>
 #include <ipi.h>
+#include <irqchip.h>
 #include <log.h>
 #include <mpxy.h>
 #include <sbi/sbi.h>
@@ -95,6 +96,9 @@ void hart_detect_features(void)
 	if (features[HART_FEAT_MENVCFG] && csr_probe(CSR_STIMECMP, &val))
 		features[HART_FEAT_SSTC] = true;
 #endif
+#ifdef CONFIG_RISCV_EXT_SMSTATEEN
+	features[HART_FEAT_SMSTATEEN] = csr_probe(CSR_MSTATEEN0, &val);
+#endif
 #ifdef CONFIG_RISCV_EXT_SSCOFPMF
 	/* scountovf exists when Sscofpmf does. */
 	features[HART_FEAT_SSCOFPMF] = csr_probe(CSR_SCOUNTOVF, &val);
@@ -144,6 +148,27 @@ static void envcfg_init(void)
 	csr_set(CSR_MENVCFGH, BIT(ENVCFG_PBMTE_BIT - 32));
 	if (hart_has(HART_FEAT_SSTC))
 		csr_set(CSR_MENVCFGH, BIT(ENVCFG_STCE_BIT - 32));
+#endif
+}
+
+/*
+ * State enables exist to keep state away from a lower privilege level. The
+ * monitor has no such policy: S-mode gets what it would have on a hart
+ * without Smstateen (WARL, so bits without a meaning stay clear).
+ */
+static void stateen_init(void)
+{
+	if (!hart_has(HART_FEAT_SMSTATEEN))
+		return;
+	csr_write(CSR_MSTATEEN0, ~UL(0));
+	csr_write(CSR_MSTATEEN0 + 1, ~UL(0));
+	csr_write(CSR_MSTATEEN0 + 2, ~UL(0));
+	csr_write(CSR_MSTATEEN0 + 3, ~UL(0));
+#if __RISCV_XLEN__ == 32
+	csr_write(CSR_MSTATEEN0H, ~UL(0));
+	csr_write(CSR_MSTATEEN0H + 1, ~UL(0));
+	csr_write(CSR_MSTATEEN0H + 2, ~UL(0));
+	csr_write(CSR_MSTATEEN0H + 3, ~UL(0));
 #endif
 }
 
@@ -199,9 +224,11 @@ void hart_runtime_init(void)
 	csr_write(scounteren, 0);
 
 	envcfg_init();
+	stateen_init();
 	pmp_init();
 	pmu_hart_init();
 	fwft_hart_init();
+	irqchip_hart_init();
 	mpxy_hart_init();
 
 	/* Nothing stale pending when the next stage (re)starts on this hart. */

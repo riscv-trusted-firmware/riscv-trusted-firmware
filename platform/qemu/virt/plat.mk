@@ -6,6 +6,8 @@
 
 QEMU      ?= qemu-system-riscv$(XLEN)
 QEMU_SMP  ?= 4
+# virt,aia=aplic or virt,aia=aplic-imsic for the AIA interrupt controllers.
+QEMU_MACHINE ?= virt
 QEMU_ARGS ?=
 
 # -bios takes the loader when it is enabled (it jumps to the monitor loaded
@@ -29,6 +31,6 @@ qemu-images += -device loader,file=$(1)/images/sbitest/sbitest.bin,addr=$(CONFIG
 endif
 
 define plat-run
-	$(QEMU) -M virt -nographic -smp $(QEMU_SMP) -m $$(($(CONFIG_QEMU_VIRT_RAM_SIZE)/1048576)) \
+	$(QEMU) -M $(QEMU_MACHINE) -nographic -smp $(QEMU_SMP) -m $$(($(CONFIG_QEMU_VIRT_RAM_SIZE)/1048576)) \
 		$(call qemu-images,$(1)) $(QEMU_ARGS)
 endef

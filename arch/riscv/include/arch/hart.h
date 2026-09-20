@@ -56,6 +56,7 @@ enum hart_feature {
 	HART_FEAT_MENVCFG, /* privileged spec 1.12 menvcfg */
 	HART_FEAT_SSTC,
 	HART_FEAT_SSCOFPMF,
+	HART_FEAT_SMSTATEEN,
 	HART_FEAT_H,
 	HART_FEAT_COUNT,
 };

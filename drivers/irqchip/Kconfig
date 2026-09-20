@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+menu "Interrupt controllers"
+
+config IRQCHIP
+	bool
+	select LIBFDT
+	help
+	  External interrupt controllers are found in the device tree: the
+	  monitor quiets their machine-level parts, delegates the interrupt
+	  sources to S-mode and hides what is machine-level from the next
+	  stage's device tree.
+
+config IRQCHIP_PLIC
+	bool "RISC-V PLIC"
+	select IRQCHIP
+
+config IRQCHIP_APLIC
+	bool "RISC-V APLIC (AIA wired interrupts)"
+	select IRQCHIP
+
+config IRQCHIP_IMSIC
+	bool "RISC-V IMSIC (AIA message-signalled interrupts)"
+	select IRQCHIP
+
+endmenu

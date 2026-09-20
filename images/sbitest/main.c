@@ -806,6 +806,26 @@ static void test_fdt(unsigned long addr)
 		      "monitor memory is not no-map");
 	}
 	CHECK(found == 1, "%d reserved-memory entries for the monitor", found);
+
+	/* No interrupt controller we could use may be wired to M-mode. */
+	for (node = fdt_next_node(fdt, -1, NULL); node >= 0;
+	     node = fdt_next_node(fdt, node, NULL)) {
+		const char *status = fdt_getprop(fdt, node, "status", NULL);
+		const fdt32_t *ext = NULL;
+		int len = 0;
+
+		if (fdt_node_check_compatible(fdt, node, "riscv,aplic") &&
+		    fdt_node_check_compatible(fdt, node, "riscv,imsics") &&
+		    fdt_node_check_compatible(fdt, node, "riscv,plic0"))
+			continue;
+		ext = fdt_getprop(fdt, node, "interrupts-extended", &len);
+		if (status && status[0] == 'd')
+			continue;
+		for (int i = 0; ext && i + 1 < len / 4; i += 2)
+			CHECK(fdt32_to_cpu(ext[i + 1]) != IRQ_M_EXT,
+			      "%s: context %d is a machine-level one",
+			      fdt_get_name(fdt, node, NULL), i / 2);
+	}
 }
 #else
 static void test_fdt(unsigned long addr)

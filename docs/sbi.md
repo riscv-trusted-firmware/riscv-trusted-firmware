@@ -49,6 +49,7 @@ arch/riscv/runtime/       hart.c    per-hart state, feature probing, S-mode entr
 services/mpxy/            MPXY core (shared memory, channels, attributes)
                           and the RPMI message protocol for channels
 drivers/rpmi/             RPMI client + shared memory transport
+drivers/irqchip/          PLIC, APLIC, IMSIC: machine-level set-up, found in the device tree
 drivers/timer/            timer core + ACLINT MTIMER
 drivers/ipi/              IPI core (event multiplexing) + ACLINT MSWI
 drivers/reset/            reset core + SiFive test finisher
@@ -76,6 +77,19 @@ available) and programs two PMP entries: the monitor's memory without
 permissions, then everything else RWX. `smode_range_ok()` is the matching
 software check for addresses S-mode passes in (start and resume addresses,
 DBCN buffers).
+
+### Interrupt controllers
+
+The monitor takes no external interrupts, but only M-mode can put the
+controllers in a state S-mode can use. The drivers find them in the device
+tree (a driver's `probe()` receives it): a PLIC gets every context quiet; an
+APLIC root domain delegates the sources named by `riscv,delegate` to its
+child domain and, in MSI mode, programs the IMSIC addresses of both levels
+(the S-level domain can only read them); the M-level IMSIC files stay off.
+The device tree fix-up then disables the machine-level APLIC and IMSIC
+nodes and invalidates the PLIC's M-mode contexts, so that the next stage
+only sees what it may drive. With Smstateen all state enables are opened:
+the monitor has no policy that would keep state from S-mode.
 
 ### Hart state management
 
@@ -201,7 +215,10 @@ the hand-over the monitor adds its own memory to `/reserved-memory` in the
 device tree (`no-map`, `images/monitor/fdt_fixup.c`); without that entry a
 kernel allocates those pages and faults on the PMP fence. The tree is
 grown in place, or moved to `CONFIG_MONITOR_FDT_ADDR` first. Tested with
-Linux 6.19 and 7.3-rc on 4 harts, with and without Sstc: SMP bring-up, CPU
+Linux 6.19 and 7.3-rc on 4 harts, with and without Sstc, with the PLIC and
+with `QEMU_MACHINE=virt,aia=aplic` (with `aia=aplic-imsic` the kernel comes
+up on the IMSIC and the APLIC in MSI mode, but QEMU 8.2 then storms on
+level-triggered sources, whatever the firmware): SMP bring-up, CPU
 hotplug (HSM stop/start), `reboot` and `poweroff` (SRST), `earlycon=sbi`
 (DBCN), the `riscv-pmu-sbi` driver finding its counters, and on 7.3-rc FWFT
 and suspend to RAM (`echo mem > /sys/power/state`: CPUs offlined, SUSP,
@@ -223,8 +240,8 @@ with `IMAGE_SBITEST` disabled.
 4. **Device tree driven configuration.** libfdt is only used for the
    fix-up; device addresses and the hart count still come from Kconfig.
 5. **Smepmp.** PMP is programmed without `mseccfg.MML`.
-6. **Interrupt controller set-up** (PLIC/APLIC M-mode contexts), more
-   timer / IPI / reset / serial drivers.
+6. More timer / IPI / reset / serial drivers; IPIs through the IMSIC;
+   PMP over machine-level device registers.
 7. **Scalability.** Remote fences are serialised system-wide; harts are
    indexed by hart id (`hartid < CONFIG_PLATFORM_HART_COUNT`).
 
