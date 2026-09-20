@@ -5,9 +5,10 @@ menuconfig SBI
 	bool "SBI (Supervisor Binary Interface)"
 	default y
 	help
-	  RISC-V SBI implementation exposed to S-mode software (the base
-	  extension is always present when SBI is enabled; the other
-	  extensions are added as separate services).
+	  RISC-V SBI implementation exposed to S-mode software. The base,
+	  TIME, IPI, RFENCE, HSM and SRST extensions are always built; each
+	  reports itself through the probe call only when its backend (timer,
+	  IPI or reset driver) is there. Every extension is its own service.
 
 if SBI
 
@@ -21,5 +22,17 @@ config SBI_IMPL_ID
 config SBI_IMPL_VERSION
 	hex "SBI implementation version"
 	default 0x00000100
+
+config SBI_DBCN
+	bool "Debug console extension (DBCN)"
+	default y
+
+config SBI_LEGACY
+	bool "Legacy v0.1 extensions (EIDs 0x00-0x08)"
+	default y
+	help
+	  set_timer, console putchar/getchar, clear/send IPI, remote fences
+	  and shutdown as defined before SBI v0.2. Deprecated by the
+	  specification; current kernels do not need them.
 
 endif
