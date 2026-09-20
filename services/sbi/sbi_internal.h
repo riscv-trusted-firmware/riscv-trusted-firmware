@@ -12,7 +12,7 @@
 
 static inline struct service_ret sbi_ret(long error, long value)
 {
-	return (struct service_ret){ error, value };
+	return (struct service_ret){ .error = error, .value = value };
 }
 
 static inline struct service_ret sbi_ok(long value)

@@ -134,6 +134,8 @@ enum cmd {
 	CMD_SUSPEND_RETENTIVE,
 	CMD_SUSPEND_NON_RETENTIVE,
 	CMD_PUC, /* serve the RPMI PuC model from now on */
+	/* register, enable and unmask the local SSE event */
+	CMD_SSE,
 };
 
 struct mailbox {
@@ -167,6 +169,10 @@ static void __noreturn secondary_loop(unsigned long hartid)
 			WRITE_ONCE(m->cmd, CMD_NONE);
 			puc_init();
 			WRITE_ONCE(m->puc, 1);
+			break;
+		case CMD_SSE:
+			WRITE_ONCE(m->cmd, CMD_NONE);
+			sse_secondary_setup(hartid);
 			break;
 		case CMD_STOP:
 			WRITE_ONCE(m->cmd, CMD_NONE);
@@ -260,8 +266,8 @@ static void test_base(void)
 	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, BOGUS_EID);
 	CHECK_RET(ret, SBI_SUCCESS);
 	CHECK(ret.value == 0, "bogus extension probed");
-	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_SSE);
-	CHECK(ret.value == 0, "SSE probed but not implemented");
+	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_CPPC);
+	CHECK(ret.value == 0, "CPPC probed but not implemented");
 	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_FWFT);
 	CHECK(ret.value != 0, "FWFT not probed");
 
@@ -653,6 +659,11 @@ static void test_smp(void)
 		CHECK(WAIT_FOR(READ_ONCE(mbox[first].puc)),
 		      "hart %lu: no PuC model", first);
 		test_mpxy();
+	}
+
+	if (first != ~UL(0)) {
+		WRITE_ONCE(mbox[first].cmd, CMD_SSE);
+		test_sse_remote(first);
 	}
 
 	printf("rfence\n");
@@ -1176,6 +1187,7 @@ void test_main(unsigned long hartid, unsigned long fdt)
 	test_traps();
 	test_pmu();
 	test_fwft();
+	test_sse(hartid);
 	test_smp();
 	test_susp();
 	test_finish();

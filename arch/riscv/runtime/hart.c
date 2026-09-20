@@ -12,6 +12,7 @@
 #include <arch/fwft.h>
 #include <arch/pmp.h>
 #include <arch/pmu.h>
+#include <arch/sse.h>
 #include <atomic.h>
 #include <ipi.h>
 #include <irqchip.h>
@@ -228,6 +229,7 @@ void hart_runtime_init(void)
 	pmp_init();
 	pmu_hart_init();
 	fwft_hart_init();
+	sse_hart_init();
 	irqchip_hart_init();
 	mpxy_hart_init();
 

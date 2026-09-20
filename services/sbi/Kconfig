@@ -23,6 +23,13 @@ config SBI_IMPL_VERSION
 	hex "SBI implementation version"
 	default 0x00000100
 
+config SBI_SSE
+	bool "Supervisor software events extension (SSE)"
+	default y
+	help
+	  Events injected into S-mode ahead of anything S-mode can mask.
+	  Sources so far: the software injected local and global events.
+
 config SBI_SUSP
 	bool "System suspend extension (SUSP)"
 	help

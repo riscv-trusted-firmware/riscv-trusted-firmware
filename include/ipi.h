@@ -18,6 +18,8 @@ enum ipi_event {
 	IPI_EVENT_SMODE, /* raise the S-mode software interrupt */
 	IPI_EVENT_RFENCE, /* serve the current remote fence request */
 	IPI_EVENT_HALT, /* stop executing, for good */
+	/* pass through the trap exit: an event is due */
+	IPI_EVENT_SSE,
 	IPI_EVENT_COUNT,
 };
 

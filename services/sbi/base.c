@@ -13,7 +13,7 @@
 
 static struct service_ret ok(long value)
 {
-	return (struct service_ret){ SBI_SUCCESS, value };
+	return (struct service_ret){ .error = SBI_SUCCESS, .value = value };
 }
 
 static struct service_ret sbi_base_ecall(unsigned long eid, unsigned long fid,
@@ -36,7 +36,7 @@ static struct service_ret sbi_base_ecall(unsigned long eid, unsigned long fid,
 	case SBI_BASE_GET_MIMPID:
 		return ok((long)csr_read(mimpid));
 	default:
-		return (struct service_ret){ SBI_ERR_NOT_SUPPORTED, 0 };
+		return (struct service_ret){ .error = SBI_ERR_NOT_SUPPORTED };
 	}
 }
 

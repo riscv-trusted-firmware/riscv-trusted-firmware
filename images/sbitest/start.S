@@ -109,3 +109,59 @@ _strap_entry:
 	REG_L	t6, 15 * REGBYTES(sp)
 	addi	sp, sp, FRAME_SIZE
 	sret
+
+	/*
+	 * SSE handler entry: a6 = hart id, a7 = the event's entry argument, a
+	 * struct sse_ctx (sse.c). Everything else belongs to the interrupted
+	 * code, the stack included, so the handler brings its own; a6 and
+	 * a7 are put back by the SBI implementation on completion.
+	 */
+#define SSE_CTX_STACK	(0 * REGBYTES)
+#define SSE_CTX_TMP	(1 * REGBYTES)
+#define SSE_FRAME_SIZE	(18 * REGBYTES)
+
+	.globl _sse_entry
+	.balign	4
+_sse_entry:
+	REG_S	sp, SSE_CTX_TMP(a7)
+	REG_L	sp, SSE_CTX_STACK(a7)
+	addi	sp, sp, -SSE_FRAME_SIZE
+	REG_S	ra, 0 * REGBYTES(sp)
+	REG_S	t0, 1 * REGBYTES(sp)
+	REG_S	t1, 2 * REGBYTES(sp)
+	REG_S	t2, 3 * REGBYTES(sp)
+	REG_S	a0, 4 * REGBYTES(sp)
+	REG_S	a1, 5 * REGBYTES(sp)
+	REG_S	a2, 6 * REGBYTES(sp)
+	REG_S	a3, 7 * REGBYTES(sp)
+	REG_S	a4, 8 * REGBYTES(sp)
+	REG_S	a5, 9 * REGBYTES(sp)
+	REG_S	t3, 10 * REGBYTES(sp)
+	REG_S	t4, 11 * REGBYTES(sp)
+	REG_S	t5, 12 * REGBYTES(sp)
+	REG_S	t6, 13 * REGBYTES(sp)
+	REG_L	t0, SSE_CTX_TMP(a7)
+	REG_S	t0, 14 * REGBYTES(sp)		/* interrupted sp */
+	mv	a0, a7
+	mv	a1, a6
+	call	sse_handler
+	REG_L	ra, 0 * REGBYTES(sp)
+	REG_L	t0, 1 * REGBYTES(sp)
+	REG_L	t1, 2 * REGBYTES(sp)
+	REG_L	t2, 3 * REGBYTES(sp)
+	REG_L	a0, 4 * REGBYTES(sp)
+	REG_L	a1, 5 * REGBYTES(sp)
+	REG_L	a2, 6 * REGBYTES(sp)
+	REG_L	a3, 7 * REGBYTES(sp)
+	REG_L	a4, 8 * REGBYTES(sp)
+	REG_L	a5, 9 * REGBYTES(sp)
+	REG_L	t3, 10 * REGBYTES(sp)
+	REG_L	t4, 11 * REGBYTES(sp)
+	REG_L	t5, 12 * REGBYTES(sp)
+	REG_L	t6, 13 * REGBYTES(sp)
+	REG_L	sp, 14 * REGBYTES(sp)
+	li	a7, 0x535345			/* SBI_EXT_SSE */
+	li	a6, 6				/* sbi_sse_complete */
+	ecall
+	/* Not reached: completion resumes the interrupted code. */
+1:	j	1b

@@ -43,11 +43,13 @@ long service_probe(unsigned long eid)
 void service_ecall(struct trap_regs *regs)
 {
 	const struct service *s = service_lookup(regs->a7);
-	struct service_ret ret = { SBI_ERR_NOT_SUPPORTED, 0 };
+	struct service_ret ret = { .error = SBI_ERR_NOT_SUPPORTED };
 
 	if (s && s->ecall)
 		ret = s->ecall(regs->a7, regs->a6, regs);
 
+	if (ret.keep_regs)
+		return;
 	regs->a0 = (unsigned long)ret.error;
 	if (!s || !(s->flags & SERVICE_LEGACY_RET))
 		regs->a1 = (unsigned long)ret.value;

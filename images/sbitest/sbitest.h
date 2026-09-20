@@ -76,15 +76,23 @@ extern uint32_t puc_notifications_enabled;
 void puc_init(void);
 void puc_poll(void);
 
+/* sse.c */
+void test_sse(unsigned long self);
+void test_sse_remote(unsigned long other);
+void sse_secondary_setup(unsigned long hartid);
+
 /* mpxy.c: needs another hart running puc_poll(). */
 void test_mpxy(void);
 
+struct sse_ctx;
 unsigned long strap_handler(unsigned long scause, unsigned long sepc,
 			    unsigned long stval);
 void secondary_main(unsigned long hartid, unsigned long opaque);
 void resume_main(unsigned long hartid, unsigned long opaque);
 void test_main(unsigned long hartid, unsigned long fdt);
+void sse_handler(struct sse_ctx *ctx, unsigned long hartid);
 void _resume_start(void);
 void _secondary_start(void);
+void _sse_entry(void);
 
 #endif

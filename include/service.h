@@ -25,6 +25,8 @@
 struct service_ret {
 	long error;
 	long value;
+	/* The call rewrote the register file itself: write nothing back. */
+	bool keep_regs;
 };
 
 /* Only a0 = error is returned, a1 is preserved (SBI v0.1 calls). */

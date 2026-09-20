@@ -16,12 +16,13 @@ and what is still missing.
 | SRST      | `SRST` | shutdown, cold and warm reboot through the reset driver |
 | SUSP      | `SUSP` | suspend to RAM as an M-mode wait with all other harts stopped (`CONFIG_SBI_SUSP`, on for QEMU virt) |
 | FWFT      | `FWFT` | misaligned exception delegation; landing pad, shadow stack, double trap, PTE A/D updating and pointer masking where the hart has them; lock flag |
+| SSE       | `SSE`  | all ten functions; sources: the software injected local and global events |
 | MPXY      | `MPXY` | all eight functions; channels carry RPMI service groups (see below); no MSI / SSE indication, notifications are polled |
 | PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart, `event_get_info`; no snapshot shared memory |
 | DBCN      | `DBCN` | write, read, write_byte (`CONFIG_SBI_DBCN`) |
 | Legacy    | `0x00`-`0x08` | all v0.1 calls (`CONFIG_SBI_LEGACY`) |
 
-Not implemented yet: SSE, DBTR, and CPPC (it needs a platform backend,
+Not implemented yet: DBTR, and CPPC (it needs a platform backend,
 which RPMI can now provide). They probe as absent. NACL and
 STA are interfaces a hypervisor offers its guests, not M-mode firmware.
 
@@ -46,6 +47,7 @@ arch/riscv/runtime/       hart.c    per-hart state, feature probing, S-mode entr
                           pmp.c     PMP programming
                           pmu.c     hardware and firmware counters
                           fwft.c    firmware features (medeleg / menvcfg controls)
+                          sse.c     supervisor software events
 services/mpxy/            MPXY core (shared memory, channels, attributes)
                           and the RPMI message protocol for channels
 drivers/rpmi/             RPMI client + shared memory transport
@@ -126,6 +128,26 @@ nobody owns them. With Sscofpmf the overflow interrupt is delegated and the
 mode-filter flags of `counter_config_matching` are honoured; M-mode is
 always filtered out. Firmware counters count the events of the SBI
 specification where they happen (`pmu_fw_event()`).
+
+### Supervisor software events
+
+An event is injected where a trap from S/U-mode returns: `sse_process()`,
+the last thing `trap_handler()` does, rewrites the register file so that the
+mret lands in the handler, after saving what completion has to put back
+(sepc, the sstatus and hstatus bits, a6, a7). This composes with everything
+else at that point, a redirected exception included: the handler then
+"interrupts" the first instruction of S-mode's trap vector. Another hart is
+made to pass through there with an IPI, and a suspended hart wakes up for a
+pending event. A per-hart flag says whether there may be anything to do, so
+the common trap exit takes no lock. `sbi_sse_complete` rebuilds the
+interrupted context in the register file, a0 and a1 included, so the
+dispatcher writes no return value for it (`service_ret.keep_regs`).
+
+Events come from a table (`local_ids`, `global_ids` in `sse.c`); a new
+source adds its id and calls the injection path. Today those are the
+software injected local and global events. The standard events without a
+source here (RAS, double trap, PMU overflow) are `SBI_ERR_NOT_SUPPORTED`,
+reserved ids `SBI_ERR_INVALID_PARAM`.
 
 ### Firmware features
 
@@ -229,7 +251,8 @@ with `IMAGE_SBITEST` disabled.
 
 ## Gaps
 
-1. **SSE** and **DBTR**; PMU counter snapshots.
+1. **DBTR**; SSE event sources (PMU overflow, double trap, RAS); PMU
+   counter snapshots.
 2. **RPMI consumers in M-mode**: system reset, system suspend, HSM and
    CPPC backends over RPMI; service groups implemented by the firmware
    itself behind the same MPXY channels; MSI / SSE indication of

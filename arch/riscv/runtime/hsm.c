@@ -5,6 +5,7 @@
 
 #include <arch/hart.h>
 #include <arch/hsm.h>
+#include <arch/sse.h>
 #include <atomic.h>
 #include <ipi.h>
 #include <sbi/sbi.h>
@@ -116,7 +117,9 @@ static void hsm_wait_for_wakeup(void)
 			ipi_process();
 		if (pending & MIP_MTIP)
 			timer_process();
-		if (csr_read(mip) & csr_read(mie) & csr_read(mideleg))
+		/* S-mode has work: an interrupt it enabled, or an event. */
+		if ((csr_read(mip) & csr_read(mie) & csr_read(mideleg)) ||
+		    sse_pending())
 			break;
 		wfi();
 	}

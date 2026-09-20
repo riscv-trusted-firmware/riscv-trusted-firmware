@@ -13,6 +13,7 @@
 
 #include <arch/hart.h>
 #include <arch/pmu.h>
+#include <arch/sse.h>
 #include <arch/trap.h>
 #include <ipi.h>
 #include <log.h>
@@ -93,21 +94,10 @@ void trap_redirect(struct trap_regs *regs, const struct trap_info *info)
 	regs->mepc = csr_read(stvec) & ~UL(3);
 }
 
-void trap_handler(struct trap_regs *regs)
+/* A trap from S/U-mode (or VS/VU-mode). */
+static void trap_from_below(struct trap_regs *regs)
 {
-	struct hart *h = this_hart();
 	struct trap_info info = {};
-
-	if ((regs->mstatus & MSTATUS_MPP) == MSTATUS_MPP) {
-		if (h && h->trap_expected) {
-			h->trap_taken = 1;
-			h->trap_cause = csr_read(mcause);
-			h->trap_tval = csr_read(mtval);
-			regs->mepc += 4;
-			return;
-		}
-		trap_fatal(regs, "unexpected trap in M-mode");
-	}
 
 	trap_info_read(regs, &info);
 
@@ -149,4 +139,26 @@ void trap_handler(struct trap_regs *regs)
 		break;
 	}
 	trap_redirect(regs, &info);
+}
+
+void trap_handler(struct trap_regs *regs)
+{
+	struct hart *h = this_hart();
+
+	if ((regs->mstatus & MSTATUS_MPP) == MSTATUS_MPP) {
+		if (h && h->trap_expected) {
+			h->trap_taken = 1;
+			h->trap_cause = csr_read(mcause);
+			h->trap_tval = csr_read(mtval);
+			regs->mepc += 4;
+			return;
+		}
+		trap_fatal(regs, "unexpected trap in M-mode");
+	}
+
+	trap_from_below(regs);
+	/*
+	 * Whatever the return to S-mode looks like now, an event goes on top.
+	 */
+	sse_process(regs);
 }
