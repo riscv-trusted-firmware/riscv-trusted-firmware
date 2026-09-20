@@ -11,9 +11,11 @@
  * timeout, a previous firmware) and are dropped.
  */
 
+#include <arch/hart.h>
 #include <atomic.h>
 #include <fdt_util.h>
 #include <ipi.h>
+#include <irqchip.h>
 #include <log.h>
 #include <rpmi.h>
 #include <spinlock.h>
@@ -72,9 +74,21 @@ static void context_lock(struct rpmi_context *ctx)
 		ipi_process();
 }
 
+static void p2a_drain(struct rpmi_context *ctx);
+static void doorbell_setup(struct rpmi_context *ctx);
+
+/*
+ * The doorbell may have rung while the lock was taken, and whoever had it
+ * answers for that: before letting go, and again if it rings in between.
+ */
 static void context_unlock(struct rpmi_context *ctx)
 {
-	atomic_store_ulong(&ctx->lock, 0);
+	do {
+		if (atomic_swap_ulong(&ctx->doorbell_rang, 0))
+			p2a_drain(ctx);
+		atomic_store_ulong(&ctx->lock, 0);
+	} while (atomic_load_ulong(&ctx->doorbell_rang) &&
+		 !atomic_swap_ulong(&ctx->lock, 1));
 }
 
 static uint64_t deadline(void)
@@ -171,6 +185,15 @@ int rpmi_request(struct rpmi_context *ctx, uint16_t group, uint8_t service,
 	if (!rc)
 		rc = wait_ack(ctx, &hdr, resp, resp_max, resp_len);
 	context_unlock(ctx);
+	/*
+	 * A PuC that answers is one to ask for its doorbell. Without one, what
+	 * it has sent in the meantime is found now rather than when somebody
+	 * asks: notification events may be signalled to S-mode.
+	 */
+	if (!rc)
+		doorbell_setup(ctx);
+	if (!rc && ctx->nr_sinks && !ctx->doorbell)
+		rpmi_poll(ctx);
 	return rc;
 }
 
@@ -267,14 +290,11 @@ static void deliver_events(struct rpmi_context *ctx, const struct rpmi_hdr *hdr)
 			ctx->sinks[i].fn(ctx->sinks[i].ctx, ctx->p2a_buf, len);
 }
 
-void rpmi_poll(struct rpmi_context *ctx)
+/* The P2A request queue, until it is empty; called with the lock held. */
+static void p2a_drain(struct rpmi_context *ctx)
 {
 	struct rpmi_hdr hdr = {};
 
-	if (!ctx || !ctx->has_p2a)
-		return;
-
-	context_lock(ctx);
 	while (!ctx->recv(ctx, RPMI_QUEUE_P2A_REQ, &hdr, ctx->p2a_buf,
 			  sizeof(ctx->p2a_buf))) {
 		switch (hdr.flags & RPMI_FLAGS_TYPE_MASK) {
@@ -293,5 +313,66 @@ void rpmi_poll(struct rpmi_context *ctx)
 			break;
 		}
 	}
+}
+
+void rpmi_poll(struct rpmi_context *ctx)
+{
+	if (!ctx || !ctx->has_p2a)
+		return;
+
+	context_lock(ctx);
+	p2a_drain(ctx);
 	context_unlock(ctx);
+}
+
+/*
+ * The P2A doorbell, in interrupt context (<irqchip.h>): no waiting for the
+ * lock, which this very hart may hold. Whoever has it sees the flag.
+ */
+static void doorbell_irq(void *arg)
+{
+	struct rpmi_context *ctx = arg;
+
+	atomic_store_ulong(&ctx->doorbell_rang, 1);
+	if (!atomic_swap_ulong(&ctx->lock, 1))
+		context_unlock(ctx);
+}
+
+/*
+ * The P2A doorbell as an MSI: one of the PuC's system MSIs, which the
+ * device tree names, aimed at an MSI of the monitor's own and enabled.
+ * Tried once, when the PuC has shown to be there; without it (no interrupt
+ * files at machine level, no such system MSI, a PuC that refuses) the queue
+ * is polled, as it is by whoever wants its contents anyway.
+ */
+static void doorbell_setup(struct rpmi_context *ctx)
+{
+	uint32_t req[4] = { ctx->p2a_doorbell_sysmsi }, resp[1] = {};
+	struct irqchip_msi msi = {};
+
+	if (!ctx->has_p2a || ctx->p2a_doorbell_sysmsi == RPMI_NO_SYSMSI ||
+	    atomic_swap_ulong(&ctx->doorbell_tried, 1))
+		return;
+	if (irqchip_msi_request(doorbell_irq, ctx, &msi))
+		return;
+	req[1] = (uint32_t)msi.addr;
+	req[2] = high32_from_64(msi.addr);
+	req[3] = msi.data;
+	if (rpmi_call(ctx, RPMI_GROUP_SYSTEM_MSI, RPMI_SYSMSI_SET_MSI_TARGET,
+		      req, 4, resp, 1))
+		return;
+	req[1] = 1;
+	if (rpmi_call(ctx, RPMI_GROUP_SYSTEM_MSI, RPMI_SYSMSI_SET_MSI_STATE,
+		      req, 2, resp, 1))
+		return;
+	ctx->doorbell = true;
+	pr_info("%s: P2A doorbell is system MSI %u, on hart %lu\n", ctx->name,
+		ctx->p2a_doorbell_sysmsi, this_hartid());
+	/* What was sent before anybody listened. */
+	rpmi_poll(ctx);
+}
+
+bool rpmi_has_doorbell(const struct rpmi_context *ctx)
+{
+	return ctx && ctx->doorbell;
 }

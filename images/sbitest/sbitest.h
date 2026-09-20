@@ -107,6 +107,8 @@ extern uint32_t puc_sysmsi_requests;
 #define PUC_TEST_STALE_ACK 0xe2 /* a foreign acknowledgment first */
 #define PUC_TEST_NOTIFY 0xe3 /* word 0: number of events to send */
 #define PUC_TEST_ECHO 0xe4 /* STATUS, then the request data */
+#define PUC_TEST_NOTIFY_LATER \
+	0xe5 /* word 0 events, a moment after the answer */
 
 #define PUC_EVENT_ID 0x01
 #define PUC_EVENT_DATALEN 8 /* (sequence number, PUC_EVENT_MAGIC) */
@@ -120,6 +122,8 @@ extern uint32_t puc_sysmsi_requests;
 #define PUC_CPPC_RO_VALUE 100
 /* Fast channels: normal mode, with a doorbell that is a word of memory. */
 #define PUC_CPPC_DB_VALUE 0x5a5a0001
+/* Times the model rang the P2A doorbell: the monitor has asked for that. */
+extern uint32_t puc_doorbell_rings;
 extern uint32_t puc_cppc_doorbell, puc_cppc_writes;
 /* The performance request fast channel of 'hart': (desired, reserved). */
 uint32_t *puc_cppc_fastchan(unsigned long hart);
@@ -162,6 +166,11 @@ void secondary_ipis_set(unsigned long hartid, unsigned long ipis);
 
 /* dbtr.c */
 void test_dbtr(void);
+
+/* sse.c: take 'event' on the calling hart and count how often it runs. */
+bool sse_watch(unsigned long event);
+unsigned long sse_watch_runs(void);
+void sse_unwatch(void);
 
 /* sse.c */
 void test_sse(unsigned long self);

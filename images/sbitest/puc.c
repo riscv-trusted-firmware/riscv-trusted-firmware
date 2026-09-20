@@ -73,6 +73,23 @@ static void enqueue(enum rpmi_queue q, const struct rpmi_hdr *hdr,
 	io_write32(queue_slot(q, 1), (tail + 1) % MSG_SLOTS);
 }
 
+/* SYSTEM_MSI state and target (address low, high, data) as they were set. */
+static uint32_t sysmsi_state[PUC_NUM_SYSMSI], sysmsi_target[PUC_NUM_SYSMSI][3];
+uint32_t puc_doorbell_rings;
+
+/* The P2A doorbell: the system MSI the device tree says it is, when enabled. */
+static void ring_p2a_doorbell(void)
+{
+	const uint32_t *t =
+		sysmsi_target[CONFIG_QEMU_VIRT_RPMI_DOORBELL_SYSMSI];
+	uint64_t addr = reg_pair_to_64(t[1], t[0]);
+
+	if (!(sysmsi_state[CONFIG_QEMU_VIRT_RPMI_DOORBELL_SYSMSI] & 1) || !addr)
+		return;
+	atomic_inc32(&puc_doorbell_rings);
+	io_write32((vaddr_t)addr, t[2]);
+}
+
 static void notify(uint16_t group, uint32_t count)
 {
 	struct rpmi_hdr hdr = {
@@ -96,7 +113,13 @@ static void notify(uint16_t group, uint32_t count)
 	hdr.datalen = (uint16_t)(n * 4);
 	if (n)
 		enqueue(RPMI_QUEUE_P2A_REQ, &hdr, data);
+	ring_p2a_doorbell();
 }
+
+/* PUC_TEST_NOTIFY_LATER: events the model sends of its own accord. */
+static uint32_t later_count;
+static uint16_t later_group;
+static uint64_t later_at;
 
 /* Fills 'resp' (STATUS first), returns its length in words; 0: no answer. */
 static unsigned int serve_base(const struct rpmi_hdr *hdr, const uint32_t *req,
@@ -182,7 +205,7 @@ static unsigned int serve_clock(const struct rpmi_hdr *hdr, const uint32_t *req,
 static unsigned int serve_sysmsi(const struct rpmi_hdr *hdr,
 				 const uint32_t *req, uint32_t *resp)
 {
-	static uint32_t state[PUC_NUM_SYSMSI], target[PUC_NUM_SYSMSI][3];
+	uint32_t *state = sysmsi_state, (*target)[3] = sysmsi_target;
 
 	resp[0] = RPMI_SUCCESS;
 	if (hdr->service == RPMI_SYSMSI_GET_ATTRIBUTES) {
@@ -258,6 +281,11 @@ static unsigned int serve_test(const struct rpmi_hdr *hdr, const uint32_t *req,
 	case PUC_TEST_NOTIFY:
 		if (READ_ONCE(puc_notifications_enabled))
 			notify(hdr->group, words ? req[0] : 0);
+		return 1;
+	case PUC_TEST_NOTIFY_LATER:
+		later_count = words ? req[0] : 0;
+		later_group = hdr->group;
+		later_at = now() + TICKS_SHORT;
 		return 1;
 	case PUC_TEST_STALE_ACK:
 	case PUC_TEST_ECHO:
@@ -429,6 +457,11 @@ void puc_poll(void)
 	struct rpmi_hdr hdr = {};
 	unsigned int words = 0;
 
+	if (later_count && now() >= later_at) {
+		if (READ_ONCE(puc_notifications_enabled))
+			notify(later_group, later_count);
+		later_count = 0;
+	}
 	if (head == io_read32(queue_slot(RPMI_QUEUE_A2P_REQ, 1)))
 		return;
 

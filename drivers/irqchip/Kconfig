@@ -24,4 +24,13 @@ config IRQCHIP_IMSIC
 	bool "RISC-V IMSIC (AIA message-signalled interrupts)"
 	select IRQCHIP
 
+config IRQCHIP_IMSIC_PROTECT
+	bool "Hide the machine-level interrupt files from S/U-mode"
+	depends on IRQCHIP_IMSIC
+	default y
+	help
+	  They are where the monitor's IPIs and MSIs arrive: nothing S-mode
+	  should be able to write to. Say n only where what sends the monitor
+	  an MSI is S-mode software itself, a model of a device for testing.
+
 endmenu

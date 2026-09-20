@@ -124,8 +124,12 @@ config QEMU_VIRT_RPMI_SLOT_SIZE
 	int "Slot size"
 	default 64
 
-# The PuC model runs in S-mode.
+# The PuC model runs in S-mode: it shares the queues, and rings the P2A
+# doorbell, an MSI of the monitor's, by writing to an interrupt file itself.
 config RPMI_SHMEM_PROTECT
+	default n
+
+config IRQCHIP_IMSIC_PROTECT
 	default n
 
 endif

@@ -174,6 +174,9 @@ struct rpmi_context {
 
 	/* The client's. */
 	unsigned long lock;
+	/* The P2A doorbell: tried to set up, rang while the lock was taken. */
+	unsigned long doorbell_tried, doorbell_rang;
+	bool doorbell;
 	uint16_t next_token;
 	unsigned int nr_sinks;
 	struct {
@@ -236,6 +239,8 @@ int rpmi_probe_group(struct rpmi_context *ctx, uint16_t group,
 int rpmi_event_sink_register(struct rpmi_context *ctx, uint16_t group,
 			     rpmi_event_sink_t sink, void *sink_ctx);
 void rpmi_poll(struct rpmi_context *ctx);
+/* Does the PuC interrupt for the P2A request queue (no need to poll it)? */
+bool rpmi_has_doorbell(const struct rpmi_context *ctx);
 
 #endif /* CONFIG_RPMI */
 
