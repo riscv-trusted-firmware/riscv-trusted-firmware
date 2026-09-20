@@ -97,14 +97,15 @@ unsigned long hart_id_of(unsigned int index)
 bool hart_index_valid(unsigned int index)
 {
 	return index < _boot_hart_nr &&
-	       atomic_load_ulong(&harts[index].present);
+	       atomic_load_ulong(&harts[index].present) &&
+	       !harts[index].no_smode;
 }
 
 bool hart_valid(unsigned long hartid)
 {
 	struct hart *h = hart_get(hartid);
 
-	return h && atomic_load_ulong(&h->present);
+	return h && atomic_load_ulong(&h->present) && !h->no_smode;
 }
 
 unsigned int hart_table_size(void)
@@ -133,6 +134,10 @@ void hart_init(unsigned long hartid)
 
 	h->hartid = hartid;
 	h->index = index;
+	/*
+	 * misa may be all zero: a hart that does not say is taken to have one.
+	 */
+	h->no_smode = csr_read(misa) && !(csr_read(misa) & MISA_EXT('S'));
 	h->m_sp = monitor_base() + CONFIG_MONITOR_SIZE -
 		  index * CONFIG_STACK_SIZE;
 	/*

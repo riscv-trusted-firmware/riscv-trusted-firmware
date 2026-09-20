@@ -185,6 +185,13 @@ void image_main(unsigned long hartid, unsigned long fdt,
 #else
 	pr_info("monitor: next stage at %lx (%c-mode), fdt: %lx\n", next,
 		mode == PRV_S ? 'S' : 'U', fdt);
+	/*
+	 * A boot hart without S-mode has done its part: the first hart with one
+	 * goes on.
+	 */
+	for (unsigned int i = 0; this_hart()->no_smode && hart_by_index(i); i++)
+		if (hart_index_valid(i) && !hsm_hart_boot(i, next, fdt, mode))
+			hsm_hart_wait();
 	hsm_boot_hart_start(next, fdt, mode);
 #endif
 }

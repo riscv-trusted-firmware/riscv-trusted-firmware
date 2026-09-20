@@ -346,6 +346,19 @@ void __noreturn domains_start(unsigned long fdt)
 
 		if (!dom->next_arg1_given)
 			dom->next_arg1 = root_arg1;
+		/*
+		 * A boot hart that has no S-mode cannot boot anything: the
+		 * first hart of the domain that has one does it in its place.
+		 */
+		if (dom->boot_hart >= 0 &&
+		    hart_by_index((unsigned int)dom->boot_hart)->no_smode) {
+			dom->boot_hart = -1;
+			for (unsigned int i = 0;
+			     hart_by_index(i) && dom->boot_hart < 0; i++)
+				if (domain_hart_assigned(dom, i) &&
+				    hart_index_valid(i))
+					dom->boot_hart = (int)i;
+		}
 		if (dom->nr_regions > pmp_domain_entries())
 			panic("domain %s: %u regions, %u PMP entries left\n",
 			      dom->name, dom->nr_regions, pmp_domain_entries());
@@ -358,9 +371,16 @@ void __noreturn domains_start(unsigned long fdt)
 		long rc = 0;
 
 		/* A domain boots on its boot hart, if that hart is its own. */
-		if (dom == mine || dom->boot_hart < 0 || !dom->next_addr ||
+		if ((dom == mine && dom->boot_hart == (int)this_hart_index()) ||
+		    dom->boot_hart < 0 || !dom->next_addr ||
 		    !domain_hart_assigned(dom, (unsigned int)dom->boot_hart))
 			continue;
+		if (dom == mine)
+			pr_info("monitor: next stage at %lx (%c-mode) on hart %lu, arg1: %lx\n",
+				dom->next_addr,
+				dom->next_mode == PRV_S ? 'S' : 'U',
+				hart_id_of((unsigned int)dom->boot_hart),
+				dom->next_arg1);
 		rc = domain_start(dom);
 		if (rc)
 			pr_warn("domain %s: cannot start (%ld)\n", dom->name,

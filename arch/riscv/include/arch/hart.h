@@ -39,6 +39,12 @@ struct hart {
 	/* the domain it runs now, see <domain.h> */
 	struct domain *domain;
 	unsigned long present; /* reached the monitor */
+	/*
+	 * A hart without S-mode (the monitor core of a SiFive U SoC): it can
+	 * do the monitor's work, the boot included, but there is nothing to
+	 * hand it to, and the next stage never hears of it.
+	 */
+	bool no_smode;
 
 	/*
 	 * A trap taken in M-mode is expected and skipped (CSR probing, unpriv).
@@ -109,7 +115,9 @@ struct hart *hart_by_index(unsigned int index);
 int hart_index(unsigned long hartid);
 /* The id of hart 'index', known before that hart shows up. */
 unsigned long hart_id_of(unsigned int index);
-/* Managed, and it has reached the monitor. */
+/*
+ * Managed, it has reached the monitor, and it has an S-mode to run things in.
+ */
 bool hart_valid(unsigned long hartid);
 bool hart_index_valid(unsigned int index);
 unsigned int hart_count(void);
