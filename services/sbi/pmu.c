@@ -5,7 +5,7 @@
 
 /*
  * SBI performance monitoring unit extension (EID "PMU"), up to the v3.0
- * event_get_info call. Counter snapshots are not implemented.
+ * event_get_info call.
  */
 
 #include <arch/pmu.h>
@@ -57,8 +57,10 @@ static struct service_ret sbi_pmu_ecall(unsigned long eid, unsigned long fid,
 			return sbi_err(regs->a1 ? SBI_ERR_INVALID_ADDRESS :
 				       SBI_ERR_INVALID_PARAM);
 		return sbi_err(pmu_event_info(regs->a0, regs->a2));
+	case SBI_PMU_SNAPSHOT_SET_SHMEM:
+		return sbi_err(pmu_snapshot_set_shmem(regs->a0, regs->a1,
+						      regs->a2));
 	default:
-		/* Including SBI_PMU_SNAPSHOT_SET_SHMEM. */
 		return sbi_err(SBI_ERR_NOT_SUPPORTED);
 	}
 }

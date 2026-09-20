@@ -17,6 +17,7 @@
 #include <arch/hart.h>
 #include <arch/hsm.h>
 #include <arch/pmp.h>
+#include <arch/pmu.h>
 #include <arch/sse.h>
 #include <atomic.h>
 #include <ipi.h>
@@ -40,7 +41,11 @@ struct sse_event {
 #define INT_FLAGS_VALID \
 	(INT_FLAGS_SPP | INT_FLAGS_SPIE | INT_FLAGS_SPV | INT_FLAGS_SPVP)
 
-static const uint32_t local_ids[] = { SSE_EVENT_LOCAL_SOFTWARE };
+static const uint32_t local_ids[] = {
+	SSE_EVENT_LOCAL_PMU_OVERFLOW,
+	SSE_EVENT_LOCAL_SOFTWARE,
+};
+
 static const uint32_t global_ids[] = { SSE_EVENT_GLOBAL_SOFTWARE };
 
 static unsigned long sse_lock = SPINLOCK_UNLOCK;
@@ -56,6 +61,25 @@ static bool is_global(uint32_t id)
 	return id & 0x8000;
 }
 
+static bool event_available(uint32_t id)
+{
+	return id != SSE_EVENT_LOCAL_PMU_OVERFLOW || pmu_sse_supported();
+}
+
+/* Only the software events are S-mode's to inject. */
+static bool event_injectable(uint32_t id)
+{
+	return id == SSE_EVENT_LOCAL_SOFTWARE ||
+	       id == SSE_EVENT_GLOBAL_SOFTWARE;
+}
+
+/* The source of an event follows its state: ENABLED or RUNNING means armed. */
+static void event_source_update(const struct sse_event *e)
+{
+	if (e->id == SSE_EVENT_LOCAL_PMU_OVERFLOW)
+		pmu_sse_enable(e->attr[SSE_ATTR_STATUS] >= SSE_STATE_ENABLED);
+}
+
 /*
  * SBI_SUCCESS with *e set, NOT_SUPPORTED for the rest of the standard events.
  */
@@ -64,6 +88,9 @@ static long event_find(unsigned long event_id, unsigned long hartid,
 {
 	for (unsigned int i = 0; i < ARRAY_SIZE(local_ids); i++)
 		if (event_id == local_ids[i]) {
+			/* Known, but only there with the hardware behind it. */
+			if (!event_available(local_ids[i]))
+				return SBI_ERR_NOT_SUPPORTED;
 			*e = &local_events[hartid][i];
 			return SBI_SUCCESS;
 		}
@@ -77,7 +104,6 @@ static long event_find(unsigned long event_id, unsigned long hartid,
 	case 0x00000000: /* local high priority RAS */
 	case 0x00000001: /* local double trap */
 	case 0x00008000: /* global high priority RAS */
-	case 0x00010000: /* local PMU overflow */
 	case 0x00100000: /* local low priority RAS */
 	case 0x00108000: /* global low priority RAS */
 		return SBI_ERR_NOT_SUPPORTED;
@@ -265,6 +291,9 @@ bool sse_complete(struct trap_regs *regs)
 						   SSE_CONFIG_ONESHOT ?
 					   SSE_STATE_REGISTERED :
 					   SSE_STATE_ENABLED;
+	event_source_update(e);
+	if (e->id == SSE_EVENT_LOCAL_PMU_OVERFLOW)
+		pmu_sse_complete();
 	/* Whatever this event kept waiting is due now. */
 	atomic_store_ulong(&kick[self], 1);
 	spin_unlock(&sse_lock);
@@ -307,6 +336,18 @@ static void make_pending(struct sse_event *e, unsigned long hartid)
 		ipi_send(hartid, IPI_EVENT_SSE);
 }
 
+/* An event source in the monitor: the event is due on the calling hart. */
+void sse_raise_local(uint32_t event_id)
+{
+	struct sse_event *e = NULL;
+
+	if (event_find(event_id, this_hartid(), &e))
+		return;
+	spin_lock(&sse_lock);
+	make_pending(e, this_hartid());
+	spin_unlock(&sse_lock);
+}
+
 long sse_inject(unsigned long event_id, unsigned long hartid)
 {
 	struct sse_event *e = NULL;
@@ -322,6 +363,8 @@ long sse_inject(unsigned long event_id, unsigned long hartid)
 	rc = event_find(event_id, hartid, &e);
 	if (rc)
 		return rc;
+	if (!event_injectable(e->id))
+		return SBI_ERR_INVALID_PARAM;
 
 	spin_lock(&sse_lock);
 	make_pending(e, hartid);
@@ -343,6 +386,7 @@ static long transition(unsigned long event_id, unsigned long from,
 		rc = SBI_ERR_INVALID_STATE;
 	} else {
 		e->attr[SSE_ATTR_STATUS] = to;
+		event_source_update(e);
 		/* Newly enabled and already pending: deliver. */
 		if (to == SSE_STATE_ENABLED && e->pending)
 			make_pending(e, e->hart);
@@ -453,7 +497,9 @@ long sse_read_attrs(unsigned long event_id, unsigned long base,
 
 		if (base + i == SSE_ATTR_STATUS)
 			val |= (e->pending ? SSE_STATUS_PENDING : 0) |
-			       SSE_STATUS_INJECTABLE;
+			       (event_injectable(e->id) ?
+					SSE_STATUS_INJECTABLE :
+					0);
 		out[i] = val;
 	}
 	spin_unlock(&sse_lock);

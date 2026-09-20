@@ -27,10 +27,10 @@ jobs:
         run: MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
       - name: Boot test, AIA interrupt controllers (APLIC + IMSIC)
         run: MAKEARGS="QEMU_MACHINE=virt,aia=aplic-imsic ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
-      - name: Boot test, Smepmp (M-mode confined by MML and MMWP)
+      - name: Boot test, Smepmp and Sscofpmf (M-mode confined; counter overflow events)
         run: |
           xlen=$(sed -n 's/^CONFIG_RISCV_XLEN=//p' build/.config)
-          QEMU_EXTRA_ARGS="-cpu rv$xlen,smepmp=on" \
+          QEMU_EXTRA_ARGS="-cpu rv$xlen,smepmp=on,sscofpmf=on" \
           MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
       - name: Boot test, hart without Sstc (M-mode timer path)
         run: |

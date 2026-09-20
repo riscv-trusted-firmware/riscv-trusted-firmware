@@ -885,6 +885,96 @@ static void pmu_stop_reset(unsigned long idx)
 		  SBI_PMU_STOP_FLAG_RESET);
 }
 
+/*
+ * Counter values through the snapshot shared memory, relative to the call's
+ * base.
+ */
+static void test_pmu_snapshot(unsigned long fw_first, unsigned long fw_mask,
+			      bool hw)
+{
+	static struct {
+		uint64_t overflow_bitmap;
+		uint64_t values[64];
+	} __aligned(4096) snap;
+	unsigned long idx = 0, rel = 0;
+	struct sbiret ret = {};
+
+	ret = pmu_config(fw_first, fw_mask, SBI_PMU_CFG_FLAG_CLEAR_VALUE,
+			 FW_EVENT(SBI_PMU_FW_SET_TIMER));
+	CHECK_RET(ret, SBI_SUCCESS);
+	idx = (unsigned long)ret.value;
+	rel = idx - fw_first;
+
+	/* No shared memory, no snapshot. */
+	CHECK_RET(sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_START, fw_first,
+			   BIT(rel), SBI_PMU_START_FLAG_INIT_SNAPSHOT, 0, 0),
+		  SBI_ERR_NO_SHMEM);
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_SNAPSHOT_SET_SHMEM,
+			    (unsigned long)&snap + 8, 0, 0),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_SNAPSHOT_SET_SHMEM,
+			    (unsigned long)&snap, 0, 1),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_SNAPSHOT_SET_SHMEM,
+			    CONFIG_MONITOR_LOAD_ADDR, 0, 0),
+		  SBI_ERR_INVALID_ADDRESS);
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_SNAPSHOT_SET_SHMEM,
+			    (unsigned long)&snap, 0, 0),
+		  SBI_SUCCESS);
+
+	/* Start from the value in the snapshot, stop into it. */
+	snap.values[rel] = ULL(0x1000000041);
+	snap.values[rel + 1] = 0xdead;
+	CHECK_RET(sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_START, fw_first,
+			   BIT(rel),
+			   SBI_PMU_START_FLAG_INIT_SNAPSHOT |
+			   SBI_PMU_START_FLAG_SET_INIT_VALUE,
+			   0, 0),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_START, fw_first,
+			   BIT(rel), SBI_PMU_START_FLAG_INIT_SNAPSHOT, 0, 0),
+		  SBI_SUCCESS);
+	sbi_set_timer(~ULL(0));
+	snap.values[rel] = 0;
+	snap.overflow_bitmap = ~ULL(0);
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_COUNTER_STOP, fw_first,
+			    BIT(rel), SBI_PMU_STOP_FLAG_TAKE_SNAPSHOT),
+		  SBI_SUCCESS);
+	CHECK(snap.values[rel] == ULL(0x1000000042), "snapshot value %llx",
+	      (unsigned long long)snap.values[rel]);
+	CHECK(snap.values[rel + 1] == 0xdead,
+	      "snapshot touched another counter");
+	CHECK(snap.overflow_bitmap == 0, "overflow bitmap %llx",
+	      (unsigned long long)snap.overflow_bitmap);
+	pmu_stop_reset(idx);
+
+	if (hw) {
+		/* A hardware counter, cleared when it was configured. */
+		CHECK_RET(pmu_config(0, 0x1, PMU_CFG_START,
+				     SBI_PMU_HW_CPU_CYCLES),
+			  SBI_SUCCESS);
+		CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_COUNTER_STOP, 0, 1,
+				    SBI_PMU_STOP_FLAG_TAKE_SNAPSHOT),
+			  SBI_SUCCESS);
+		/*
+		 * QEMU before 9.1 misreads a stopped counter in two halves
+		 * (RV32).
+		 */
+		CHECK((snap.values[0] > 0 || __RISCV_XLEN__ == 32) &&
+		      snap.values[0] < ULL(0x100000000),
+		      "cycle snapshot %llx",
+		      (unsigned long long)snap.values[0]);
+		pmu_stop_reset(0);
+	}
+
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_SNAPSHOT_SET_SHMEM, ~UL(0),
+			    ~UL(0), 0),
+		  SBI_SUCCESS);
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_COUNTER_STOP, fw_first, 1,
+			    SBI_PMU_STOP_FLAG_TAKE_SNAPSHOT),
+		  SBI_ERR_NO_SHMEM);
+}
+
 static void test_pmu(void)
 {
 	unsigned long total = 0, fw_first = ~UL(0), fw_mask = 0, hw = 0, fw = 0,
@@ -1018,8 +1108,7 @@ static void test_pmu(void)
 	CHECK_RET(sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_START, fw_first, 1, 0,
 			   0, 0),
 		  SBI_ERR_INVALID_PARAM);
-	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_SNAPSHOT_SET_SHMEM, 0, 0, 0),
-		  SBI_ERR_NOT_SUPPORTED);
+	test_pmu_snapshot(fw_first, fw_mask, hw != 0);
 
 	/* event_get_info: which of these events can be counted at all? */
 	static struct {

@@ -142,7 +142,6 @@ static void test_attrs_and_states(struct sse_ctx *ctx)
 	 */
 	CHECK_RET(sse_call(FID_ENABLE, 0x00000002), SBI_ERR_INVALID_PARAM);
 	CHECK_RET(sse_call(FID_ENABLE, 0x00000000), SBI_ERR_NOT_SUPPORTED);
-	CHECK_RET(sse_call(FID_ENABLE, 0x00010000), SBI_ERR_NOT_SUPPORTED);
 	CHECK_RET(sse_call(FID_ENABLE, 0xffff4000), SBI_ERR_NOT_SUPPORTED);
 
 	/* UNUSED -> REGISTERED -> ENABLED and back, and nothing else. */
@@ -257,6 +256,92 @@ static void test_priorities(struct sse_ctx *ctx, unsigned long self)
 	global_ctx.inject_event = 0;
 }
 
+#ifdef CONFIG_SBI_PMU
+/*
+ * Counter overflow as an event (harts with Sscofpmf): a cycle counter that
+ * starts a few thousand counts short of wrapping around.
+ */
+static void test_pmu_overflow(unsigned long self)
+{
+	static struct {
+		uint64_t overflow_bitmap;
+		uint64_t values[64];
+	} __aligned(4096) snap;
+	static struct sse_ctx ctx;
+	const unsigned long base = 3, mask = 0xffff;
+	unsigned long idx = 0;
+	struct sbiret ret = {};
+
+	ret = sse_setup(SSE_EVENT_LOCAL_PMU_OVERFLOW, &ctx);
+	if (ret.error == SBI_ERR_NOT_SUPPORTED) {
+		printf("  no counter overflow interrupt on this hart\n");
+		return;
+	}
+	printf("sse (pmu overflow)\n");
+	CHECK_RET(ret, SBI_SUCCESS);
+	CHECK(!(attr_read(SSE_EVENT_LOCAL_PMU_OVERFLOW, SSE_ATTR_STATUS) &
+		SSE_STATUS_INJECTABLE),
+	      "overflow event injectable from S-mode");
+	CHECK_RET(sbi_call2(SBI_EXT_SSE, FID_INJECT,
+			    SSE_EVENT_LOCAL_PMU_OVERFLOW, self),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sse_call(FID_ENABLE, SSE_EVENT_LOCAL_PMU_OVERFLOW),
+		  SBI_SUCCESS);
+
+	/*
+	 * A programmable counter on cycles (the fixed one cannot
+	 * overflow-interrupt).
+	 */
+	ret = sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_CONFIG_MATCHING, base, mask,
+		       0, SBI_PMU_HW_CPU_CYCLES, 0);
+	CHECK_RET(ret, SBI_SUCCESS);
+	idx = (unsigned long)ret.value;
+	CHECK(idx >= base, "cycles on counter %lu", idx);
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_SNAPSHOT_SET_SHMEM,
+			    (unsigned long)&snap, 0, 0),
+		  SBI_SUCCESS);
+
+	/*
+	 * Far enough away that the counter is running by then: QEMU's counter
+	 * follows host time, and arms its overflow timer when the value is
+	 * written, before the monitor has cleared OF and started the counter.
+	 */
+	snap.values[idx - base] = ~ULL(0) - 20000000;
+	CHECK_RET(sbi_call(SBI_EXT_PMU, SBI_PMU_COUNTER_START, base,
+			   BIT(idx - base), SBI_PMU_START_FLAG_INIT_SNAPSHOT, 0,
+			   0),
+		  SBI_SUCCESS);
+	CHECK(WAIT_FOR(ctx.runs), "no overflow event");
+	CHECK(ctx.runs == 1 && ctx.hartid == self, "%lu overflow events",
+	      ctx.runs);
+
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_COUNTER_STOP, base,
+			    BIT(idx - base),
+			    SBI_PMU_STOP_FLAG_TAKE_SNAPSHOT |
+			    SBI_PMU_STOP_FLAG_RESET),
+		  SBI_SUCCESS);
+	CHECK(snap.overflow_bitmap == BIT64(idx - base), "overflow bitmap %llx",
+	      (unsigned long long)snap.overflow_bitmap);
+	/* QEMU before 9.1 misreads a stopped counter in two halves (RV32). */
+	CHECK(snap.values[idx - base] < ULL(0x100000000) ||
+	      __RISCV_XLEN__ == 32,
+	      "counter did not wrap: %llx",
+	      (unsigned long long)snap.values[idx - base]);
+
+	CHECK_RET(sbi_call3(SBI_EXT_PMU, SBI_PMU_SNAPSHOT_SET_SHMEM, ~UL(0),
+			    ~UL(0), 0),
+		  SBI_SUCCESS);
+	CHECK_RET(sse_call(FID_DISABLE, SSE_EVENT_LOCAL_PMU_OVERFLOW),
+		  SBI_SUCCESS);
+	CHECK_RET(sse_call(FID_UNREGISTER, SSE_EVENT_LOCAL_PMU_OVERFLOW),
+		  SBI_SUCCESS);
+}
+#else
+static void test_pmu_overflow(unsigned long self)
+{
+}
+#endif
+
 /* Runs on a secondary hart: take part with the local event. */
 void sse_secondary_setup(unsigned long hartid)
 {
@@ -308,6 +393,7 @@ void test_sse(unsigned long self)
 	test_attrs_and_states(ctx);
 	test_delivery(ctx, self);
 	test_priorities(ctx, self);
+	test_pmu_overflow(self);
 
 	CHECK_RET(sse_call(FID_DISABLE, LOCAL), SBI_SUCCESS);
 	CHECK_RET(sse_call(FID_UNREGISTER, LOCAL), SBI_SUCCESS);

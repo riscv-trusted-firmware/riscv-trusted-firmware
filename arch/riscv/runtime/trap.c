@@ -109,6 +109,8 @@ static void trap_from_below(struct trap_regs *regs)
 		 */
 		if (irq == IRQ_M_TIMER)
 			timer_process();
+		else if (irq == IRQ_PMU_OVF && pmu_sse_overflow_irq())
+			sse_raise_local(SSE_EVENT_LOCAL_PMU_OVERFLOW);
 		else if (irq < __RISCV_XLEN__ && BIT(irq) == ipi_irq())
 			ipi_process();
 		else

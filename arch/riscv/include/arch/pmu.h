@@ -16,6 +16,7 @@
  * place of 'time', is not a counter); PMU_FW_FIRST and up the firmware ones.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #define PMU_HW_COUNTERS 32
@@ -42,6 +43,15 @@ long pmu_counter_start(unsigned long base, unsigned long mask,
 long pmu_counter_stop(unsigned long base, unsigned long mask,
 		      unsigned long flags);
 long pmu_counter_fw_read(unsigned long idx, uint64_t *value);
+long pmu_snapshot_set_shmem(unsigned long lo, unsigned long hi,
+			    unsigned long flags);
+
+/* Counter overflow delivered as the SSE PMU overflow event (needs Sscofpmf). */
+bool pmu_sse_supported(void);
+void pmu_sse_enable(bool enable);
+bool pmu_sse_overflow_irq(void);
+void pmu_sse_complete(void);
+
 /* Fill in the 'supported' bit of 'count' event entries at physical 'addr'. */
 long pmu_event_info(unsigned long addr, unsigned long count);
 
@@ -56,6 +66,24 @@ static inline void pmu_hart_init(void)
 }
 
 static inline void pmu_fw_event(unsigned int event)
+{
+}
+
+static inline bool pmu_sse_supported(void)
+{
+	return false;
+}
+
+static inline void pmu_sse_enable(bool enable)
+{
+}
+
+static inline bool pmu_sse_overflow_irq(void)
+{
+	return false;
+}
+
+static inline void pmu_sse_complete(void)
 {
 }
 

@@ -16,10 +16,10 @@ and what is still missing.
 | SRST      | `SRST` | shutdown, cold and warm reboot through the reset driver |
 | SUSP      | `SUSP` | suspend to RAM as an M-mode wait with all other harts stopped (`CONFIG_SBI_SUSP`, on for QEMU virt) |
 | FWFT      | `FWFT` | misaligned exception delegation; landing pad, shadow stack, double trap, PTE A/D updating and pointer masking where the hart has them; lock flag |
-| SSE       | `SSE`  | all ten functions; sources: the software injected local and global events |
+| SSE       | `SSE`  | all ten functions; sources: the software injected local and global events, PMU counter overflow (Sscofpmf) |
 | DBTR      | `DBTR` | all eight functions, on harts with Sdtrig; address / data match triggers (mcontrol, mcontrol6), chains included |
 | MPXY      | `MPXY` | all eight functions; channels carry RPMI service groups (see below); no MSI / SSE indication, notifications are polled |
-| PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart, `event_get_info`; no snapshot shared memory |
+| PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart, `event_get_info`, counter snapshots |
 | DBCN      | `DBCN` | write, read, write_byte (`CONFIG_SBI_DBCN`) |
 | Legacy    | `0x00`-`0x08` | all v0.1 calls (`CONFIG_SBI_LEGACY`) |
 
@@ -151,7 +151,13 @@ is handed out stopped (mcountinhibit); cycle and instret run freely while
 nobody owns them. With Sscofpmf the overflow interrupt is delegated and the
 mode-filter flags of `counter_config_matching` are honoured; M-mode is
 always filtered out. Firmware counters count the events of the SBI
-specification where they happen (`pmu_fw_event()`).
+specification where they happen (`pmu_fw_event()`). Counter snapshots use
+a per-hart page: `counter_start` can take initial values from it,
+`counter_stop` writes the values and, with Sscofpmf, the bitmap of counters
+that wrapped around, all relative to the call's `counter_idx_base`. While
+the SSE PMU overflow event is enabled on a hart, the overflow interrupt is
+not delegated there: M-mode takes it and raises the event, and re-arms it
+when the handler completes.
 
 ### Supervisor software events
 
@@ -167,11 +173,13 @@ the common trap exit takes no lock. `sbi_sse_complete` rebuilds the
 interrupted context in the register file, a0 and a1 included, so the
 dispatcher writes no return value for it (`service_ret.keep_regs`).
 
-Events come from a table (`local_ids`, `global_ids` in `sse.c`); a new
-source adds its id and calls the injection path. Today those are the
-software injected local and global events. The standard events without a
-source here (RAS, double trap, PMU overflow) are `SBI_ERR_NOT_SUPPORTED`,
-reserved ids `SBI_ERR_INVALID_PARAM`.
+Events come from a table (`local_ids`, `global_ids` in `sse.c`); a source
+in the monitor raises its event with `sse_raise_local()` and follows the
+event's state through `event_source_update()`. Today: the software injected
+local and global events, and the PMU overflow event. Only the software
+events can be injected by S-mode. The standard events without a source here
+(RAS, double trap) are `SBI_ERR_NOT_SUPPORTED`, reserved ids
+`SBI_ERR_INVALID_PARAM`.
 
 ### Debug triggers
 
@@ -287,8 +295,8 @@ with `IMAGE_SBITEST` disabled.
 
 ## Gaps
 
-1. SSE event sources (PMU overflow, double trap, RAS); PMU counter
-   snapshots; DBTR trigger types other than address / data match.
+1. SSE event sources (double trap, RAS); DBTR trigger types other than
+   address / data match.
 2. **RPMI consumers in M-mode**: system reset, system suspend, HSM and
    CPPC backends over RPMI; service groups implemented by the firmware
    itself behind the same MPXY channels; MSI / SSE indication of
