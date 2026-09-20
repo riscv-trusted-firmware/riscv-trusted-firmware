@@ -10,7 +10,8 @@
  * device tree describes as RAM: without a /reserved-memory entry an
  * operating system hands those pages out and faults on first use. The
  * entry is "no-map" so that the memory does not end up in a linear
- * mapping either, where speculative accesses could reach it.
+ * mapping either, where speculative accesses could reach it. The same goes
+ * for an RPMI shared memory transport carved out of RAM.
  */
 
 #include <arch/hart.h>
@@ -20,8 +21,8 @@
 
 #include "fdt_fixup.h"
 
-/* Room for the node added below, with some to spare. */
-#define FDT_FIXUP_ROOM 256
+/* Room for the nodes added below, with some to spare. */
+#define FDT_FIXUP_ROOM 512
 
 static int cells_of(const void *fdt, int node, const char *prop, int dflt)
 {
@@ -37,9 +38,8 @@ static void put_cells(fdt32_t **p, int cells, uint64_t val)
 	*p += cells;
 }
 
-static int reserve_monitor(void *fdt)
+static int reserve(void *fdt, const char *what, uint64_t base, uint64_t size)
 {
-	uint64_t base = CONFIG_MONITOR_LOAD_ADDR, size = CONFIG_MONITOR_SIZE;
 	int ac = cells_of(fdt, 0, "#address-cells", 2);
 	int sc = cells_of(fdt, 0, "#size-cells", 1);
 	fdt32_t reg[4] = {}, *p = reg;
@@ -67,7 +67,7 @@ static int reserve_monitor(void *fdt)
 	if (ac < 1 || ac > 2 || sc < 1 || sc > 2)
 		return -FDT_ERR_BADNCELLS;
 
-	snprintf(name, sizeof(name), "monitor@%llx", (unsigned long long)base);
+	snprintf(name, sizeof(name), "%s@%llx", what, (unsigned long long)base);
 	node = fdt_add_subnode(fdt, parent, name);
 	if (node < 0)
 		return node;
@@ -100,7 +100,13 @@ unsigned long fdt_fixup(unsigned long fdt)
 	}
 	rc = fdt_open_into((void *)fdt, (void *)dst, (int)size);
 	if (!rc)
-		rc = reserve_monitor((void *)dst);
+		rc = reserve((void *)dst, "monitor", CONFIG_MONITOR_LOAD_ADDR,
+			     CONFIG_MONITOR_SIZE);
+#ifdef CONFIG_RPMI_SHMEM_IN_RAM
+	if (!rc)
+		rc = reserve((void *)dst, "rpmi-shmem", CONFIG_RPMI_SHMEM_BASE,
+			     4 * CONFIG_RPMI_SHMEM_QUEUE_SIZE);
+#endif
 	if (rc) {
 		pr_warn("fdt: fix-up failed: %s\n", fdt_strerror(rc));
 		return fdt;

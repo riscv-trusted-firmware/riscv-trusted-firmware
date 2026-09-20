@@ -25,6 +25,17 @@ extern char __stack_top[];
 static struct hart harts[CONFIG_PLATFORM_HART_COUNT];
 static bool features[HART_FEAT_COUNT];
 
+/* Memory S/U-mode is fenced off from: a PMP NAPOT entry each, in this order. */
+static const struct {
+	unsigned long base, size;
+} mmode_regions[] = {
+	{ CONFIG_MONITOR_LOAD_ADDR, CONFIG_MONITOR_SIZE },
+#ifdef CONFIG_RPMI_SHMEM_PROTECT
+	/* The transport to the platform microcontroller: all four queues. */
+	{ CONFIG_RPMI_SHMEM_BASE, 4 * CONFIG_RPMI_SHMEM_QUEUE_SIZE },
+#endif
+};
+
 struct hart *hart_get(unsigned long hartid)
 {
 	return hartid < CONFIG_PLATFORM_HART_COUNT ? &harts[hartid] : NULL;
@@ -71,7 +82,8 @@ void hart_detect_features(void)
 	features[HART_FEAT_MENVCFG] = csr_probe(CSR_MENVCFG, &val);
 
 	/* pmpaddr is WARL: an unimplemented entry reads back as zero. */
-	if (CONFIG_RISCV_PMP_COUNT >= 2 && csr_probe(CSR_PMPADDR0, &val)) {
+	if (CONFIG_RISCV_PMP_COUNT > (int)ARRAY_SIZE(mmode_regions) &&
+	    csr_probe(CSR_PMPADDR0, &val)) {
 		csr_write(CSR_PMPADDR0, ~UL(0));
 		features[HART_FEAT_PMP] = csr_read(CSR_PMPADDR0) != 0;
 		csr_write(CSR_PMPADDR0, val);
@@ -90,13 +102,15 @@ void hart_detect_features(void)
 
 bool smode_range_ok(paddr_t addr, paddr_size_t size)
 {
-	unsigned long fw_start = CONFIG_MONITOR_LOAD_ADDR;
-	unsigned long fw_end = fw_start + CONFIG_MONITOR_SIZE;
 	unsigned long end = addr + size;
 
 	if (end < addr)
 		return false;
-	return end <= fw_start || addr >= fw_end;
+	for (unsigned int i = 0; i < ARRAY_SIZE(mmode_regions); i++)
+		if (end > mmode_regions[i].base &&
+		    addr < mmode_regions[i].base + mmode_regions[i].size)
+			return false;
+	return true;
 }
 
 static void envcfg_init(void)
@@ -140,12 +154,15 @@ static void pmp_init(void)
 		return;
 	}
 
-	/* Entry 0 hides the monitor from S/U-mode, entry 1 opens the rest. */
-	if (pmp_set_napot(0, CONFIG_MONITOR_LOAD_ADDR, CONFIG_MONITOR_SIZE, 0))
-		panic("monitor region %lx+%lx is not a NAPOT range\n",
-		      (unsigned long)CONFIG_MONITOR_LOAD_ADDR,
-		      (unsigned long)CONFIG_MONITOR_SIZE);
-	pmp_set_all(1, PMP_R | PMP_W | PMP_X);
+	/*
+	 * The first entries hide M-mode memory, the one after opens the rest.
+	 */
+	for (unsigned int i = 0; i < ARRAY_SIZE(mmode_regions); i++)
+		if (pmp_set_napot(i, mmode_regions[i].base,
+				  mmode_regions[i].size, 0))
+			panic("M-mode region %lx+%lx is not a NAPOT range\n",
+			      mmode_regions[i].base, mmode_regions[i].size);
+	pmp_set_all(ARRAY_SIZE(mmode_regions), PMP_R | PMP_W | PMP_X);
 	__asm__ __volatile__("sfence.vma" ::: "memory");
 }
 

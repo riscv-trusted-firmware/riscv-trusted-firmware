@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+
+menu "RPMI (RISC-V Platform Management Interface)"
+
+config RPMI
+	bool "RPMI client"
+	help
+	  Talk to a platform microcontroller: the message protocol, the
+	  request / acknowledgment engine and the notification path. Needs a
+	  transport below.
+
+if RPMI
+
+config RPMI_MAX_DATA_LEN
+	int "Largest message data the client handles (bytes)"
+	default 248
+	help
+	  An upper bound for the transport's own limit (slot size minus the
+	  8-byte header); sizes the client's bounce buffer. A multiple of 4.
+
+config RPMI_TIMEOUT_US
+	int "Send and acknowledgment timeout (microseconds)"
+	default 100000
+
+config RPMI_SHMEM
+	bool "Shared memory transport"
+
+if RPMI_SHMEM
+
+config RPMI_SHMEM_BASE
+	hex "Address of the first queue"
+	help
+	  Four contiguous queues: A2P request, P2A acknowledgment, P2A
+	  request, A2P acknowledgment.
+
+config RPMI_SHMEM_QUEUE_SIZE
+	hex "Size of each queue (bytes)"
+	default 0x1000
+
+config RPMI_SHMEM_SLOT_SIZE
+	int "Slot size (bytes)"
+	default 64
+
+config RPMI_SHMEM_DOORBELL_ADDR
+	hex "A2P doorbell register (0: none, the PuC polls)"
+	default 0x0
+
+config RPMI_SHMEM_DOORBELL_VALUE
+	hex "Value written to the A2P doorbell"
+	default 0x1
+
+config RPMI_SHMEM_IN_RAM
+	bool "The shared memory is carved out of RAM"
+	help
+	  Add it to /reserved-memory (no-map) in the device tree of the next
+	  stage, which would otherwise allocate it.
+
+config RPMI_SHMEM_PROTECT
+	bool "Hide the shared memory from S/U-mode"
+	default y
+	help
+	  One PMP NAPOT entry over the four queues (their total size must be
+	  a power of two, the base a multiple of it). S-mode then reaches
+	  the PuC through MPXY only.
+
+endif
+
+endif
+
+endmenu

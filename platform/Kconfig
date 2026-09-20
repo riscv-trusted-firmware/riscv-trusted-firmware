@@ -35,6 +35,13 @@ config PLATFORM_HART_COUNT
 	range 1 4096
 	default 1
 
+config PLATFORM_TIMEBASE_FREQUENCY
+	int "Platform timer frequency (Hz)"
+	default 10000000
+	help
+	  Rate of the 'time' counter (the device tree's timebase-frequency),
+	  for the monitor's own timeouts.
+
 config PLATFORM_FW_START
 	hex "Firmware load/link address"
 

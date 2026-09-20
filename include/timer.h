@@ -28,6 +28,15 @@ bool timer_available(void);
 const char *timer_name(void);
 uint64_t timer_now(void);
 
+/*
+ * Ticks of timer_now() in 'us' microseconds
+ * (CONFIG_PLATFORM_TIMEBASE_FREQUENCY).
+ */
+static inline uint64_t timer_usecs_to_ticks(uint64_t us)
+{
+	return us * CONFIG_PLATFORM_TIMEBASE_FREQUENCY / 1000000;
+}
+
 /* Calling hart: quiesce the compare register. */
 void timer_hart_init(void);
 /* Calling hart: (re)program the S-mode timer event, SBI set_timer semantics. */

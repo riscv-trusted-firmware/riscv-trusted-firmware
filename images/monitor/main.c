@@ -21,6 +21,7 @@
 #include <log.h>
 #include <platform.h>
 #include <reset.h>
+#include <rpmi.h>
 #include <service.h>
 #include <timer.h>
 
@@ -87,6 +88,9 @@ void image_main(unsigned long hartid, unsigned long fdt)
 	print_features();
 	pr_info("timer: %s, ipi: %s, reset: %s, harts: %u\n", timer_name(),
 		ipi_name(), reset_name(), hart_count());
+#ifdef CONFIG_RPMI
+	pr_info("rpmi: %s\n", rpmi_transport_name());
+#endif
 	print_services();
 	pmu_init((const void *)fdt);
 
