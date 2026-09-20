@@ -451,7 +451,7 @@ static void test_legacy(void)
 
 static void test_traps(void)
 {
-	unsigned long val = 0;
+	unsigned long val = 0, addr = 0;
 
 	printf("traps\n");
 	WRITE_ONCE(trap_expected, true);
@@ -482,6 +482,17 @@ static void test_traps(void)
 		   : "memory");
 	CHECK(trap_count == 1 && trap_cause == CAUSE_STORE_ACCESS,
 	      "monitor write: %lu traps, cause %lu", trap_count, trap_cause);
+
+#ifdef CONFIG_IPI_ACLINT_MSWI
+	/*
+	 * So are the monitor's devices: no sending M-mode IPIs from down here.
+	 */
+	WRITE_ONCE(trap_count, 0);
+	addr = CONFIG_IPI_ACLINT_MSWI_ADDR;
+	PROBE_INSN("sw zero, 0(%0)", : : "r"(addr) : "memory");
+	CHECK(trap_count == 1 && trap_cause == CAUSE_STORE_ACCESS,
+	      "MSWI write: %lu traps, cause %lu", trap_count, trap_cause);
+#endif
 
 	/* ... and the memory right after it is ours. */
 	WRITE_ONCE(trap_count, 0);

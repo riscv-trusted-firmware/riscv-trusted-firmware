@@ -11,6 +11,7 @@
 #include <driver.h>
 #include <io.h>
 #include <ipi.h>
+#include <memregion.h>
 #include <stdint.h>
 #include <types_ext.h>
 
@@ -39,6 +40,8 @@ static const struct ipi_ops aclint_mswi_ops = {
 static int aclint_mswi_probe(const void *fdt)
 {
 	ipi_register(&aclint_mswi_ops);
+	memregion_add(CONFIG_IPI_ACLINT_MSWI_ADDR, CONFIG_IPI_ACLINT_MSWI_SIZE,
+		      MEMREGION_MMODE_RW);
 	return 0;
 }
 

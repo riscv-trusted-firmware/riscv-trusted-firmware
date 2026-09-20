@@ -12,6 +12,7 @@
  */
 
 #include <arch/hart.h>
+#include <arch/pmp.h>
 #include <mpxy.h>
 #include <sbi/sbi.h>
 #include <string.h>
@@ -63,6 +64,18 @@ static uint32_t *this_shmem(void)
 	return addr == SHMEM_NONE ? NULL : (uint32_t *)addr;
 }
 
+void mpxy_shmem_access(bool begin)
+{
+	unsigned long addr = shmem[this_hartid()];
+
+	if (addr == SHMEM_NONE)
+		return;
+	if (begin)
+		smode_access_begin(addr, MPXY_SHMEM_SIZE);
+	else
+		smode_access_end();
+}
+
 long mpxy_set_shmem(unsigned long lo, unsigned long hi, unsigned long flags)
 {
 	unsigned long *cur = &shmem[this_hartid()], old = *cur;
@@ -85,9 +98,10 @@ long mpxy_set_shmem(unsigned long lo, unsigned long hi, unsigned long flags)
 		/*
 		 * OVERWRITE-RETURN: the previous (lo, hi), all-ones when none.
 		 */
-		new = (unsigned long *)lo;
+		new = smode_access_begin(lo, 2 * sizeof(*new));
 		new[0] = old;
 		new[1] = old == SHMEM_NONE ? ~UL(0) : 0;
+		smode_access_end();
 	}
 	return SBI_SUCCESS;
 }

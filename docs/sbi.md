@@ -81,10 +81,25 @@ are probed (`csr_probe()`) and how unprivileged accesses report faults.
 
 Before entering S-mode a hart delegates the usual exceptions and the S-mode
 interrupts, opens the counters, sets up menvcfg (Sstc, Zicbo*, Svpbmt as
-available) and programs two PMP entries: the monitor's memory without
-permissions, then everything else RWX. `smode_range_ok()` is the matching
-software check for addresses S-mode passes in (start and resume addresses,
-DBCN buffers).
+available) and programs the PMP from the memory region list
+(`include/memregion.h`): the monitor's image, plus what the drivers
+registered at probe time. Machine-only regions (the CLINT, the machine-level
+APLIC and IMSIC files, a protected RPMI transport) are closed to S/U-mode;
+the last entry opens everything else. A region takes one NAPOT entry, or an
+OFF + TOR pair when its bounds do not allow that. `smode_range_ok()` is the
+matching software check for addresses S-mode passes in.
+
+With **Smepmp** M-mode is confined as well (`mseccfg.MML` and `MMWP`): its
+regions become locked rules, R-X for the monitor's code and constants and RW
+for the rest (the linker script aligns the split), devices it shares with
+S-mode (console, reset) get shared rules, and everything else is out of its
+reach, S-mode memory included. Where a call has to touch a buffer S-mode
+named by physical address (DBCN, the MPXY and DBTR shared memories, SSE
+attributes, PMU event info), `smode_access_begin()` / `_end()` open a
+two-entry window on exactly that range; `unpriv_*()` needs none, it goes
+through `mstatus.MPRV`. `mseccfg.RLB` stays set: the window
+is a shared-region rule written at run time, which QEMU only accepts under
+MML with rule locking bypassed.
 
 ### Interrupt controllers
 
@@ -280,10 +295,8 @@ with `IMAGE_SBITEST` disabled.
    misaligned accesses, atomics, missing counters.
 4. **Device tree driven configuration.** libfdt is only used for the
    fix-up; device addresses and the hart count still come from Kconfig.
-5. **Smepmp.** PMP is programmed without `mseccfg.MML`.
-6. More timer / IPI / reset / serial drivers; IPIs through the IMSIC;
-   PMP over machine-level device registers.
-7. **Scalability.** Remote fences are serialised system-wide; harts are
+5. More timer / IPI / reset / serial drivers; IPIs through the IMSIC.
+6. **Scalability.** Remote fences are serialised system-wide; harts are
    indexed by hart id (`hartid < CONFIG_PLATFORM_HART_COUNT`).
 
 The H-extension paths (trap redirection from VS/VU-mode, `hfence` on a real

@@ -45,6 +45,7 @@ static void print_features(void)
 {
 	static const char *const names[HART_FEAT_COUNT] = {
 		[HART_FEAT_PMP] = "pmp",
+		[HART_FEAT_SMEPMP] = "smepmp",
 		[HART_FEAT_TIME_CSR] = "time",
 		[HART_FEAT_MENVCFG] = "menvcfg",
 		[HART_FEAT_SSTC] = "sstc",

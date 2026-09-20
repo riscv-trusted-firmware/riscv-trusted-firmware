@@ -12,6 +12,7 @@
 #include <arch/hart.h>
 #include <driver.h>
 #include <io.h>
+#include <memregion.h>
 #include <timer.h>
 #include <types_ext.h>
 #include <util.h>
@@ -64,6 +65,11 @@ static const struct timer_ops aclint_mtimer_ops = {
 static int aclint_mtimer_probe(const void *fdt)
 {
 	timer_register(&aclint_mtimer_ops);
+	/* One MTIMECMP per hart, and MTIME; S-mode has the time CSR. */
+	memregion_add(CONFIG_TIMER_ACLINT_MTIMER_MTIMECMP_ADDR,
+		      UL(8) * CONFIG_PLATFORM_HART_COUNT, MEMREGION_MMODE_RW);
+	memregion_add(CONFIG_TIMER_ACLINT_MTIMER_MTIME_ADDR, 8,
+		      MEMREGION_MMODE_RW);
 	return 0;
 }
 

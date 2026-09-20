@@ -14,6 +14,7 @@
 
 #include <arch/dbtr.h>
 #include <arch/hart.h>
+#include <arch/pmp.h>
 #include <sbi/sbi.h>
 #include <util.h>
 
@@ -222,8 +223,15 @@ static long entries_get(struct dbtr_hart *d, unsigned long count,
 		return SBI_ERR_NO_SHMEM;
 	if (count > d->count)
 		return SBI_ERR_BAD_RANGE;
-	*entries = (struct dbtr_entry *)d->shmem;
+	/* Every caller pairs this with entries_put(). */
+	*entries = smode_access_begin(d->shmem, d->count * sizeof(**entries));
 	return SBI_SUCCESS;
+}
+
+static long entries_put(long rc)
+{
+	smode_access_end();
+	return rc;
 }
 
 long dbtr_read(unsigned long base, unsigned long count)
@@ -235,7 +243,7 @@ long dbtr_read(unsigned long base, unsigned long count)
 	if (rc)
 		return rc;
 	if (base >= d->count || count > d->count - base)
-		return SBI_ERR_BAD_RANGE;
+		return entries_put(SBI_ERR_BAD_RANGE);
 
 	for (unsigned long i = 0; i < count; i++) {
 		csr_write(CSR_TSELECT, base + i);
@@ -246,7 +254,7 @@ long dbtr_read(unsigned long base, unsigned long count)
 			.tdata3 = d->has_tdata3 ? csr_read(CSR_TDATA3) : 0,
 		};
 	}
-	return SBI_SUCCESS;
+	return entries_put(SBI_SUCCESS);
 }
 
 /*
@@ -292,7 +300,7 @@ long dbtr_install(unsigned long count, unsigned long *failed)
 			rc = SBI_ERR_INVALID_PARAM;
 		if (rc) {
 			*failed = i;
-			return rc;
+			return entries_put(rc);
 		}
 	}
 	for (unsigned long i = 0, len; i < count; i += len) {
@@ -303,7 +311,7 @@ long dbtr_install(unsigned long count, unsigned long *failed)
 		start = find_run(d, &cfg[i], len, taken);
 		if (start < 0) {
 			*failed = i;
-			return SBI_ERR_FAILED;
+			return entries_put(SBI_ERR_FAILED);
 		}
 		for (unsigned long k = 0; k < len; k++) {
 			where[i + k] = (unsigned int)start + (unsigned int)k;
@@ -319,13 +327,13 @@ long dbtr_install(unsigned long count, unsigned long *failed)
 				hw_clear(where[i]);
 				d->state[where[i]] = 0;
 			}
-			return SBI_ERR_NOT_SUPPORTED;
+			return entries_put(SBI_ERR_NOT_SUPPORTED);
 		}
 		d->state[where[i]] = state_of(where[i], cfg[i].tdata1);
 	}
 	for (unsigned long i = 0; i < count; i++)
 		mem[i].idx = where[i];
-	return SBI_SUCCESS;
+	return entries_put(SBI_SUCCESS);
 }
 
 long dbtr_update(unsigned long count, unsigned long *failed)
@@ -345,11 +353,11 @@ long dbtr_update(unsigned long count, unsigned long *failed)
 		*failed = i;
 		rc = config_check(&cfg);
 		if (rc)
-			return rc;
+			return entries_put(rc);
 		if (cfg.idx >= d->count)
-			return SBI_ERR_INVALID_PARAM;
+			return entries_put(SBI_ERR_INVALID_PARAM);
 		if (!(d->state[cfg.idx] & STATE_MAPPED))
-			return SBI_ERR_FAILED;
+			return entries_put(SBI_ERR_FAILED);
 
 		/*
 		 * An update keeps the kind of trigger and its place in a chain.
@@ -358,15 +366,15 @@ long dbtr_update(unsigned long count, unsigned long *failed)
 		cur = csr_read(CSR_TDATA1);
 		if (TDATA1_TYPE(cur) != TDATA1_TYPE(cfg.tdata1) ||
 		    ((cur ^ cfg.tdata1) & MC_CHAIN))
-			return SBI_ERR_INVALID_PARAM;
+			return entries_put(SBI_ERR_INVALID_PARAM);
 		if (!hw_program(d, (unsigned int)cfg.idx, &cfg)) {
 			d->state[cfg.idx] = 0;
-			return SBI_ERR_NOT_SUPPORTED;
+			return entries_put(SBI_ERR_NOT_SUPPORTED);
 		}
 		d->state[cfg.idx] = state_of((unsigned int)cfg.idx, cfg.tdata1);
 	}
 	*failed = 0;
-	return SBI_SUCCESS;
+	return entries_put(SBI_SUCCESS);
 }
 
 enum set_op { SET_UNINSTALL, SET_ENABLE, SET_DISABLE };

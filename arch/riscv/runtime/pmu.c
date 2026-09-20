@@ -14,6 +14,7 @@
  */
 
 #include <arch/hart.h>
+#include <arch/pmp.h>
 #include <arch/pmu.h>
 #include <libfdt.h>
 #include <log.h>
@@ -1195,7 +1196,7 @@ struct event_info {
 
 long pmu_event_info(unsigned long addr, unsigned long count)
 {
-	struct event_info *info = (struct event_info *)addr;
+	struct event_info *info = NULL;
 	uint64_t select = 0;
 
 	if (!IS_ALIGNED(addr, sizeof(*info)))
@@ -1203,6 +1204,7 @@ long pmu_event_info(unsigned long addr, unsigned long count)
 	if (count > ~UL(0) / sizeof(*info) ||
 	    !smode_range_ok(addr, count * sizeof(*info)))
 		return SBI_ERR_INVALID_ADDRESS;
+	info = smode_access_begin(addr, count * sizeof(*info));
 
 	for (unsigned long i = 0; i < count; i++) {
 		uint32_t event = info[i].event_idx;
@@ -1217,5 +1219,6 @@ long pmu_event_info(unsigned long addr, unsigned long count)
 			      hw_counters);
 		info[i].output = ok;
 	}
+	smode_access_end();
 	return SBI_SUCCESS;
 }

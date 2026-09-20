@@ -10,6 +10,7 @@
 
 #include <driver.h>
 #include <io.h>
+#include <memregion.h>
 #include <reset.h>
 #include <stdint.h>
 #include <types_ext.h>
@@ -39,6 +40,9 @@ static const struct reset_ops sifive_test_ops = {
 static int sifive_test_probe(const void *fdt)
 {
 	reset_register(&sifive_test_ops);
+	/* Operating systems know the device too (syscon-poweroff). */
+	memregion_add(CONFIG_RESET_SIFIVE_TEST_ADDR, 0x1000,
+		      MEMREGION_SHARED_RW);
 	return 0;
 }
 

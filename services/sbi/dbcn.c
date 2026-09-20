@@ -10,6 +10,7 @@
  */
 
 #include <arch/hart.h>
+#include <arch/pmp.h>
 #include <console.h>
 
 #include "sbi_internal.h"
@@ -30,12 +31,15 @@ static struct service_ret sbi_dbcn_ecall(unsigned long eid, unsigned long fid,
 	case SBI_DBCN_CONSOLE_WRITE:
 		if (!dbcn_buffer_ok(len, regs->a1, regs->a2))
 			return sbi_err(SBI_ERR_INVALID_PARAM);
-		console_write((const char *)regs->a1, len);
+		console_write(smode_access_begin(regs->a1, len), len);
+		smode_access_end();
 		return sbi_ok((long)len);
 	case SBI_DBCN_CONSOLE_READ:
 		if (!dbcn_buffer_ok(len, regs->a1, regs->a2))
 			return sbi_err(SBI_ERR_INVALID_PARAM);
-		return sbi_ok((long)console_read((char *)regs->a1, len));
+		len = console_read(smode_access_begin(regs->a1, len), len);
+		smode_access_end();
+		return sbi_ok((long)len);
 	case SBI_DBCN_CONSOLE_WRITE_BYTE:
 		console_write(&(char){ (char)regs->a0 }, 1);
 		return sbi_ok(0);

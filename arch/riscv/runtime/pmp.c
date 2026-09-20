@@ -4,12 +4,14 @@
  */
 
 /*
- * Physical memory protection. pmpcfg/pmpaddr CSRs are selected by number,
- * hence the switch over the entry index.
+ * Physical memory protection: the PMP CSRs. pmpcfg/pmpaddr are selected by
+ * number, hence the switch over the entry index. What goes into the entries
+ * is decided in hart.c.
  */
 
 #include <arch/csr.h>
 #include <arch/pmp.h>
+#include <types_ext.h>
 #include <util.h>
 
 #define PMP_CFG_PER_REG (__RISCV_XLEN__ / 8)
@@ -99,23 +101,38 @@ static void pmpcfg_update(unsigned int idx, unsigned int cfg)
 	}
 }
 
-int pmp_set_napot(unsigned int idx, unsigned long base, unsigned long size,
-		  unsigned int perm)
+void pmp_entry_cfg(unsigned int idx, unsigned int cfg)
 {
-	/* NAPOT: power of two, at least 8 bytes, base aligned to the size. */
-	if (idx >= 16 || size < 8 || !IS_POWER_OF_TWO(size) ||
-	    !IS_ALIGNED(base, size))
-		return -1;
-
-	pmpaddr_write(idx, (base >> 2) | ((size >> 3) - 1));
-	pmpcfg_update(idx, PMP_A_NAPOT | perm);
-	return 0;
+	if (idx < 16)
+		pmpcfg_update(idx, cfg);
 }
 
-void pmp_set_all(unsigned int idx, unsigned int perm)
+void pmp_entry_set(unsigned int idx, unsigned long pmpaddr, unsigned int cfg)
 {
 	if (idx >= 16)
 		return;
-	pmpaddr_write(idx, ~UL(0));
-	pmpcfg_update(idx, PMP_A_NAPOT | perm);
+	/* Off while the address changes. A locked entry ignores all of this. */
+	pmpcfg_update(idx, 0);
+	pmpaddr_write(idx, pmpaddr);
+	pmpcfg_update(idx, cfg);
+}
+
+unsigned int pmp_range_set(unsigned int idx, paddr_t base, paddr_size_t size,
+			   unsigned int perm)
+{
+	/* NAPOT: power of two, at least 8 bytes, base aligned to the size. */
+	if (size >= 8 && IS_POWER_OF_TWO(size) && IS_ALIGNED(base, size)) {
+		pmp_entry_set(idx, (base >> 2) | ((size >> 3) - 1),
+			      PMP_A_NAPOT | perm);
+		return 1;
+	}
+	/* TOR: from the previous entry's address up to this one's. */
+	pmp_entry_set(idx, base >> 2, 0);
+	pmp_entry_set(idx + 1, (base + size) >> 2, PMP_A_TOR | perm);
+	return 2;
+}
+
+void pmp_all_set(unsigned int idx, unsigned int perm)
+{
+	pmp_entry_set(idx, ~UL(0), PMP_A_NAPOT | perm);
 }

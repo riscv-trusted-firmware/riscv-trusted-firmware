@@ -16,6 +16,7 @@
 
 #include <arch/hart.h>
 #include <arch/hsm.h>
+#include <arch/pmp.h>
 #include <arch/sse.h>
 #include <atomic.h>
 #include <ipi.h>
@@ -439,12 +440,13 @@ static long attrs_check(unsigned long event_id, unsigned long base,
 long sse_read_attrs(unsigned long event_id, unsigned long base,
 		    unsigned long count, unsigned long addr)
 {
-	unsigned long *out = (unsigned long *)addr;
+	unsigned long *out = NULL;
 	struct sse_event *e = NULL;
 	long rc = attrs_check(event_id, base, count, addr, &e);
 
 	if (rc)
 		return rc;
+	out = smode_access_begin(addr, count * sizeof(*out));
 	spin_lock(&sse_lock);
 	for (unsigned long i = 0; i < count; i++) {
 		unsigned long val = e->attr[base + i];
@@ -455,6 +457,7 @@ long sse_read_attrs(unsigned long event_id, unsigned long base,
 		out[i] = val;
 	}
 	spin_unlock(&sse_lock);
+	smode_access_end();
 	return SBI_SUCCESS;
 }
 
@@ -498,7 +501,7 @@ static long attr_write_check(const struct sse_event *e, unsigned long id,
 long sse_write_attrs(unsigned long event_id, unsigned long base,
 		     unsigned long count, unsigned long addr)
 {
-	const unsigned long *in = (const unsigned long *)addr;
+	const unsigned long *in = NULL;
 	unsigned long vals[SSE_ATTR_COUNT] = {};
 	struct sse_event *e = NULL;
 	long rc = attrs_check(event_id, base, count, addr, &e);
@@ -506,8 +509,10 @@ long sse_write_attrs(unsigned long event_id, unsigned long base,
 	if (rc)
 		return rc;
 	/* Read once: the memory is S-mode's and can change under us. */
+	in = smode_access_begin(addr, count * sizeof(*in));
 	for (unsigned long i = 0; i < count; i++)
 		vals[i] = in[i];
+	smode_access_end();
 
 	spin_lock(&sse_lock);
 	for (unsigned long i = 0; i < count && !rc; i++)

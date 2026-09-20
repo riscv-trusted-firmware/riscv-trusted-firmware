@@ -19,6 +19,7 @@
 
 #include <driver.h>
 #include <io.h>
+#include <memregion.h>
 #include <rpmi.h>
 #include <string.h>
 #include <types_ext.h>
@@ -126,6 +127,13 @@ static const struct rpmi_transport rpmi_shmem_transport = {
 static int rpmi_shmem_probe(const void *fdt)
 {
 	rpmi_transport_register(&rpmi_shmem_transport);
+#ifdef CONFIG_RPMI_SHMEM_PROTECT
+	memregion_add(CONFIG_RPMI_SHMEM_BASE, RPMI_QUEUE_COUNT * QUEUE_SIZE,
+		      MEMREGION_MMODE_RW);
+#else
+	memregion_add(CONFIG_RPMI_SHMEM_BASE, RPMI_QUEUE_COUNT * QUEUE_SIZE,
+		      MEMREGION_SHARED_RW);
+#endif
 	return 0;
 }
 

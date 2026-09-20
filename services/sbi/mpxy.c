@@ -20,17 +20,13 @@
 #define SBI_MPXY_SEND_MSG_WITHOUT_RESP 6
 #define SBI_MPXY_GET_NOTIFICATIONS 7
 
-static struct service_ret sbi_mpxy_ecall(unsigned long eid, unsigned long fid,
-					 struct trap_regs *regs)
+static struct service_ret sbi_mpxy_shmem_call(unsigned long fid,
+					      struct trap_regs *regs)
 {
 	unsigned long out = 0;
 	long rc = 0;
 
 	switch (fid) {
-	case SBI_MPXY_GET_SHMEM_SIZE:
-		return sbi_ok(MPXY_SHMEM_SIZE);
-	case SBI_MPXY_SET_SHMEM:
-		return sbi_err(mpxy_set_shmem(regs->a0, regs->a1, regs->a2));
 	case SBI_MPXY_GET_CHANNEL_IDS:
 		return sbi_err(mpxy_get_channel_ids(regs->a0));
 	case SBI_MPXY_READ_ATTRS:
@@ -50,6 +46,25 @@ static struct service_ret sbi_mpxy_ecall(unsigned long eid, unsigned long fid,
 		return sbi_ret(rc, (long)out);
 	default:
 		return sbi_err(SBI_ERR_NOT_SUPPORTED);
+	}
+}
+
+static struct service_ret sbi_mpxy_ecall(unsigned long eid, unsigned long fid,
+					 struct trap_regs *regs)
+{
+	struct service_ret ret = {};
+
+	switch (fid) {
+	case SBI_MPXY_GET_SHMEM_SIZE:
+		return sbi_ok(MPXY_SHMEM_SIZE);
+	case SBI_MPXY_SET_SHMEM:
+		return sbi_err(mpxy_set_shmem(regs->a0, regs->a1, regs->a2));
+	default:
+		/* The rest works on the shared memory. */
+		mpxy_shmem_access(true);
+		ret = sbi_mpxy_shmem_call(fid, regs);
+		mpxy_shmem_access(false);
+		return ret;
 	}
 }
 

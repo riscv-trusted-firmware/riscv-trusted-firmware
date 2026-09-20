@@ -18,6 +18,7 @@
 #include <fdt_util.h>
 #include <io.h>
 #include <log.h>
+#include <memregion.h>
 #include <types_ext.h>
 #include <util.h>
 
@@ -169,7 +170,7 @@ static void aplic_root_init(const void *fdt, int node, vaddr_t base,
 static int aplic_probe(const void *fdt)
 {
 	int node = -1;
-	uint64_t base = 0;
+	uint64_t base = 0, size = 0;
 
 	while (fdt) {
 		node = fdt_node_offset_by_compatible(fdt, node, "riscv,aplic");
@@ -177,8 +178,10 @@ static int aplic_probe(const void *fdt)
 			break;
 		if (!fdt_node_enabled(fdt, node) ||
 		    !irqchip_is_mlevel(fdt, node) ||
-		    fdt_reg(fdt, node, 0, &base, NULL))
+		    fdt_reg(fdt, node, 0, &base, &size))
 			continue;
+		memregion_add((unsigned long)base, (unsigned long)size,
+			      MEMREGION_MMODE_RW);
 		aplic_root_init(fdt, node, (uintptr_t)base,
 				fdt_prop_u32(fdt, node, "riscv,num-sources",
 					     0));

@@ -11,8 +11,10 @@
 #include <console.h>
 #include <drivers/serial/uart8250.h>
 #include <io.h>
+#include <memregion.h>
 #include <stdint.h>
 #include <types_ext.h>
+#include <util.h>
 
 #define UART_RBR 0 /* receive buffer (read) */
 #define UART_THR 0 /* transmit holding (write) */
@@ -94,4 +96,7 @@ void uart8250_console_init(void)
 	reg_write(&uart, UART_MCR, 0x03); /* DTR | RTS */
 
 	console_register(&uart8250_console);
+	/* The next stage usually drives the same UART. */
+	memregion_add(uart.base, SHIFT_UL(0x100, uart.reg_shift),
+		      MEMREGION_SHARED_RW);
 }

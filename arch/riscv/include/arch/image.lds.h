@@ -42,10 +42,9 @@ SECTIONS {
 		__driver_table_end = .;
 	} > image
 
-	. = ALIGN(16);
-	__text_rodata_end = .;
-
-	.data : {
+	/* A protection boundary (Smepmp: R-X before, RW after). */
+	.data : ALIGN(4096) {
+		__text_rodata_end = .;
 		__data_start = .;
 		*(.data .data.*)
 		*(.got .got.*)

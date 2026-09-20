@@ -90,6 +90,12 @@ struct mpxy_channel {
 long mpxy_channel_register(struct mpxy_channel *ch);
 unsigned int mpxy_channel_count(void);
 
+/*
+ * M-mode access to the calling hart's shared memory, around the calls below
+ * that use it (everything but mpxy_set_shmem): see smode_access_begin().
+ */
+void mpxy_shmem_access(bool begin);
+
 /* The SBI calls, acting on the calling hart's shared memory. */
 long mpxy_set_shmem(unsigned long lo, unsigned long hi, unsigned long flags);
 long mpxy_get_channel_ids(unsigned long start_index);

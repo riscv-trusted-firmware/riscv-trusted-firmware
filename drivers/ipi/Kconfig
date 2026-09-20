@@ -11,6 +11,12 @@ if IPI_ACLINT_MSWI
 config IPI_ACLINT_MSWI_ADDR
 	hex "MSIP register array address"
 
+config IPI_ACLINT_MSWI_SIZE
+	hex "Size of the MSWI register block"
+	default 0x4000
+	help
+	  Kept from S/U-mode. The SiFive CLINT has its timer right behind.
+
 config IPI_ACLINT_MSWI_FIRST_HART
 	int "Hart id of the first MSIP register"
 	default 0

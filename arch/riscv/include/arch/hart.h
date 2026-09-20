@@ -52,6 +52,7 @@ struct hart {
 
 enum hart_feature {
 	HART_FEAT_PMP, /* at least two PMP entries */
+	HART_FEAT_SMEPMP,
 	HART_FEAT_TIME_CSR, /* 'time' readable without trapping */
 	HART_FEAT_MENVCFG, /* privileged spec 1.12 menvcfg */
 	HART_FEAT_SSTC,

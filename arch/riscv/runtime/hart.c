@@ -11,6 +11,7 @@
 #include <arch/hart.h>
 #include <arch/dbtr.h>
 #include <arch/fwft.h>
+#include <arch/image.h>
 #include <arch/pmp.h>
 #include <arch/pmu.h>
 #include <arch/sse.h>
@@ -18,6 +19,7 @@
 #include <ipi.h>
 #include <irqchip.h>
 #include <log.h>
+#include <memregion.h>
 #include <mpxy.h>
 #include <sbi/sbi.h>
 #include <timer.h>
@@ -29,16 +31,40 @@ extern char __stack_top[];
 static struct hart harts[CONFIG_PLATFORM_HART_COUNT];
 static bool features[HART_FEAT_COUNT];
 
-/* Memory S/U-mode is fenced off from: a PMP NAPOT entry each, in this order. */
-static const struct {
-	unsigned long base, size;
-} mmode_regions[] = {
-	{ CONFIG_MONITOR_LOAD_ADDR, CONFIG_MONITOR_SIZE },
-#ifdef CONFIG_RPMI_SHMEM_PROTECT
-	/* The transport to the platform microcontroller: all four queues. */
-	{ CONFIG_RPMI_SHMEM_BASE, 4 * CONFIG_RPMI_SHMEM_QUEUE_SIZE },
-#endif
-};
+/*
+ * The address map as far as protection goes (<memregion.h>). The monitor's
+ * own image is added at boot, the rest by the drivers.
+ */
+#define MAX_MEMREGIONS 12
+
+static struct memregion {
+	paddr_t base;
+	paddr_size_t size;
+	enum memregion_kind kind;
+} memregions[MAX_MEMREGIONS];
+static unsigned int nr_memregions;
+
+void memregion_add(paddr_t base, paddr_size_t size, enum memregion_kind kind)
+{
+	/* Neighbours of a kind share an entry (the CLINT's MSWI and MTIMER). */
+	for (unsigned int i = 0; i < nr_memregions; i++) {
+		struct memregion *r = &memregions[i];
+
+		if (r->kind != kind || base > r->base + r->size ||
+		    r->base > base + size)
+			continue;
+		if (base + size > r->base + r->size)
+			r->size = base + size - r->base;
+		if (base < r->base) {
+			r->size += r->base - base;
+			r->base = base;
+		}
+		return;
+	}
+	if (nr_memregions == MAX_MEMREGIONS)
+		panic("too many memory regions\n");
+	memregions[nr_memregions++] = (struct memregion){ base, size, kind };
+}
 
 struct hart *hart_get(unsigned long hartid)
 {
@@ -77,6 +103,22 @@ bool hart_has(enum hart_feature feat)
 	return features[feat];
 }
 
+/* Boot hart: the monitor's own image. */
+static void monitor_regions_init(void)
+{
+	unsigned long start = CONFIG_MONITOR_LOAD_ADDR;
+	unsigned long split = (unsigned long)__text_rodata_end;
+
+	/* One entry keeps S-mode out; confining M-mode takes the W^X split. */
+	if (!hart_has(HART_FEAT_SMEPMP)) {
+		memregion_add(start, CONFIG_MONITOR_SIZE, MEMREGION_MMODE_RW);
+		return;
+	}
+	memregion_add(start, split - start, MEMREGION_MMODE_RX);
+	memregion_add(split, start + CONFIG_MONITOR_SIZE - split,
+		      MEMREGION_MMODE_RW);
+}
+
 void hart_detect_features(void)
 {
 	unsigned long val = 0;
@@ -86,8 +128,7 @@ void hart_detect_features(void)
 	features[HART_FEAT_MENVCFG] = csr_probe(CSR_MENVCFG, &val);
 
 	/* pmpaddr is WARL: an unimplemented entry reads back as zero. */
-	if (CONFIG_RISCV_PMP_COUNT > (int)ARRAY_SIZE(mmode_regions) &&
-	    csr_probe(CSR_PMPADDR0, &val)) {
+	if (CONFIG_RISCV_PMP_COUNT >= 2 && csr_probe(CSR_PMPADDR0, &val)) {
 		csr_write(CSR_PMPADDR0, ~UL(0));
 		features[HART_FEAT_PMP] = csr_read(CSR_PMPADDR0) != 0;
 		csr_write(CSR_PMPADDR0, val);
@@ -99,6 +140,11 @@ void hart_detect_features(void)
 		features[HART_FEAT_SSTC] = true;
 #endif
 	features[HART_FEAT_SDTRIG] = csr_probe(CSR_TSELECT, &val);
+#ifdef CONFIG_RISCV_EXT_SMEPMP
+	/* mseccfg exists when Smepmp does. */
+	features[HART_FEAT_SMEPMP] = features[HART_FEAT_PMP] &&
+				     csr_probe(CSR_MSECCFG, &val);
+#endif
 #ifdef CONFIG_RISCV_EXT_SMSTATEEN
 	features[HART_FEAT_SMSTATEEN] = csr_probe(CSR_MSTATEEN0, &val);
 #endif
@@ -106,6 +152,8 @@ void hart_detect_features(void)
 	/* scountovf exists when Sscofpmf does. */
 	features[HART_FEAT_SSCOFPMF] = csr_probe(CSR_SCOUNTOVF, &val);
 #endif
+
+	monitor_regions_init();
 }
 
 bool smode_range_ok(paddr_t addr, paddr_size_t size)
@@ -114,9 +162,10 @@ bool smode_range_ok(paddr_t addr, paddr_size_t size)
 
 	if (end < addr)
 		return false;
-	for (unsigned int i = 0; i < ARRAY_SIZE(mmode_regions); i++)
-		if (end > mmode_regions[i].base &&
-		    addr < mmode_regions[i].base + mmode_regions[i].size)
+	for (unsigned int i = 0; i < nr_memregions; i++)
+		if (memregions[i].kind != MEMREGION_SHARED_RW &&
+		    end > memregions[i].base &&
+		    addr < memregions[i].base + memregions[i].size)
 			return false;
 	return true;
 }
@@ -175,8 +224,41 @@ static void stateen_init(void)
 #endif
 }
 
-static void pmp_init(void)
+/*
+ * PMP layout. The first matching entry decides:
+ *
+ *   0, 1     Smepmp only: the window M-mode opens on S-mode memory
+ *   ...      the memory regions, a NAPOT entry or an OFF + TOR pair each
+ *   last     everything else: S/U-mode RWX
+ *
+ * Without Smepmp an M-mode region is an entry without permissions: S/U-mode
+ * is kept out and M-mode is not bound by it. With Smepmp (mseccfg.MML)
+ * M-mode is confined as well: its regions are locked rules (R-X for the
+ * monitor's code and constants, RW otherwise, so the monitor is W^X), the
+ * devices it shares with S-mode are shared rules, and with MMWP anything
+ * else is out of its reach, S-mode memory included.
+ */
+#define SMEPMP_WINDOW_ENTRIES 2
+
+static unsigned int region_cfg(enum memregion_kind kind)
 {
+	if (!hart_has(HART_FEAT_SMEPMP))
+		return 0;
+	switch (kind) {
+	case MEMREGION_MMODE_RX:
+		return PMP_L | PMP_R | PMP_X;
+	case MEMREGION_MMODE_RW:
+		return PMP_L | PMP_R | PMP_W;
+	default:
+		/* MML: L=0, RWX=011 is "read-write for M-mode and S/U-mode". */
+		return PMP_W | PMP_X;
+	}
+}
+
+void pmp_hart_init(void)
+{
+	unsigned int idx = 0;
+
 	if (!hart_has(HART_FEAT_PMP)) {
 		pr_warn("hart %lu: no PMP, firmware memory is not protected\n",
 			this_hartid());
@@ -184,15 +266,75 @@ static void pmp_init(void)
 	}
 
 	/*
-	 * The first entries hide M-mode memory, the one after opens the rest.
+	 * A hart that is started again already lives by these rules, and
+	 * rewriting the one it executes from would pull it away under its feet.
 	 */
-	for (unsigned int i = 0; i < ARRAY_SIZE(mmode_regions); i++)
-		if (pmp_set_napot(i, mmode_regions[i].base,
-				  mmode_regions[i].size, 0))
-			panic("M-mode region %lx+%lx is not a NAPOT range\n",
-			      mmode_regions[i].base, mmode_regions[i].size);
-	pmp_set_all(ARRAY_SIZE(mmode_regions), PMP_R | PMP_W | PMP_X);
+	if (hart_has(HART_FEAT_SMEPMP) && (csr_read(CSR_MSECCFG) & MSECCFG_MML))
+		return;
+
+	if (hart_has(HART_FEAT_SMEPMP)) {
+		/*
+		 * Rule locking bypass, and it stays on: the window on S-mode
+		 * memory is a shared-region rule written at run time, which
+		 * implementations (QEMU) only take under MML with RLB set.
+		 * It can only be set while no rule is locked.
+		 */
+		csr_set(CSR_MSECCFG, MSECCFG_RLB);
+		pmp_entry_set(0, 0, 0);
+		pmp_entry_set(1, 0, 0);
+		idx = SMEPMP_WINDOW_ENTRIES;
+	}
+	/*
+	 * Two passes around the switch to MML: a locked rule with execute
+	 * permission can only be written before it, and the shared-region
+	 * encoding (W without R) only means something after it.
+	 */
+	for (int shared = 0; shared <= 1; shared++) {
+		unsigned int at = idx;
+
+		for (unsigned int i = 0; i < nr_memregions; i++) {
+			const struct memregion *r = &memregions[i];
+			bool is_shared = r->kind == MEMREGION_SHARED_RW;
+			bool napot = r->size >= 8 && IS_POWER_OF_TWO(r->size) &&
+				     IS_ALIGNED(r->base, r->size);
+
+			if (r->kind == MEMREGION_SHARED_RW &&
+			    !hart_has(HART_FEAT_SMEPMP))
+				continue;
+			if (at + 3 > CONFIG_RISCV_PMP_COUNT)
+				panic("out of PMP entries at region %lx+%lx\n",
+				      r->base, r->size);
+			if (is_shared == shared)
+				pmp_range_set(at, r->base, r->size,
+					      region_cfg(r->kind));
+			at += napot ? 1 : 2;
+		}
+		if (!shared) {
+			/* Sticky until reset. */
+			if (hart_has(HART_FEAT_SMEPMP))
+				csr_set(CSR_MSECCFG,
+					MSECCFG_MML | MSECCFG_MMWP);
+			continue;
+		}
+		pmp_all_set(at, PMP_R | PMP_W | PMP_X);
+	}
 	__asm__ __volatile__("sfence.vma" ::: "memory");
+}
+
+void *smode_access_begin(paddr_t addr, paddr_size_t size)
+{
+	if (hart_has(HART_FEAT_SMEPMP) && size) {
+		pmp_entry_set(0, addr >> 2, 0);
+		pmp_entry_set(1, (addr + size + 3) >> 2,
+			      PMP_A_TOR | PMP_W | PMP_X);
+	}
+	return (void *)addr;
+}
+
+void smode_access_end(void)
+{
+	if (hart_has(HART_FEAT_SMEPMP))
+		pmp_entry_cfg(1, 0);
 }
 
 void hart_runtime_init(void)
@@ -228,7 +370,7 @@ void hart_runtime_init(void)
 
 	envcfg_init();
 	stateen_init();
-	pmp_init();
+	pmp_hart_init();
 	pmu_hart_init();
 	fwft_hart_init();
 	sse_hart_init();

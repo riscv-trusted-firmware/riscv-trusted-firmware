@@ -15,6 +15,7 @@
 #include <fdt_util.h>
 #include <irqchip.h>
 #include <log.h>
+#include <memregion.h>
 
 #include "irqchip_internal.h"
 
@@ -39,6 +40,7 @@ static void imsic_hart_init(void)
 
 static int imsic_probe(const void *fdt)
 {
+	uint64_t base = 0, size = 0;
 	int node = -1;
 
 	while (fdt) {
@@ -48,6 +50,9 @@ static int imsic_probe(const void *fdt)
 		if (!fdt_node_enabled(fdt, node) ||
 		    !irqchip_is_mlevel(fdt, node))
 			continue;
+		for (int i = 0; !fdt_reg(fdt, node, i, &base, &size); i++)
+			memregion_add((unsigned long)base, (unsigned long)size,
+				      MEMREGION_MMODE_RW);
 		irqchip_set_hart_init(imsic_hart_init);
 		pr_info("imsic: machine-level interrupt files left off\n");
 		break;
