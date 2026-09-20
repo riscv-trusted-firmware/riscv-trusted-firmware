@@ -5,6 +5,7 @@
 # What an image needs to host a lower privilege level: per-hart state, the
 # trap policy, PMP, hart state management, remote fences. Listed by the
 # image (images/monitor/image.mk), not pulled in by arch/riscv/sub.mk.
+srcs-$(CONFIG_SBI_DBTR) += dbtr.c
 srcs-y += fwft.c
 srcs-y += hart.c
 srcs-y += hsm.c

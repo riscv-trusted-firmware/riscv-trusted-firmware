@@ -120,6 +120,11 @@
 #define CSR_MENVCFGH 0x31a
 #define CSR_MSTATUSH 0x310
 #define CSR_HSTATUS 0x600
+#define CSR_TSELECT 0x7a0
+#define CSR_TDATA1 0x7a1
+#define CSR_TDATA2 0x7a2
+#define CSR_TDATA3 0x7a3
+#define CSR_TINFO 0x7a4
 #define CSR_HTVAL 0x643
 #define CSR_HTINST 0x64a
 #define CSR_MTINST 0x34a

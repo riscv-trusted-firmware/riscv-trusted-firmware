@@ -30,6 +30,19 @@ config SBI_SSE
 	  Events injected into S-mode ahead of anything S-mode can mask.
 	  Sources so far: the software injected local and global events.
 
+config SBI_DBTR
+	bool "Debug triggers extension (DBTR)"
+	default y
+	help
+	  Hardware breakpoints and watchpoints for S-mode, on harts with the
+	  Sdtrig extension: address / data match triggers.
+
+config SBI_DBTR_MAX_TRIGGERS
+	int "Most triggers per hart the monitor manages"
+	depends on SBI_DBTR
+	range 1 64
+	default 16
+
 config SBI_SUSP
 	bool "System suspend extension (SUSP)"
 	help

@@ -17,12 +17,13 @@ and what is still missing.
 | SUSP      | `SUSP` | suspend to RAM as an M-mode wait with all other harts stopped (`CONFIG_SBI_SUSP`, on for QEMU virt) |
 | FWFT      | `FWFT` | misaligned exception delegation; landing pad, shadow stack, double trap, PTE A/D updating and pointer masking where the hart has them; lock flag |
 | SSE       | `SSE`  | all ten functions; sources: the software injected local and global events |
+| DBTR      | `DBTR` | all eight functions, on harts with Sdtrig; address / data match triggers (mcontrol, mcontrol6), chains included |
 | MPXY      | `MPXY` | all eight functions; channels carry RPMI service groups (see below); no MSI / SSE indication, notifications are polled |
 | PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart, `event_get_info`; no snapshot shared memory |
 | DBCN      | `DBCN` | write, read, write_byte (`CONFIG_SBI_DBCN`) |
 | Legacy    | `0x00`-`0x08` | all v0.1 calls (`CONFIG_SBI_LEGACY`) |
 
-Not implemented yet: DBTR, and CPPC (it needs a platform backend,
+Not implemented yet: CPPC (it needs a platform backend,
 which RPMI can now provide). They probe as absent. NACL and
 STA are interfaces a hypervisor offers its guests, not M-mode firmware.
 
@@ -48,6 +49,7 @@ arch/riscv/runtime/       hart.c    per-hart state, feature probing, S-mode entr
                           pmu.c     hardware and firmware counters
                           fwft.c    firmware features (medeleg / menvcfg controls)
                           sse.c     supervisor software events
+                          dbtr.c    debug triggers (Sdtrig)
 services/mpxy/            MPXY core (shared memory, channels, attributes)
                           and the RPMI message protocol for channels
 drivers/rpmi/             RPMI client + shared memory transport
@@ -148,6 +150,18 @@ source adds its id and calls the injection path. Today those are the
 software injected local and global events. The standard events without a
 source here (RAS, double trap, PMU overflow) are `SBI_ERR_NOT_SUPPORTED`,
 reserved ids `SBI_ERR_INVALID_PARAM`.
+
+### Debug triggers
+
+The Sdtrig CSRs are M-mode only; DBTR programs them on S-mode's behalf.
+Each hart finds its triggers when it is started (tselect, tinfo). A trigger
+index is the hardware trigger's index, so a chain gets contiguous indices
+by getting contiguous hardware triggers. Configurations must have dmode and
+m clear, and are taken all or nothing: validated and placed first, then
+programmed, with a read-back that turns a WARL refusal into
+`SBI_ERR_NOT_SUPPORTED`. "Off" is the trigger's type with nothing else set,
+since tdata1 may refuse to read as zero (QEMU). A trigger that fires is a
+breakpoint exception, which is delegated: the monitor is not involved.
 
 ### Firmware features
 
@@ -251,8 +265,8 @@ with `IMAGE_SBITEST` disabled.
 
 ## Gaps
 
-1. **DBTR**; SSE event sources (PMU overflow, double trap, RAS); PMU
-   counter snapshots.
+1. SSE event sources (PMU overflow, double trap, RAS); PMU counter
+   snapshots; DBTR trigger types other than address / data match.
 2. **RPMI consumers in M-mode**: system reset, system suspend, HSM and
    CPPC backends over RPMI; service groups implemented by the firmware
    itself behind the same MPXY channels; MSI / SSE indication of

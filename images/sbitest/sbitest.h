@@ -76,6 +76,23 @@ extern uint32_t puc_notifications_enabled;
 void puc_init(void);
 void puc_poll(void);
 
+/*
+ * Expected traps: while trap_expected is set the trap handler records an
+ * exception and skips the instruction, which must be 4 bytes long.
+ */
+extern bool trap_expected;
+extern unsigned long trap_cause, trap_tval, trap_count;
+
+#define PROBE_INSN(insn, ...)                                             \
+	({                                                                \
+		__asm__ __volatile__(".option push\n.option norvc\n" insn \
+				     "\n.option pop" __VA_ARGS__);        \
+	})
+
+/* dbtr.c */
+void test_dbtr(void);
+void dbtr_target(void);
+
 /* sse.c */
 void test_sse(unsigned long self);
 void test_sse_remote(unsigned long other);

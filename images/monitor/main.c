@@ -50,6 +50,7 @@ static void print_features(void)
 		[HART_FEAT_SSTC] = "sstc",
 		[HART_FEAT_SSCOFPMF] = "sscofpmf",
 		[HART_FEAT_SMSTATEEN] = "smstateen",
+		[HART_FEAT_SDTRIG] = "sdtrig",
 		[HART_FEAT_H] = "h",
 	};
 

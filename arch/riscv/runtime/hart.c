@@ -9,6 +9,7 @@
  */
 
 #include <arch/hart.h>
+#include <arch/dbtr.h>
 #include <arch/fwft.h>
 #include <arch/pmp.h>
 #include <arch/pmu.h>
@@ -97,6 +98,7 @@ void hart_detect_features(void)
 	if (features[HART_FEAT_MENVCFG] && csr_probe(CSR_STIMECMP, &val))
 		features[HART_FEAT_SSTC] = true;
 #endif
+	features[HART_FEAT_SDTRIG] = csr_probe(CSR_TSELECT, &val);
 #ifdef CONFIG_RISCV_EXT_SMSTATEEN
 	features[HART_FEAT_SMSTATEEN] = csr_probe(CSR_MSTATEEN0, &val);
 #endif
@@ -230,6 +232,7 @@ void hart_runtime_init(void)
 	pmu_hart_init();
 	fwft_hart_init();
 	sse_hart_init();
+	dbtr_hart_init();
 	irqchip_hart_init();
 	mpxy_hart_init();
 

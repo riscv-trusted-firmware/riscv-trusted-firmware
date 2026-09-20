@@ -165,3 +165,16 @@ _sse_entry:
 	ecall
 	/* Not reached: completion resumes the interrupted code. */
 1:	j	1b
+
+	/*
+	 * Breakpoint target of the debug trigger tests: a 4-byte first
+	 * instruction.
+	 */
+	.globl dbtr_target
+	.balign	4
+dbtr_target:
+.option push
+.option norvc
+	nop
+.option pop
+	ret

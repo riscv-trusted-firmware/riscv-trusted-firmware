@@ -11,6 +11,7 @@ srcs-$(CONFIG_SBI) += srst.c
 srcs-$(CONFIG_SBI) += fwft.c
 srcs-$(CONFIG_SBI_SUSP) += susp.c
 srcs-$(CONFIG_SBI_SSE) += sse.c
+srcs-$(CONFIG_SBI_DBTR) += dbtr.c
 srcs-$(CONFIG_MPXY) += mpxy.c
 srcs-$(CONFIG_SBI_PMU) += pmu.c
 srcs-$(CONFIG_SBI_DBCN) += dbcn.c

@@ -37,16 +37,6 @@
 
 unsigned int checks, failures;
 
-void check_ret(const char *func, int line, long error, long expected)
-{
-	checks++;
-	if (error != expected) {
-		failures++;
-		printf("  FAIL %s:%d: error %ld, expected %ld\n", func, line,
-		       error, expected);
-	}
-}
-
 uint64_t now(void)
 {
 #if __RISCV_XLEN__ == 32
@@ -83,9 +73,19 @@ static long hart_status(unsigned long hartid)
 /* ---- trap handling ---------------------------------------------------- */
 
 static unsigned long boot_hartid;
-static bool trap_expected;
-static unsigned long trap_cause, trap_tval, trap_count;
+bool trap_expected;
+unsigned long trap_cause, trap_tval, trap_count;
 static unsigned long timer_irqs, soft_irqs;
+
+void check_ret(const char *func, int line, long error, long expected)
+{
+	checks++;
+	if (error != expected) {
+		failures++;
+		printf("  FAIL %s:%d: error %ld, expected %ld\n", func, line,
+		       error, expected);
+	}
+}
 
 unsigned long strap_handler(unsigned long scause, unsigned long sepc,
 			    unsigned long stval)
@@ -119,12 +119,6 @@ unsigned long strap_handler(unsigned long scause, unsigned long sepc,
 	for (;;)
 		;
 }
-
-#define PROBE_INSN(insn, ...)                                             \
-	({                                                                \
-		__asm__ __volatile__(".option push\n.option norvc\n" insn \
-				     "\n.option pop" __VA_ARGS__);        \
-	})
 
 /* ---- mailbox ---------------------------------------------------------- */
 
@@ -1188,6 +1182,7 @@ void test_main(unsigned long hartid, unsigned long fdt)
 	test_pmu();
 	test_fwft();
 	test_sse(hartid);
+	test_dbtr();
 	test_smp();
 	test_susp();
 	test_finish();
