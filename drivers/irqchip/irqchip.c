@@ -50,11 +50,12 @@ static int disable_mlevel(void *fdt, const char *compatible)
 	return 0;
 }
 
-bool irqchip_is_plic(const void *fdt, int node)
-{
-	return !fdt_node_check_compatible(fdt, node, "sifive,plic-1.0.0") ||
-	       !fdt_node_check_compatible(fdt, node, "riscv,plic0");
-}
+const char *const irqchip_plic_compatible[] = {
+	"sifive,plic-1.0.0",
+	"riscv,plic0",
+	"thead,c900-plic",
+	NULL,
+};
 
 /*
  * PLIC contexts of M-mode: marked invalid rather than removed, the index
@@ -68,7 +69,8 @@ static int plic_invalidate_mlevel(void *fdt)
 	     node = fdt_next_node(fdt, node, NULL)) {
 		fdt32_t *ext = NULL;
 
-		if (!irqchip_is_plic(fdt, node))
+		if (!fdt_node_compatible_any(fdt, node,
+					     irqchip_plic_compatible))
 			continue;
 		ext = fdt_getprop_w(fdt, node, "interrupts-extended", &len);
 		for (int i = 0; ext && i + 1 < len / 4; i += 2)

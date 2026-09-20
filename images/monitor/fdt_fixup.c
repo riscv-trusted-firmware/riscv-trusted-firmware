@@ -15,15 +15,19 @@
  */
 
 #include <arch/hart.h>
+#include <driver.h>
+#include <fdt_util.h>
 #include <irqchip.h>
 #include <libfdt.h>
 #include <log.h>
+#include <memregion.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "fdt_fixup.h"
 
-/* Room for the nodes added below, with some to spare. */
-#define FDT_FIXUP_ROOM 512
+/* Room for what the platform and the fix-up add, with some to spare. */
+#define FDT_ROOM 4096
 
 static int cells_of(const void *fdt, int node, const char *prop, int dflt)
 {
@@ -81,39 +85,91 @@ static int reserve(void *fdt, const char *what, uint64_t base, uint64_t size)
 	return rc;
 }
 
-unsigned long fdt_fixup(unsigned long fdt)
+unsigned long fdt_prepare(unsigned long fdt)
 {
 	unsigned long dst = CONFIG_MONITOR_FDT_ADDR ? CONFIG_MONITOR_FDT_ADDR :
 						      fdt;
 	unsigned long size = 0;
 	int rc = 0;
 
-	if (!fdt || fdt_check_header((void *)fdt)) {
+	if (!fdt_valid((const void *)fdt)) {
 		pr_warn("fdt: no valid device tree at %lx\n", fdt);
-		return fdt;
+		return 0;
 	}
 
 	/* The tree grows in place unless the configuration gives it a home. */
-	size = fdt_totalsize((void *)fdt) + FDT_FIXUP_ROOM;
+	size = fdt_totalsize((void *)fdt) + FDT_ROOM;
 	if (!smode_range_ok(dst, size)) {
 		pr_warn("fdt: %lx+%lx overlaps the monitor\n", dst, size);
-		return fdt;
+		return 0;
 	}
 	rc = fdt_open_into((void *)fdt, (void *)dst, (int)size);
-	if (!rc)
-		rc = reserve((void *)dst, "monitor", CONFIG_MONITOR_LOAD_ADDR,
-			     CONFIG_MONITOR_SIZE);
-#ifdef CONFIG_RPMI_SHMEM_IN_RAM
-	if (!rc)
-		rc = reserve((void *)dst, "rpmi-shmem", CONFIG_RPMI_SHMEM_BASE,
-			     4 * CONFIG_RPMI_SHMEM_QUEUE_SIZE);
-#endif
-	if (!rc)
-		rc = irqchip_fdt_fixup((void *)dst);
 	if (rc) {
-		pr_warn("fdt: fix-up failed: %s\n", fdt_strerror(rc));
-		return fdt;
+		pr_warn("fdt: cannot make room: %s\n", fdt_strerror(rc));
+		return 0;
 	}
-	fdt_pack((void *)dst);
 	return dst;
+}
+
+/* The harts the monitor does not manage are not the next stage's either. */
+static int disable_unmanaged_harts(void *fdt)
+{
+	int cpus = fdt_path_offset(fdt, "/cpus"), cpu = 0, rc = 0;
+	uint64_t hartid = 0;
+
+	if (cpus < 0)
+		return 0;
+	fdt_for_each_subnode(cpu, fdt, cpus) {
+		const char *type = fdt_getprop(fdt, cpu, "device_type", NULL);
+
+		if (!type || strcmp(type, "cpu") ||
+		    fdt_reg(fdt, cpu, 0, &hartid, NULL) ||
+		    hart_valid((unsigned long)hartid))
+			continue;
+		rc = fdt_node_disable(fdt, cpu);
+		if (rc)
+			return rc;
+	}
+	return 0;
+}
+
+/*
+ * Machine-only and shared regions that lie in RAM: an OS would allocate them.
+ */
+static int reserve_memregions(void *fdt)
+{
+	unsigned long base = 0, size = 0;
+	enum memregion_kind kind = 0;
+	int rc = 0;
+
+	for (unsigned int i = 0; memregion_get(i, &base, &size, &kind); i++) {
+		/* The image is reserved as a whole, W^X split or not. */
+		if (base >= CONFIG_MONITOR_LOAD_ADDR &&
+		    base < CONFIG_MONITOR_LOAD_ADDR + CONFIG_MONITOR_SIZE)
+			continue;
+		if (!fdt_range_is_memory(fdt, base, size))
+			continue;
+		rc = reserve(fdt, "monitor-shmem", base, size);
+		if (rc)
+			return rc;
+	}
+	return 0;
+}
+
+void fdt_fixup(void *fdt)
+{
+	int rc = reserve(fdt, "monitor", CONFIG_MONITOR_LOAD_ADDR,
+			 CONFIG_MONITOR_SIZE);
+
+	if (!rc)
+		rc = reserve_memregions(fdt);
+	if (!rc)
+		rc = irqchip_fdt_fixup(fdt);
+	if (!rc)
+		rc = drivers_fdt_fixup(fdt);
+	if (!rc)
+		rc = disable_unmanaged_harts(fdt);
+	if (rc)
+		pr_warn("fdt: fix-up failed: %s\n", fdt_strerror(rc));
+	fdt_pack(fdt);
 }

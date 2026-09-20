@@ -157,19 +157,34 @@ platform/<vendor>/<board>/
   include/       platform headers (on the include path)
 ```
 
-`plat.c` implements `include/platform.h`: `plat_early_init()` (console) and
-`plat_init()`.
+`plat.c` implements `include/platform.h`: `plat_early_init(fdt)` (console),
+`plat_fdt_prepare(fdt)` (complete the device tree, if need be) and
+`plat_init()`. With a previous stage that describes the machine there is
+little else: the drivers take it from the tree.
 
 ## Drivers and services
 
 A driver is a `DRIVER_DEFINE()` descriptor in the `.driver_table` linker
-set, probed by `drivers_init()` with the previous stage's device tree. A service is a `SERVICE_DEFINE()`
+set. It names the device tree nodes it handles by their `compatible` strings
+and `drivers_init()` probes it once for every enabled node that matches, in
+two stages so that a driver finds what it depends on (an RPMI transport
+before the users of its mailbox). What a driver needs, register addresses,
+geometry, which hart sits at which index of a per-hart register array, it
+reads from its node with the helpers of `include/fdt_util.h`. A driver with
+`probe_without_node` also has a Kconfig configuration to fall back on when
+the tree has nothing for it; one marked `mmode_only` gets its nodes disabled
+in the device tree of the next stage. The console is the exception: it is
+needed first, so the platform's `plat_early_init(fdt)` brings up the UART
+that `/chosen/stdout-path` names. A platform whose previous stage leaves
+things out of the tree completes it in `plat_fdt_prepare()`, before the
+drivers look.
+
+A service is a `SERVICE_DEFINE()`
 descriptor in `.service_table` owning an ecall EID range; `service_ecall()`
 routes S-mode ecalls (SBI convention: a7 = EID, a6 = FID) to it; an optional
 `probe` hook tells whether the service is usable on this platform. Timer,
 IPI and reset drivers register an ops structure with the core of their
-class (`include/timer.h`, `ipi.h`, `reset.h`). Device tree matching for
-drivers is the next layer (libfdt goes under `lib/`). The SBI implementation
+class (`include/timer.h`, `ipi.h`, `reset.h`, ...). The SBI implementation
 is described in [sbi.md](sbi.md).
 
 ## Toolchains

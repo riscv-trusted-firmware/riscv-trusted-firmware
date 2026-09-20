@@ -100,30 +100,27 @@ static unsigned int imsic_map_files(const void *fdt, int node)
 	return mapped;
 }
 
-static int imsic_probe(const void *fdt)
+static int imsic_probe(const void *fdt, int node)
 {
 	unsigned long val = 0;
-	int node = -1;
 
-	/* No Smaia on the boot hart, no interrupt files to talk to. */
-	if (!fdt || !csr_probe(CSR_MISELECT, &val))
+	/* The supervisor-level files are the next stage's. */
+	if (node < 0 || !irqchip_is_mlevel(fdt, node))
 		return 0;
-
-	while ((node = fdt_node_offset_by_compatible(fdt, node,
-						     "riscv,imsics")) >= 0) {
-		if (!fdt_node_enabled(fdt, node) ||
-		    !irqchip_is_mlevel(fdt, node))
-			continue;
-		if (imsic_map_files(fdt, node)) {
-			ipi_register(&imsic_ipi_ops);
-			pr_dbg("imsic: machine-level files carry the IPIs\n");
-		}
-		break;
+	/* No Smaia on the boot hart, no interrupt files to talk to. */
+	if (!csr_probe(CSR_MISELECT, &val))
+		return -1;
+	if (imsic_map_files(fdt, node)) {
+		ipi_register(&imsic_ipi_ops);
+		pr_dbg("imsic: machine-level files carry the IPIs\n");
 	}
 	return 0;
 }
 
+static const char *const imsic_compatible[] = { "riscv,imsics", NULL };
+
 DRIVER_DEFINE(imsic) = {
 	.name = "imsic",
+	.compatible = imsic_compatible,
 	.probe = imsic_probe,
 };

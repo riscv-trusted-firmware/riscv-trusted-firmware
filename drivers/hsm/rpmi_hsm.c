@@ -22,6 +22,9 @@
 #include <sbi/sbi.h>
 #include <util.h>
 
+/* The PuC behind the node's "mboxes"; NULL until a node was probed. */
+static struct rpmi_context *puc;
+
 /* Nobody there, or nobody who does hart power (no transport, no HSM group). */
 static bool silent(int rc)
 {
@@ -35,8 +38,8 @@ static long rpmi_hsm_hart_start(unsigned long hartid)
 	uint32_t req[3] = { (uint32_t)hartid, (uint32_t)entry,
 			    high32_from_64(entry) };
 	uint32_t resp[1] = {};
-	int rc =
-		rpmi_call(RPMI_GROUP_HSM, RPMI_HSM_HART_START, req, 3, resp, 1);
+	int rc = rpmi_call(puc, RPMI_GROUP_HSM, RPMI_HSM_HART_START, req, 3,
+			   resp, 1);
 
 	/* A hart the PuC finds running already is what we want, too. */
 	if (!rc || rc == RPMI_ERR_ALREADY || silent(rc))
@@ -48,8 +51,8 @@ static long rpmi_hsm_hart_start(unsigned long hartid)
 static void rpmi_hsm_hart_stop(unsigned long hartid)
 {
 	uint32_t req = (uint32_t)hartid, resp[1] = {};
-	int rc =
-		rpmi_call(RPMI_GROUP_HSM, RPMI_HSM_HART_STOP, &req, 1, resp, 1);
+	int rc = rpmi_call(puc, RPMI_GROUP_HSM, RPMI_HSM_HART_STOP, &req, 1,
+			   resp, 1);
 
 	if (rc && !silent(rc))
 		pr_warn("rpmi-hsm: hart %lu stop refused (%d)\n", hartid, rc);
@@ -61,13 +64,30 @@ static const struct hsm_ops rpmi_hsm_ops = {
 	.hart_stop = rpmi_hsm_hart_stop,
 };
 
-static int rpmi_hsm_probe(const void *fdt)
+static int rpmi_hsm_probe(const void *fdt, int node)
 {
+	uint16_t group = 0;
+
+	/*
+	 * "mboxes = <&transport group>": which PuC, and a check on the group.
+	 */
+	if (node < 0 || puc)
+		return 0;
+	if (rpmi_client_from_fdt(fdt, node, &puc, &group) ||
+	    group != RPMI_GROUP_HSM) {
+		puc = NULL;
+		return -1;
+	}
 	hsm_register(&rpmi_hsm_ops);
 	return 0;
 }
 
+static const char *const rpmi_hsm_compatible[] = { "riscv,rpmi-hsm", NULL };
+
 DRIVER_DEFINE(rpmi_hsm) = {
 	.name = "rpmi-hsm",
+	.compatible = rpmi_hsm_compatible,
+	.stage = DRIVER_STAGE_LATE,
+	.mmode_only = true,
 	.probe = rpmi_hsm_probe,
 };

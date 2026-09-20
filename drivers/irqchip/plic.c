@@ -36,31 +36,25 @@ static void plic_init(vaddr_t base, uint32_t sources, unsigned int contexts)
 	}
 }
 
-static int plic_probe(const void *fdt)
+static int plic_probe(const void *fdt, int node)
 {
-	int node = 0, len = 0;
+	uint32_t sources = 0;
 	uint64_t base = 0;
+	int len = 0;
 
-	if (!fdt)
-		return 0;
-	for (node = fdt_next_node(fdt, -1, NULL); node >= 0;
-	     node = fdt_next_node(fdt, node, NULL)) {
-		uint32_t sources = fdt_prop_u32(fdt, node, "riscv,ndev", 0);
-
-		if (!irqchip_is_plic(fdt, node) ||
-		    !fdt_node_enabled(fdt, node) ||
-		    fdt_reg(fdt, node, 0, &base, NULL) ||
-		    !fdt_getprop(fdt, node, "interrupts-extended", &len))
-			continue;
-		/* One context per (hart, interrupt) pair. */
-		plic_init((uintptr_t)base, sources, (unsigned int)len / 8);
-		pr_info("plic: %lx, %u sources, %d contexts\n",
-			(unsigned long)base, sources, len / 8);
-	}
+	if (node < 0 || fdt_reg(fdt, node, 0, &base, NULL) ||
+	    !fdt_getprop(fdt, node, "interrupts-extended", &len))
+		return -1;
+	sources = fdt_prop_u32(fdt, node, "riscv,ndev", 0);
+	/* One context per (hart, interrupt) pair. */
+	plic_init((vaddr_t)base, sources, (unsigned int)len / 8);
+	pr_info("plic: %lx, %u sources, %d contexts\n", (unsigned long)base,
+		sources, len / 8);
 	return 0;
 }
 
 DRIVER_DEFINE(plic) = {
 	.name = "plic",
+	.compatible = irqchip_plic_compatible,
 	.probe = plic_probe,
 };

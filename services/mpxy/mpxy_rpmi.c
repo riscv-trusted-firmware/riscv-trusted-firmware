@@ -9,11 +9,15 @@
  * message_id = SERVICE_ID, message data = RPMI request / acknowledgment
  * data, notification events as the PuC packed them.
  *
+ * Channels are "riscv,rpmi-mpxy-*" nodes of the device tree.
+ *
  * What the PuC says about itself and the group (versions, implementation
  * id) is asked on first use rather than at boot, when the PuC may not be
  * up yet, and then cached.
  */
 
+#include <driver.h>
+#include <fdt_util.h>
 #include <mpxy.h>
 #include <rpmi.h>
 #include <sbi/sbi.h>
@@ -29,6 +33,7 @@
 
 struct mpxy_rpmi {
 	struct mpxy_channel ch;
+	struct rpmi_context *puc;
 	uint16_t group;
 	bool probed;
 	uint32_t group_version, impl_id, impl_version;
@@ -66,7 +71,7 @@ static long rpmi_to_sbi(int rc)
 	}
 }
 
-static long mpxy_rpmi_probe(struct mpxy_rpmi *r)
+static long mpxy_rpmi_ask_puc(struct mpxy_rpmi *r)
 {
 	uint32_t spec = 0, version = 0, impl_id = 0, impl_version = 0;
 	int rc = 0;
@@ -74,15 +79,16 @@ static long mpxy_rpmi_probe(struct mpxy_rpmi *r)
 	if (r->probed)
 		return SBI_SUCCESS;
 
-	rc = rpmi_base_get(RPMI_BASE_GET_SPEC_VERSION, &spec);
+	rc = rpmi_base_get(r->puc, RPMI_BASE_GET_SPEC_VERSION, &spec);
 	if (!rc)
-		rc = rpmi_probe_group(r->group, &version);
+		rc = rpmi_probe_group(r->puc, r->group, &version);
 	if (!rc && !version)
 		rc = RPMI_ERR_NOT_SUPPORTED;
 	if (!rc)
-		rc = rpmi_base_get(RPMI_BASE_GET_IMPL_ID, &impl_id);
+		rc = rpmi_base_get(r->puc, RPMI_BASE_GET_IMPL_ID, &impl_id);
 	if (!rc)
-		rc = rpmi_base_get(RPMI_BASE_GET_IMPL_VERSION, &impl_version);
+		rc = rpmi_base_get(r->puc, RPMI_BASE_GET_IMPL_VERSION,
+				   &impl_version);
 	if (rc)
 		return rpmi_to_sbi(rc);
 
@@ -108,7 +114,7 @@ static long mpxy_rpmi_read_attr(struct mpxy_channel *ch, uint32_t id,
 		return SBI_SUCCESS;
 	}
 
-	rc = mpxy_rpmi_probe(r);
+	rc = mpxy_rpmi_ask_puc(r);
 	if (rc)
 		return rc;
 	*val = id == MPXY_RPMI_ATTR_SERVICEGROUP_VERSION ? r->group_version :
@@ -130,16 +136,16 @@ static long mpxy_rpmi_send(struct mpxy_channel *ch, uint32_t msg_id, void *buf,
 		return SBI_ERR_NOT_SUPPORTED;
 	if (!IS_ALIGNED(len, 4))
 		return SBI_ERR_INVALID_PARAM;
-	rc = mpxy_rpmi_probe(r);
+	rc = mpxy_rpmi_ask_puc(r);
 	if (rc)
 		return rc;
 
 	if (!resp_len)
-		return rpmi_to_sbi(rpmi_post(r->group, (uint8_t)msg_id, buf,
-					     len));
+		return rpmi_to_sbi(rpmi_post(r->puc, r->group, (uint8_t)msg_id,
+					     buf, len));
 
-	rc = rpmi_to_sbi(rpmi_request(r->group, (uint8_t)msg_id, buf, len, buf,
-				      resp_max, &got));
+	rc = rpmi_to_sbi(rpmi_request(r->puc, r->group, (uint8_t)msg_id, buf,
+				      len, buf, resp_max, &got));
 	*resp_len = got;
 	return rc;
 }
@@ -175,7 +181,7 @@ static long mpxy_rpmi_get_events(struct mpxy_channel *ch, void *buf,
 	size_t bytes = 0;
 	uint32_t n = 0;
 
-	rpmi_poll();
+	rpmi_poll(r->puc);
 
 	spin_lock(&r->lock);
 	while (n < r->count) {
@@ -209,13 +215,12 @@ static const struct mpxy_channel_ops mpxy_rpmi_ops = {
 	.get_events = mpxy_rpmi_get_events,
 };
 
-long mpxy_rpmi_channel_add(uint32_t channel_id, uint16_t group)
+static long mpxy_rpmi_channel_add(struct rpmi_context *puc, uint32_t channel_id,
+				  uint16_t group)
 {
 	struct mpxy_rpmi *r = NULL;
 	long rc = 0;
 
-	if (!rpmi_available())
-		return SBI_ERR_NOT_SUPPORTED;
 	/* BASE and CPPC are never proxied; these are M-mode only groups. */
 	if (group == RPMI_GROUP_BASE || group == RPMI_GROUP_CPPC ||
 	    group == RPMI_GROUP_SYSTEM_RESET ||
@@ -225,12 +230,13 @@ long mpxy_rpmi_channel_add(uint32_t channel_id, uint16_t group)
 		return SBI_ERR_FAILED;
 
 	r = &pool[pool_used];
+	r->puc = puc;
 	r->group = group;
 	r->ch = (struct mpxy_channel){
 		.id = channel_id,
 		.msg_prot_id = MPXY_MSG_PROT_RPMI,
 		.msg_prot_version = RPMI_VERSION(1, 0),
-		.msg_data_max_len = rpmi_max_data_len(),
+		.msg_data_max_len = rpmi_max_data_len(puc),
 		.send_timeout_us = CONFIG_RPMI_TIMEOUT_US,
 		/* Send, then wait for the acknowledgment. */
 		.completion_timeout_us = 2 * CONFIG_RPMI_TIMEOUT_US,
@@ -243,9 +249,45 @@ long mpxy_rpmi_channel_add(uint32_t channel_id, uint16_t group)
 	rc = mpxy_channel_register(&r->ch);
 	if (rc)
 		return rc;
-	if (rpmi_event_sink_register(group, mpxy_rpmi_event_sink, r))
+	if (rpmi_event_sink_register(puc, group, mpxy_rpmi_event_sink, r))
 		r->ch.capability &= ~(uint32_t)(MPXY_CAP_GET_NOTIFICATIONS |
 						MPXY_CAP_EVENTS_STATE);
 	pool_used++;
 	return SBI_SUCCESS;
 }
+
+/*
+ * A channel node: "mboxes = <&transport service-group>" says where the
+ * messages go, "riscv,sbi-mpxy-channel-id" what S-mode calls the channel.
+ * The compatible names the service group for whoever reads the tree; the
+ * group that counts is the one in "mboxes".
+ */
+static int mpxy_rpmi_probe(const void *fdt, int node)
+{
+	struct rpmi_context *puc = NULL;
+	uint16_t group = 0;
+	int len = 0;
+	const fdt32_t *id = NULL;
+
+	if (node < 0)
+		return 0;
+	id = fdt_getprop(fdt, node, "riscv,sbi-mpxy-channel-id", &len);
+	if (!id || len < 4 || rpmi_client_from_fdt(fdt, node, &puc, &group))
+		return -1;
+	return (int)mpxy_rpmi_channel_add(puc, fdt32_to_cpu(*id), group);
+}
+
+static const char *const mpxy_rpmi_compatible[] = {
+	"riscv,rpmi-mpxy-clock",       "riscv,rpmi-mpxy-device-power",
+	"riscv,rpmi-mpxy-performance", "riscv,rpmi-mpxy-system-msi",
+	"riscv,rpmi-mpxy-voltage",     "riscv,rpmi-mpxy-mm",
+	"riscv,rpmi-mpxy-logging",     NULL,
+};
+
+DRIVER_DEFINE(mpxy_rpmi) = {
+	.name = "mpxy-rpmi",
+	.compatible = mpxy_rpmi_compatible,
+	.stage = DRIVER_STAGE_LATE,
+	.mmode_only = true,
+	.probe = mpxy_rpmi_probe,
+};

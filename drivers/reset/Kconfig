@@ -7,8 +7,14 @@ config RESET_SIFIVE_TEST
 	bool "SiFive test finisher (QEMU virt / sifive_u power-off and reboot)"
 
 config RESET_SIFIVE_TEST_ADDR
-	hex "Register address"
+	hex "Register address when the device tree has no node for it"
 	depends on RESET_SIFIVE_TEST
+
+config RESET_SYSCON
+	bool "Generic syscon-poweroff / syscon-reboot"
+	help
+	  A value written to a system controller register, as the device
+	  tree describes it.
 
 config RESET_RPMI
 	bool "RPMI SYSTEM_RESET service group"

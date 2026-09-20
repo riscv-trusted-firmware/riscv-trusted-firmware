@@ -171,6 +171,17 @@ void hart_detect_features(void)
 	monitor_regions_init();
 }
 
+bool memregion_get(unsigned int i, paddr_t *base, paddr_size_t *size,
+		   enum memregion_kind *kind)
+{
+	if (i >= nr_memregions)
+		return false;
+	*base = memregions[i].base;
+	*size = memregions[i].size;
+	*kind = memregions[i].kind;
+	return true;
+}
+
 bool smode_range_ok(paddr_t addr, paddr_size_t size)
 {
 	unsigned long end = addr + size;

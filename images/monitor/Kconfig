@@ -30,23 +30,14 @@ config MONITOR_NEXT_STAGE_ADDR
 	  is up to the platform (the previous stage, or the simulator). When
 	  the first word there is zero the monitor stays idle.
 
-config MONITOR_FDT_FIXUP
-	bool "Fix up the device tree for the next stage"
-	default y
-	select LIBFDT
-	help
-	  Add the monitor's memory to /reserved-memory (no-map) in the device
-	  tree received from the previous stage before passing it on. An
-	  operating system that is not told otherwise allocates that memory
-	  and faults on the PMP fence.
-
 config MONITOR_FDT_ADDR
-	hex "Address the fixed-up device tree is moved to (0: in place)"
+	hex "Address the device tree is moved to (0: in place)"
 	default 0x0
-	depends on MONITOR_FDT_FIXUP
 	help
-	  The fix-up makes the tree a little larger. In place, the memory
-	  right after it (a few hundred bytes) must be free; otherwise name
-	  an address the next stage leaves alone until it has read the tree.
+	  The monitor completes and fixes up the device tree it was given,
+	  which makes it larger: the monitor's memory becomes reserved,
+	  machine-level devices and unmanaged harts are disabled. In place,
+	  the memory right after the tree (4 KiB) must be free; otherwise
+	  name an address the next stage leaves alone until it has read it.
 
 endif

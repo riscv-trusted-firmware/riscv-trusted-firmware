@@ -25,8 +25,8 @@
 
 #ifdef CONFIG_QEMU_VIRT_RPMI
 
-#define SLOT_SIZE CONFIG_RPMI_SHMEM_SLOT_SIZE
-#define QUEUE_SIZE CONFIG_RPMI_SHMEM_QUEUE_SIZE
+#define SLOT_SIZE CONFIG_QEMU_VIRT_RPMI_SLOT_SIZE
+#define QUEUE_SIZE CONFIG_QEMU_VIRT_RPMI_QUEUE_SIZE
 #define MSG_SLOTS (QUEUE_SIZE / SLOT_SIZE - 2)
 #define MAX_DATA (SLOT_SIZE - RPMI_MSG_HDR_SIZE)
 
@@ -41,7 +41,7 @@ static uint32_t event_seq;
 
 static vaddr_t queue_slot(enum rpmi_queue q, unsigned int slot)
 {
-	return CONFIG_RPMI_SHMEM_BASE + (vaddr_t)q * QUEUE_SIZE +
+	return CONFIG_QEMU_VIRT_RPMI_SHMEM_BASE + (vaddr_t)q * QUEUE_SIZE +
 	       (vaddr_t)slot * SLOT_SIZE;
 }
 

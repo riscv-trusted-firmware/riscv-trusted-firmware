@@ -26,7 +26,7 @@ static void __noreturn jump_next(unsigned long hartid)
 
 void image_main(unsigned long hartid, unsigned long fdt)
 {
-	plat_early_init();
+	plat_early_init((const void *)fdt);
 	pr_info("\n%s loader %s: hart %lu -> %lx\n", PROJECT_NAME,
 		PROJECT_VERSION, hartid,
 		(unsigned long)CONFIG_LOADER_NEXT_STAGE_ADDR);

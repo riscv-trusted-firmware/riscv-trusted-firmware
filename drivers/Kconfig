@@ -2,6 +2,10 @@
 # Copyright (c) 2026, The RISC-V Trusted Firmware contributors
 
 #
+# Drivers find their devices in the device tree the previous stage passes
+# (include/driver.h); the addresses some of them have here are what they
+# fall back on without one.
+#
 # Drivers, one directory per class (serial, timer, irqchip, ipi, reset,
 # iopmp, ...). Each drivers/<class>/ has a Kconfig and a sub.mk and is
 # discovered automatically (drivers/sub.mk).

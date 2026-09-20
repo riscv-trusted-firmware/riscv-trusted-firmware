@@ -25,8 +25,8 @@ jobs:
       # its verdict ("sbitest: PASS").
       - name: Boot test
         run: MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
-      - name: Boot test, AIA interrupt controllers (APLIC + IMSIC)
-        run: MAKEARGS="QEMU_MACHINE=virt,aia=aplic-imsic ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+      - name: Boot test, other device tree (ACLINT nodes, APLIC + IMSIC)
+        run: MAKEARGS="QEMU_MACHINE=virt,aclint=on,aia=aplic-imsic ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
       - name: Boot test, Smepmp and Sscofpmf (M-mode confined; counter overflow events)
         run: |
           xlen=$(sed -n 's/^CONFIG_RISCV_XLEN=//p' build/.config)

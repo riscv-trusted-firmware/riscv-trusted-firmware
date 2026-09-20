@@ -19,8 +19,8 @@ config MPXY_RPMI
 	help
 	  One channel per RPMI service group the platform opens to S-mode
 	  (clock, voltage, device power, ...), forwarded to the platform
-	  microcontroller. The platform code says which, and under which
-	  channel ids: mpxy_rpmi_channel_add().
+	  microcontroller. The channels are the "riscv,rpmi-mpxy-*" nodes of
+	  the device tree.
 
 config MPXY_RPMI_MAX_CHANNELS
 	int "Maximum number of RPMI channels"

@@ -5,11 +5,29 @@
 
 #include <arch/hart.h>
 #include <arch/pmu.h>
+#include <fdt_util.h>
 #include <sbi/sbi.h>
 #include <timer.h>
 #include <util.h>
 
 static const struct timer_ops *timer;
+
+static uint64_t frequency = CONFIG_PLATFORM_TIMEBASE_FREQUENCY;
+
+void timer_frequency_from_fdt(const void *fdt)
+{
+	int cpus = fdt_path_offset(fdt, "/cpus");
+	uint32_t hz =
+		cpus < 0 ? 0 : fdt_prop_u32(fdt, cpus, "timebase-frequency", 0);
+
+	if (hz)
+		frequency = hz;
+}
+
+uint64_t timer_frequency(void)
+{
+	return frequency;
+}
 
 void timer_register(const struct timer_ops *ops)
 {

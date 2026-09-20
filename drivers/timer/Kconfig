@@ -5,6 +5,9 @@ menu "Timer"
 
 config TIMER_ACLINT_MTIMER
 	bool "RISC-V ACLINT MTIMER / SiFive CLINT timer"
+	help
+	  Found in the device tree ("riscv,aclint-mtimer", "riscv,clint0",
+	  "sifive,clint0"). The addresses below apply when no node matches.
 
 if TIMER_ACLINT_MTIMER
 

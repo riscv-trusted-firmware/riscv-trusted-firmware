@@ -58,24 +58,24 @@ config SBI_SUSP
 	default y
 
 config QEMU_VIRT_RPMI
-	bool "RPMI shared memory transport in RAM, for a PuC model"
+	bool "Describe an RPMI transport in RAM, for a PuC model"
 	default y if IMAGE_SBITEST
 	select RPMI
 	select RPMI_SHMEM
-	select RPMI_SHMEM_IN_RAM
 	select MPXY
 	select RESET_RPMI
 	select SUSPEND_RPMI
 	select HSM_RPMI
 	select CPPC_RPMI
 	help
-	  QEMU virt has no platform microcontroller. This sets 16 KiB of RAM
-	  aside as an RPMI shared memory transport and publishes MPXY
-	  channels for the clock and voltage service groups, and turns on the
-	  RPMI backends for reset, suspend, hart power and CPPC. The SBI test
-	  payload runs a PuC model on one hart to test all of that end to
-	  end; with no PuC listening the backends stand aside (after a
-	  timeout each time they are asked).
+	  QEMU virt has no platform microcontroller. With this the platform
+	  adds to the device tree what a platform with one would have there:
+	  an RPMI shared memory transport (16 KiB of RAM), MPXY channels for
+	  the clock and voltage service groups, and the RPMI users for reset,
+	  suspend, hart power and CPPC. The drivers then find all of it like
+	  on real hardware. The SBI test payload runs a PuC model on one hart
+	  to test it end to end; with no PuC listening the RPMI users stand
+	  aside (after a timeout each time they are asked).
 
 if QEMU_VIRT_RPMI
 
@@ -84,8 +84,17 @@ config QEMU_VIRT_RPMI_CHANNEL_BASE
 	default 0x1000
 
 # Clear of everything QEMU loads with at least 128 MiB of RAM.
-config RPMI_SHMEM_BASE
+config QEMU_VIRT_RPMI_SHMEM_BASE
+	hex "Address of the four queues"
 	default 0x83f00000
+
+config QEMU_VIRT_RPMI_QUEUE_SIZE
+	hex "Size of each queue"
+	default 0x1000
+
+config QEMU_VIRT_RPMI_SLOT_SIZE
+	int "Slot size"
+	default 64
 
 # The PuC model runs in S-mode.
 config RPMI_SHMEM_PROTECT

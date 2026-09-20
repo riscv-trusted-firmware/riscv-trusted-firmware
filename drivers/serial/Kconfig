@@ -5,6 +5,10 @@ menu "Serial"
 
 config SERIAL_UART8250
 	bool "8250/16550-compatible UART"
+	help
+	  The console is the UART /chosen/stdout-path of the device tree
+	  names. The values below apply when there is no tree, or no 8250
+	  behind that path.
 
 if SERIAL_UART8250
 

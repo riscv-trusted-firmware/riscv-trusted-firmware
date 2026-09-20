@@ -16,6 +16,9 @@
 #include <sbi/sbi.h>
 #include <util.h>
 
+/* The PuC behind the node's "mboxes"; NULL until a node was probed. */
+static struct rpmi_context *puc;
+
 static long rpmi_to_sbi(int rc)
 {
 	switch (rc) {
@@ -35,8 +38,8 @@ static long rpmi_to_sbi(int rc)
 static long rpmi_cppc_probe(uint32_t reg, uint32_t *width)
 {
 	uint32_t req[2] = { reg, (uint32_t)this_hartid() }, resp[2] = { 0 };
-	int rc = rpmi_call(RPMI_GROUP_CPPC, RPMI_CPPC_PROBE_REG, req, 2, resp,
-			   2);
+	int rc = rpmi_call(puc, RPMI_GROUP_CPPC, RPMI_CPPC_PROBE_REG, req, 2,
+			   resp, 2);
 
 	/* "Not there" is an answer to a probe, not a failure. */
 	*width = rc ? 0 : resp[1];
@@ -46,8 +49,8 @@ static long rpmi_cppc_probe(uint32_t reg, uint32_t *width)
 static long rpmi_cppc_read(uint32_t reg, uint64_t *val)
 {
 	uint32_t req[2] = { reg, (uint32_t)this_hartid() }, resp[3] = { 0 };
-	int rc =
-		rpmi_call(RPMI_GROUP_CPPC, RPMI_CPPC_READ_REG, req, 2, resp, 3);
+	int rc = rpmi_call(puc, RPMI_GROUP_CPPC, RPMI_CPPC_READ_REG, req, 2,
+			   resp, 3);
 
 	*val = reg_pair_to_64(resp[2], resp[1]);
 	return rpmi_to_sbi(rc);
@@ -59,8 +62,8 @@ static long rpmi_cppc_write(uint32_t reg, uint64_t val)
 			    high32_from_64(val) };
 	uint32_t resp[1] = {};
 
-	return rpmi_to_sbi(rpmi_call(RPMI_GROUP_CPPC, RPMI_CPPC_WRITE_REG, req,
-				     4, resp, 1));
+	return rpmi_to_sbi(rpmi_call(puc, RPMI_GROUP_CPPC, RPMI_CPPC_WRITE_REG,
+				     req, 4, resp, 1));
 }
 
 static const struct cppc_ops rpmi_cppc_ops = {
@@ -70,13 +73,31 @@ static const struct cppc_ops rpmi_cppc_ops = {
 	.write = rpmi_cppc_write,
 };
 
-static int rpmi_cppc_probe_driver(const void *fdt)
+static int rpmi_cppc_drv_probe(const void *fdt, int node)
 {
+	uint16_t group = 0;
+
+	/*
+	 * "mboxes = <&transport group>": which PuC, and a check on the group.
+	 */
+	if (node < 0 || puc)
+		return 0;
+	if (rpmi_client_from_fdt(fdt, node, &puc, &group) ||
+	    group != RPMI_GROUP_CPPC) {
+		puc = NULL;
+		return -1;
+	}
 	cppc_register(&rpmi_cppc_ops);
 	return 0;
 }
 
-DRIVER_DEFINE(rpmi_cppc) = {
+static const char *const rpmi_cppc_drv_compatible[] = { "riscv,rpmi-cppc",
+							NULL };
+
+DRIVER_DEFINE(rpmi_cppc_drv) = {
 	.name = "rpmi-cppc",
-	.probe = rpmi_cppc_probe_driver,
+	.compatible = rpmi_cppc_drv_compatible,
+	.stage = DRIVER_STAGE_LATE,
+	.mmode_only = true,
+	.probe = rpmi_cppc_drv_probe,
 };

@@ -16,11 +16,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <util.h>
 
-#ifdef CONFIG_MONITOR_FDT_FIXUP
 #include <libfdt.h>
-#endif
 
 #include "sbicall.h"
 #include "sbitest.h"
@@ -842,7 +841,6 @@ static void test_smp(void)
 	}
 }
 
-#ifdef CONFIG_MONITOR_FDT_FIXUP
 /* The device tree we were given must keep us away from the monitor. */
 static void test_fdt(unsigned long addr)
 {
@@ -887,6 +885,45 @@ static void test_fdt(unsigned long addr)
 	}
 	CHECK(found == 1, "%d reserved-memory entries for the monitor", found);
 
+	/*
+	 * What is the monitor's alone is not offered to us: its RPMI transport
+	 * and users.
+	 */
+	for (node = fdt_next_node(fdt, -1, NULL); node >= 0;
+	     node = fdt_next_node(fdt, node, NULL)) {
+		const char *compat = fdt_getprop(fdt, node, "compatible", NULL);
+		const char *status = fdt_getprop(fdt, node, "status", NULL);
+
+		if (compat && !strncmp(compat, "riscv,rpmi-", 11))
+			CHECK(status && !strcmp(status, "disabled"),
+			      "%s is not disabled",
+			      fdt_get_name(fdt, node, NULL));
+	}
+#ifdef CONFIG_QEMU_VIRT_RPMI
+	/* Its shared memory lies in RAM: reserved, like the monitor itself. */
+	found = 0;
+	fdt_for_each_subnode(node, fdt, parent) {
+		const fdt32_t *reg = fdt_getprop(fdt, node, "reg", NULL);
+		int ac = fdt_address_cells(fdt, parent);
+
+		if (reg && fdt32_to_cpu(reg[ac - 1]) ==
+		    CONFIG_QEMU_VIRT_RPMI_SHMEM_BASE)
+			found++;
+	}
+	CHECK(found == 1, "%d reservations for the RPMI shared memory", found);
+#endif
+
+	/* Every hart the tree offers is one the monitor manages. */
+	fdt_for_each_subnode(node, fdt, fdt_path_offset(fdt, "/cpus")) {
+		const char *status = fdt_getprop(fdt, node, "status", NULL);
+		const fdt32_t *reg = fdt_getprop(fdt, node, "reg", NULL);
+
+		if (!reg || (status && !strcmp(status, "disabled")))
+			continue;
+		CHECK(hart_status(fdt32_to_cpu(*reg)) >= 0,
+		      "hart %u is offered but unknown", fdt32_to_cpu(*reg));
+	}
+
 	/* No interrupt controller we could use may be wired to M-mode. */
 	for (node = fdt_next_node(fdt, -1, NULL); node >= 0;
 	     node = fdt_next_node(fdt, node, NULL)) {
@@ -907,11 +944,6 @@ static void test_fdt(unsigned long addr)
 			      fdt_get_name(fdt, node, NULL), i / 2);
 	}
 }
-#else
-static void test_fdt(unsigned long addr)
-{
-}
-#endif
 
 #ifdef CONFIG_SBI_PMU
 #define FW_EVENT(code) ((SBI_PMU_EVENT_TYPE_FW << 16) | (code))

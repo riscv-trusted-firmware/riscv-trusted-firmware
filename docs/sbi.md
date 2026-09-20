@@ -109,11 +109,29 @@ through `mstatus.MPRV`. `mseccfg.RLB` stays set: the window
 is a shared-region rule written at run time, which QEMU only accepts under
 MML with rule locking bypassed.
 
+### The device tree
+
+The tree the previous stage passes is how the monitor learns the machine:
+the console (`/chosen/stdout-path`), the CLINT or ACLINT timer and software
+interrupt devices with the hart behind each of their per-hart registers, the
+reset devices (the SiFive test finisher, generic `syscon-poweroff` /
+`syscon-reboot`), the interrupt controllers, the PMU event map, the timer
+frequency, and the RPMI transports with everything that uses them. Early in
+the boot the tree is made writable with room to grow (`fdt_prepare()`), so
+that a platform can add what its previous stage leaves out
+(`plat_fdt_prepare()`; QEMU virt adds the RPMI test setup this way, and the
+drivers then find it like on real hardware). Before the hand-over
+`fdt_fixup()` takes the monitor's share out: its memory and any registered
+region that lies in RAM become `no-map` reservations, the nodes of
+`mmode_only` drivers (the RPMI transport and its users) and the
+machine-level interrupt controllers are disabled, and so are the harts the
+monitor does not manage.
+
 ### Interrupt controllers
 
 The monitor takes no external interrupts, but only M-mode can put the
 controllers in a state S-mode can use. The drivers find them in the device
-tree (a driver's `probe()` receives it): a PLIC gets every context quiet; an
+tree: a PLIC gets every context quiet; an
 APLIC root domain delegates the sources named by `riscv,delegate` to its
 child domain and, in MSI mode, programs the IMSIC addresses of both levels
 (the S-level domain can only read them). The M-level IMSIC files carry the
@@ -238,21 +256,24 @@ values are read once, and standard attribute writes are validated as a whole
 before any of them is applied. The extension probes as present once a
 channel exists.
 
-**RPMI client** (`include/rpmi.h`). One transport, one request in flight:
-the requester holds the lock from the enqueue until the acknowledgment
+**RPMI client** (`include/rpmi.h`). A context is one transport instance to
+one PuC, a `riscv,rpmi-shmem-mbox` node with its queues named in `reg-names`;
+whoever uses RPMI names its context and service group in `mboxes`. Per
+context one request is in flight: the requester holds the lock from the enqueue until the acknowledgment
 with its token arrives or `CONFIG_RPMI_TIMEOUT_US` expires, and polls for it
 (serving its own IPIs meanwhile, like every M-mode wait). Acknowledgments
 with another token are leftovers and dropped. `rpmi_poll()` drains the P2A
 request queue: notifications go to the event sink of their service group,
 requests from the PuC are answered `RPMI_ERR_NOT_SUPPORTED`. The shared
 memory transport follows the specification's queue layout, takes its
-geometry from Kconfig, and checks every index and length it reads, since the
+geometry from the node, and checks every index and length it reads, since the
 other side is not this firmware. The queues can be hidden from S-mode with a
-PMP entry (`RPMI_SHMEM_PROTECT`) and, when they live in RAM, are added to
-`/reserved-memory` (`RPMI_SHMEM_IN_RAM`).
+PMP entry (`RPMI_SHMEM_PROTECT`) and, when they lie in RAM, are added to
+`/reserved-memory`.
 
-**RPMI over MPXY.** The platform binds channel ids to service groups with
-`mpxy_rpmi_channel_add()`; BASE, CPPC and the M-mode only groups (system
+**RPMI over MPXY.** A channel is a `riscv,rpmi-mpxy-*` node: `mboxes` says
+which transport and service group, `riscv,sbi-mpxy-channel-id` what S-mode
+calls it. BASE, CPPC and the M-mode only groups (system
 reset, system suspend, HSM) are refused, as the RPMI specification demands.
 `message_id` is the RPMI service id, the message data is the RPMI request
 or acknowledgment data, so the service's own verdict is the STATUS word
@@ -283,13 +304,13 @@ error codes and side effects (pending and delivered interrupts, hart states
 across start / stop / both suspend types / restart, IPI accounting on every
 hart, trap redirection, the PMP fence around the monitor, legacy return
 convention and unprivileged hart-mask reads). QEMU virt has no platform
-microcontroller, so for MPXY and RPMI one of the secondary harts serves a
+microcontroller: the platform adds the nodes of one to the device tree
+(`CONFIG_QEMU_VIRT_RPMI`), and one of the secondary harts serves a
 PuC model (`images/sbitest/puc.c`: BASE and clock service groups, plus test
 services that stay silent, send a stale acknowledgment or fire
 notifications, and the reset, HSM and CPPC groups as the monitor's backends
 use them; the run ends with a shutdown that reaches the model over RPMI)
-over the real shared memory queues, set aside in RAM by
-`CONFIG_QEMU_VIRT_RPMI`. It prints `sbitest: PASS` or
+over the real shared memory queues. It prints `sbitest: PASS` or
 `sbitest: FAIL` and powers off through SRST; `scripts/boot-test.sh` greps
 for the verdict.
 
@@ -332,14 +353,13 @@ with `IMAGE_SBITEST` disabled.
 2. **RPMI**: service groups implemented by the firmware itself behind the
    same MPXY channels; MSI / SSE indication of notifications; the P2A
    doorbell and the SYSTEM_MSI group; CPPC fast channels and the PuC's HSM
-   suspend types; transport and channel discovery from the device tree
-   (`riscv,rpmi-shmem-mbox`, `riscv,rpmi-mpxy-*`).
-3. **Device tree driven configuration.** The interrupt controllers and the
-   PMU event map come from the device tree; the other device addresses and
-   the hart count still come from Kconfig.
+   suspend types.
+3. **Harts.** The maximum number of harts is a build-time constant and a
+   hart is indexed by its id (`hartid < CONFIG_PLATFORM_HART_COUNT`): sparse
+   hart ids need an index mapping. The monitor's own load address and size
+   are link-time values.
 4. More timer / IPI / reset / serial drivers.
-5. **Scalability.** Remote fences are serialised system-wide; harts are
-   indexed by hart id (`hartid < CONFIG_PLATFORM_HART_COUNT`).
+5. **Scalability.** Remote fences are serialised system-wide.
 
 The H-extension paths (trap redirection from VS/VU-mode, `hfence` on a real
 guest) are written after the specification but have not run under a

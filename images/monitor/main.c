@@ -18,29 +18,18 @@
 #include <driver.h>
 #include <generated/version.h>
 #include <ipi.h>
-#ifdef CONFIG_LIBFDT
-#include <libfdt.h>
-#endif
 #include <log.h>
 #include <mpxy.h>
 #include <platform.h>
 #include <reset.h>
+#ifdef CONFIG_RPMI
 #include <rpmi.h>
+#endif
 #include <service.h>
 #include <suspend.h>
 #include <timer.h>
 
 #include "fdt_fixup.h"
-
-/* The previous stage's device tree, if it handed us one that holds up. */
-static const void *fdt_valid(const void *fdt)
-{
-#ifdef CONFIG_LIBFDT
-	if (fdt && !fdt_check_header(fdt))
-		return fdt;
-#endif
-	return NULL;
-}
 
 static void print_features(void)
 {
@@ -85,9 +74,10 @@ static void wait_for_secondaries(void)
 void image_main(unsigned long hartid, unsigned long fdt)
 {
 	unsigned long next = CONFIG_MONITOR_NEXT_STAGE_ADDR;
+	void *tree = NULL;
 
 	hart_init(hartid);
-	plat_early_init();
+	plat_early_init((const void *)fdt);
 
 	pr_info("\n%s %s\n", PROJECT_NAME, PROJECT_VERSION);
 	pr_info("platform: %s, target: %s, boot hart: %lu, fdt: %lx\n",
@@ -97,7 +87,11 @@ void image_main(unsigned long hartid, unsigned long fdt)
 		csr_read(mimpid));
 
 	hart_detect_features();
-	drivers_init(fdt_valid((const void *)fdt));
+	/* From here on the tree is ours to read, complete and cut down. */
+	tree = (void *)fdt_prepare(fdt);
+	if (tree && plat_fdt_prepare(tree))
+		pr_warn("platform: could not complete the device tree\n");
+	drivers_init(tree);
 	services_init();
 	plat_init();
 
@@ -108,14 +102,14 @@ void image_main(unsigned long hartid, unsigned long fdt)
 	pr_info("timer: %s, ipi: %s, reset: %s, harts: %u\n", timer_name(),
 		ipi_name(), reset_name(), hart_count());
 #ifdef CONFIG_RPMI
-	pr_info("rpmi: %s, hart power: %s, suspend: %s\n",
-		rpmi_transport_name(), hsm_name(), suspend_name());
+	pr_info("rpmi: %u transport(s), hart power: %s, suspend: %s\n",
+		rpmi_context_count(), hsm_name(), suspend_name());
 #endif
 #ifdef CONFIG_MPXY
 	pr_info("mpxy: %u channel(s)\n", mpxy_channel_count());
 #endif
 	print_services();
-	pmu_init((const void *)fdt);
+	pmu_init(tree);
 
 	/* All-zero is no RISC-V instruction: nothing was loaded there. */
 	if (*(const uint32_t *)next == 0) {
@@ -123,9 +117,10 @@ void image_main(unsigned long hartid, unsigned long fdt)
 		hsm_hart_wait();
 	}
 
-#ifdef CONFIG_MONITOR_FDT_FIXUP
-	fdt = fdt_fixup(fdt);
-#endif
+	if (tree) {
+		fdt_fixup(tree);
+		fdt = (unsigned long)tree;
+	}
 	pr_info("monitor: next stage at %lx (S-mode), fdt: %lx\n", next, fdt);
 	hsm_boot_hart_start(next, fdt);
 }

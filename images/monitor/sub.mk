@@ -2,4 +2,4 @@
 # Copyright (c) 2026, The RISC-V Trusted Firmware contributors
 
 srcs-y += main.c
-srcs-$(CONFIG_MONITOR_FDT_FIXUP) += fdt_fixup.c
+srcs-y += fdt_fixup.c

@@ -29,12 +29,15 @@ const char *timer_name(void);
 uint64_t timer_now(void);
 
 /*
- * Ticks of timer_now() in 'us' microseconds
- * (CONFIG_PLATFORM_TIMEBASE_FREQUENCY).
+ * The rate of timer_now(): /cpus/timebase-frequency when a timer driver
+ * found one, CONFIG_PLATFORM_TIMEBASE_FREQUENCY otherwise.
  */
+void timer_frequency_from_fdt(const void *fdt);
+uint64_t timer_frequency(void);
+
 static inline uint64_t timer_usecs_to_ticks(uint64_t us)
 {
-	return us * CONFIG_PLATFORM_TIMEBASE_FREQUENCY / 1000000;
+	return us * timer_frequency() / 1000000;
 }
 
 /* Calling hart: quiesce the compare register. */

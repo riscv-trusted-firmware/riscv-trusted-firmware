@@ -2,7 +2,8 @@
 # Copyright (c) 2026, The RISC-V Trusted Firmware contributors
 
 config LIBFDT
-	bool "libfdt (flattened device tree library)"
+	bool
+	default y
 	help
-	  Upstream libfdt from the dtc project, unmodified. Selected by what
-	  needs it.
+	  Upstream libfdt from the dtc project, unmodified. Always built:
+	  drivers find their devices in the device tree.

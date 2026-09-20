@@ -107,13 +107,6 @@ long mpxy_send_message(unsigned long channel_id, unsigned long msg_id,
 		       unsigned long len, unsigned long *resp_len);
 long mpxy_get_notifications(unsigned long channel_id, unsigned long *bytes);
 
-/*
- * RPMI over MPXY: bind 'channel_id' to one RPMI service group of the
- * platform microcontroller. Only groups the RPMI specification opens to
- * S-mode are accepted (SBI_ERR_DENIED otherwise). Boot time only.
- */
-long mpxy_rpmi_channel_add(uint32_t channel_id, uint16_t group);
-
 /* Calling hart (re)enters the next stage: no shared memory. */
 #ifdef CONFIG_MPXY
 void mpxy_hart_init(void);

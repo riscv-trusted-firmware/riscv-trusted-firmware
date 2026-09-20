@@ -90,3 +90,65 @@ int fdt_hart_irq(const void *fdt, int node, int index, unsigned long *hartid,
 	*irq = fdt32_to_cpu(ext[2 * index + 1]);
 	return 0;
 }
+
+const void *fdt_valid(const void *fdt)
+{
+	return fdt && !fdt_check_header(fdt) ? fdt : NULL;
+}
+
+bool fdt_node_compatible_any(const void *fdt, int node,
+			     const char *const *compatible)
+{
+	for (; *compatible; compatible++)
+		if (!fdt_node_check_compatible(fdt, node, *compatible))
+			return true;
+	return false;
+}
+
+int fdt_reg_by_name(const void *fdt, int node, const char *name, uint64_t *addr,
+		    uint64_t *size)
+{
+	int index = fdt_stringlist_search(fdt, node, "reg-names", name);
+
+	return index < 0 ? index : fdt_reg(fdt, node, index, addr, size);
+}
+
+bool fdt_range_is_memory(const void *fdt, uint64_t base, uint64_t size)
+{
+	uint64_t start = 0, len = 0;
+	int node = 0;
+
+	for (node = fdt_next_node(fdt, -1, NULL); node >= 0;
+	     node = fdt_next_node(fdt, node, NULL)) {
+		const char *type = fdt_getprop(fdt, node, "device_type", NULL);
+
+		if (!type || strcmp(type, "memory"))
+			continue;
+		for (int i = 0; !fdt_reg(fdt, node, i, &start, &len); i++)
+			if (base >= start && base + size <= start + len)
+				return true;
+	}
+	return false;
+}
+
+unsigned int fdt_hart_indices(const void *fdt, int node, uint32_t irq,
+			      int *index_of, unsigned int nr_harts)
+{
+	unsigned int found = 0;
+	unsigned long hartid = 0;
+	uint32_t this_irq = 0;
+	int index = 0;
+
+	for (unsigned int h = 0; h < nr_harts; h++)
+		index_of[h] = -1;
+	for (int i = 0; !fdt_hart_irq(fdt, node, i, &hartid, &this_irq); i++) {
+		if (this_irq != irq)
+			continue;
+		if (hartid < nr_harts) {
+			index_of[hartid] = index;
+			found++;
+		}
+		index++;
+	}
+	return found;
+}

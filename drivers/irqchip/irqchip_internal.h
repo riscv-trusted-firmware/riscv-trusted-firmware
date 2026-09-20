@@ -9,7 +9,6 @@
 #include <stdbool.h>
 
 bool irqchip_is_mlevel(const void *fdt, int node);
-bool irqchip_is_plic(const void *fdt, int node);
+extern const char *const irqchip_plic_compatible[];
 
-/* Every node of the tree, in order. */
 #endif

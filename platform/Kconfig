@@ -39,8 +39,8 @@ config PLATFORM_TIMEBASE_FREQUENCY
 	int "Platform timer frequency (Hz)"
 	default 10000000
 	help
-	  Rate of the 'time' counter (the device tree's timebase-frequency),
-	  for the monitor's own timeouts.
+	  Rate of the 'time' counter, for the monitor's own timeouts, when
+	  the device tree does not say (/cpus/timebase-frequency).
 
 config PLATFORM_FW_START
 	hex "Firmware load/link address"

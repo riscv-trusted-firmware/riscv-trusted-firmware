@@ -37,7 +37,8 @@ add a platform, driver, service or image.
 ```
 arch/riscv/   entry, trap entry, ISA/CSR headers, -march derivation;
               runtime/: per-hart state, trap policy, PMP, HSM, remote fences
-platform/     one directory per board (QEMU virt today)
+platform/     one directory per board (QEMU virt today); the devices come
+              from the device tree
 images/       separately linked binaries: loader, monitor, sbitest (S-mode)
 services/     ecall dispatcher and services (SBI extensions, MPXY channels)
 drivers/      driver table, console, serial, timer, ipi, reset, rpmi

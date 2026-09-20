@@ -4,15 +4,19 @@
  */
 
 /*
- * 8250/16550 UART, polled. Register geometry comes from Kconfig; the
- * device-tree path will fill the same struct from the 'compatible' match.
+ * 8250/16550 UART, polled. The console is needed before anything else, so
+ * this is not a table driver: the platform's early init calls it with the
+ * device tree, where /chosen/stdout-path names the UART. Without a tree, or
+ * when that is not an 8250, the Kconfig geometry applies.
  */
 
 #include <console.h>
 #include <drivers/serial/uart8250.h>
+#include <fdt_util.h>
 #include <io.h>
 #include <memregion.h>
 #include <stdint.h>
+#include <string.h>
 #include <types_ext.h>
 #include <util.h>
 
@@ -33,15 +37,59 @@
 
 struct uart8250 {
 	uintptr_t base;
+	unsigned long size;
 	unsigned int reg_shift;
 	unsigned int reg_width;
+	uint32_t clock;
+	uint32_t baud;
 };
 
 static struct uart8250 uart = {
 	.base = CONFIG_SERIAL_UART8250_BASE,
+	.size = SHIFT_UL(0x100, CONFIG_SERIAL_UART8250_REG_SHIFT),
 	.reg_shift = CONFIG_SERIAL_UART8250_REG_SHIFT,
 	.reg_width = CONFIG_SERIAL_UART8250_REG_WIDTH,
+	.clock = CONFIG_SERIAL_UART8250_CLOCK,
+	.baud = CONFIG_SERIAL_UART8250_BAUD,
 };
+
+static const char *const uart8250_compatible[] = {
+	"ns16550a",
+	"ns16550",
+	"snps,dw-apb-uart",
+	NULL,
+};
+
+/*
+ * /chosen/stdout-path: a path or an alias, optionally followed by ":options".
+ */
+static void uart8250_from_fdt(const void *fdt)
+{
+	int chosen = 0, node = 0, len = 0;
+	uint64_t base = 0, size = 0;
+	const char *path = NULL, *colon = NULL;
+
+	chosen = fdt_path_offset(fdt, "/chosen");
+	path = chosen < 0 ? NULL :
+			    fdt_getprop(fdt, chosen, "stdout-path", &len);
+	if (!path)
+		return;
+	colon = strchr(path, ':');
+	node = fdt_path_offset_namelen(fdt, path,
+				       colon ? (int)(colon - path) :
+				       (int)strlen(path));
+	if (node < 0 ||
+	    !fdt_node_compatible_any(fdt, node, uart8250_compatible) ||
+	    fdt_reg(fdt, node, 0, &base, &size))
+		return;
+
+	uart.base = (uintptr_t)base;
+	uart.size = (unsigned long)size;
+	uart.reg_shift = fdt_prop_u32(fdt, node, "reg-shift", 0);
+	uart.reg_width = fdt_prop_u32(fdt, node, "reg-io-width", 1);
+	uart.clock = fdt_prop_u32(fdt, node, "clock-frequency", uart.clock);
+	uart.baud = fdt_prop_u32(fdt, node, "current-speed", uart.baud);
+}
 
 static uint32_t reg_read(const struct uart8250 *u, unsigned int reg)
 {
@@ -82,10 +130,13 @@ static const struct console_ops uart8250_console = {
 	.getc = uart8250_getc,
 };
 
-void uart8250_console_init(void)
+void uart8250_console_init(const void *fdt)
 {
-	uint32_t divisor = CONFIG_SERIAL_UART8250_CLOCK /
-			   (16 * CONFIG_SERIAL_UART8250_BAUD);
+	uint32_t divisor = 0;
+
+	if (fdt_valid(fdt))
+		uart8250_from_fdt(fdt);
+	divisor = uart.clock / (16 * uart.baud);
 
 	reg_write(&uart, UART_IER, 0);
 	reg_write(&uart, UART_LCR, UART_LCR_DLAB);
@@ -97,6 +148,5 @@ void uart8250_console_init(void)
 
 	console_register(&uart8250_console);
 	/* The next stage usually drives the same UART. */
-	memregion_add(uart.base, SHIFT_UL(0x100, uart.reg_shift),
-		      MEMREGION_SHARED_RW);
+	memregion_add(uart.base, uart.size, MEMREGION_SHARED_RW);
 }

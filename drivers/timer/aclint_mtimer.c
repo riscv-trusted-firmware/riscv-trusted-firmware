@@ -4,28 +4,36 @@
  */
 
 /*
- * RISC-V ACLINT MTIMER (and the timer half of the SiFive CLINT): one MTIME
- * counter, one MTIMECMP per hart, indexed by hart id minus the first hart
- * id of the device.
+ * RISC-V ACLINT MTIMER ("riscv,aclint-mtimer") and the timer half of the
+ * SiFive CLINT ("riscv,clint0", "sifive,clint0"): one MTIME counter, and
+ * one MTIMECMP per hart, numbered by the hart's position among the machine
+ * timer interrupts the node lists. Without a node the Kconfig geometry
+ * applies, with hart ids counted from TIMER_ACLINT_MTIMER_FIRST_HART.
  */
 
 #include <arch/hart.h>
 #include <driver.h>
+#include <fdt_util.h>
 #include <io.h>
 #include <memregion.h>
 #include <timer.h>
 #include <types_ext.h>
 #include <util.h>
 
-static const vaddr_t mtime = CONFIG_TIMER_ACLINT_MTIMER_MTIME_ADDR;
+#define CLINT_MTIMECMP_OFFSET 0x4000
+#define CLINT_MTIME_OFFSET 0xbff8
+
+static vaddr_t mtime;
+static vaddr_t mtimecmp_base;
+/* Which MTIMECMP is a hart's, -1: none. */
+static int mtimecmp_index[CONFIG_PLATFORM_HART_COUNT];
 
 /* 0: this hart has none. */
 static vaddr_t mtimecmp(void)
 {
-	unsigned long idx =
-		this_hartid() - CONFIG_TIMER_ACLINT_MTIMER_FIRST_HART;
+	int idx = mtimecmp_index[this_hartid()];
 
-	return CONFIG_TIMER_ACLINT_MTIMER_MTIMECMP_ADDR + 8 * idx;
+	return idx < 0 ? 0 : mtimecmp_base + 8 * (vaddr_t)idx;
 }
 
 /* 32-bit accesses on every XLEN: not all implementations take 64-bit ones. */
@@ -44,6 +52,8 @@ static void aclint_mtimer_set_event(uint64_t when)
 {
 	vaddr_t cmp = mtimecmp();
 
+	if (!cmp)
+		return;
 	/* Keep the compare value in the future while it is half-written. */
 	io_write32(cmp, ~U(0));
 	io_write32(cmp + 4, high32_from_64(when));
@@ -62,18 +72,61 @@ static const struct timer_ops aclint_mtimer_ops = {
 	.stop_event = aclint_mtimer_stop_event,
 };
 
-static int aclint_mtimer_probe(const void *fdt)
+static int aclint_mtimer_probe(const void *fdt, int node)
 {
+	uint64_t mtime_addr = 0, cmp_addr = 0;
+	unsigned int harts = 0;
+
+	if (mtime)
+		return 0; /* one time base is all the monitor uses */
+
+	if (node < 0) {
+		mtime_addr = CONFIG_TIMER_ACLINT_MTIMER_MTIME_ADDR;
+		cmp_addr = CONFIG_TIMER_ACLINT_MTIMER_MTIMECMP_ADDR;
+		harts = CONFIG_PLATFORM_HART_COUNT;
+		for (unsigned int h = 0; h < harts; h++)
+			mtimecmp_index[h] =
+				(int)h - CONFIG_TIMER_ACLINT_MTIMER_FIRST_HART;
+	} else {
+		if (!fdt_node_check_compatible(fdt, node,
+					       "riscv,aclint-mtimer")) {
+			/* "reg": MTIME, then the MTIMECMP array. */
+			if (fdt_reg(fdt, node, 0, &mtime_addr, NULL) ||
+			    fdt_reg(fdt, node, 1, &cmp_addr, NULL))
+				return -1;
+		} else {
+			if (fdt_reg(fdt, node, 0, &cmp_addr, NULL))
+				return -1;
+			mtime_addr = cmp_addr + CLINT_MTIME_OFFSET;
+			cmp_addr += CLINT_MTIMECMP_OFFSET;
+		}
+		harts = fdt_hart_indices(fdt, node, IRQ_M_TIMER, mtimecmp_index,
+					 CONFIG_PLATFORM_HART_COUNT);
+		if (!harts)
+			return -1;
+		timer_frequency_from_fdt(fdt);
+	}
+
+	mtime = (vaddr_t)mtime_addr;
+	mtimecmp_base = (vaddr_t)cmp_addr;
 	timer_register(&aclint_mtimer_ops);
-	/* One MTIMECMP per hart, and MTIME; S-mode has the time CSR. */
-	memregion_add(CONFIG_TIMER_ACLINT_MTIMER_MTIMECMP_ADDR,
-		      UL(8) * CONFIG_PLATFORM_HART_COUNT, MEMREGION_MMODE_RW);
-	memregion_add(CONFIG_TIMER_ACLINT_MTIMER_MTIME_ADDR, 8,
+	/* S-mode has the time CSR: these registers are the monitor's. */
+	memregion_add(mtimecmp_base, UL(8) * CONFIG_PLATFORM_HART_COUNT,
 		      MEMREGION_MMODE_RW);
+	memregion_add((unsigned long)mtime_addr, 8, MEMREGION_MMODE_RW);
 	return 0;
 }
 
+static const char *const aclint_mtimer_compatible[] = {
+	"riscv,aclint-mtimer",
+	"riscv,clint0",
+	"sifive,clint0",
+	NULL,
+};
+
 DRIVER_DEFINE(aclint_mtimer) = {
 	.name = "aclint-mtimer",
+	.compatible = aclint_mtimer_compatible,
+	.probe_without_node = true,
 	.probe = aclint_mtimer_probe,
 };

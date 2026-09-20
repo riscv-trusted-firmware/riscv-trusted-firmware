@@ -7,9 +7,10 @@
 #define DRIVERS_SERIAL_UART8250_H
 
 /*
- * Initialise the UART described by CONFIG_SERIAL_UART8250_* and make it the
- * console.
+ * Make the UART that /chosen/stdout-path of 'fdt' names the console; the one
+ * CONFIG_SERIAL_UART8250_* describe when there is no tree (NULL) or no such
+ * UART in it.
  */
-void uart8250_console_init(void);
+void uart8250_console_init(const void *fdt);
 
 #endif

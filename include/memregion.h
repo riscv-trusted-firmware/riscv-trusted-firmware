@@ -6,8 +6,6 @@
 #ifndef MEMREGION_H
 #define MEMREGION_H
 
-#include <types_ext.h>
-
 /*
  * What the monitor tells its memory protection about the address map.
  * Drivers register the registers they drive at probe time; the arch code
@@ -24,6 +22,9 @@
  * Boot hart only, before the next stage is entered.
  */
 
+#include <stdbool.h>
+#include <types_ext.h>
+
 enum memregion_kind {
 	MEMREGION_MMODE_RX,
 	MEMREGION_MMODE_RW,
@@ -32,6 +33,9 @@ enum memregion_kind {
 
 #ifdef IMAGE_MONITOR
 void memregion_add(paddr_t base, paddr_size_t size, enum memregion_kind kind);
+/* Region 'i' of the list; false past its end. */
+bool memregion_get(unsigned int i, paddr_t *base, paddr_size_t *size,
+		   enum memregion_kind *kind);
 #else
 /* Images that never leave M-mode protect nothing. */
 static inline void memregion_add(paddr_t base, paddr_size_t size,
