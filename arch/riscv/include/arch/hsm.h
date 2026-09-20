@@ -28,6 +28,16 @@ struct hsm_ops {
 	long (*hart_start)(unsigned long hartid);
 	/* The calling hart is about to wait until it is started again. */
 	void (*hart_stop)(unsigned long hartid);
+	/*
+	 * The calling hart is about to wait in the suspend state 'type', an
+	 * SBI HSM suspend type, platform specific ones included: the default
+	 * ones work without anybody's help, so for them an answer other than
+	 * SBI_SUCCESS is not an error. SBI_ERR_NOT_SUPPORTED for a type the
+	 * platform does not have. 'resume_addr' is where a hart that lost its
+	 * state comes back: the monitor's entry, not S-mode's address.
+	 */
+	long (*hart_suspend)(unsigned long hartid, uint32_t type,
+			     unsigned long resume_addr);
 };
 
 void hsm_register(const struct hsm_ops *ops);

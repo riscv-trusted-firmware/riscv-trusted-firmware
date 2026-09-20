@@ -12,7 +12,7 @@ and what is still missing.
 | TIME      | `TIME` | `set_timer`; stimecmp with Sstc, M-mode timer + STIP injection without |
 | IPI       | `sPI`  | `send_ipi` |
 | RFENCE    | `RFNC` | all seven calls; the `hfence` ones need the H extension (`NOT_SUPPORTED` otherwise) |
-| HSM       | `HSM`  | start, stop, status, suspend (default retentive and non-retentive types) |
+| HSM       | `HSM`  | start, stop, status, suspend (default retentive and non-retentive types, and the platform's through the RPMI HSM group) |
 | SRST      | `SRST` | shutdown, cold and warm reboot through the reset driver |
 | CPPC      | `CPPC` | probe, read, read_hi, write; backend: the RPMI CPPC service group |
 | SUSP      | `SUSP` | suspend to RAM as an M-mode wait with all other harts stopped (`CONFIG_SBI_SUSP`, on for QEMU virt) |
@@ -328,7 +328,12 @@ local reset device, and a posted reset gets a grace period before the hart
 gives up and halts); SYSTEM_SUSPEND tells the PuC when S-mode suspends the
 system, before the last hart waits for its wake-up interrupt; HSM tells it
 when harts start and stop, with the monitor's entry point as the address a
-powered-up hart comes back through; CPPC serves the SBI CPPC extension. The
+powered-up hart comes back through, and makes the PuC's suspend types the
+platform specific types of `sbi_hart_suspend()` (the list is asked for when
+one is first used; the hart waits in the monitor as for the default types,
+and one the PuC really took down comes back through the entry point and
+resumes from there, a path no test has taken yet as QEMU has no such PuC);
+CPPC serves the SBI CPPC extension. The
 PuC is asked when something is wanted, not at boot. One that does not
 answer is taken for one that does not offer the service, at the cost of a
 timeout each time; one that answers no is an error for the caller.
@@ -391,8 +396,7 @@ with `IMAGE_SBITEST` disabled.
    data match.
 2. **RPMI**: service groups implemented by the firmware itself behind the
    same MPXY channels; MSI / SSE indication of notifications and the P2A
-   doorbell as an interrupt (the P2A queue is polled); CPPC fast channels
-   and the PuC's HSM suspend types.
+   doorbell as an interrupt (the P2A queue is polled); CPPC fast channels.
 3. The maximum number of harts and domains and the monitor's size are
    build-time constants.
 4. More timer / IPI / reset / serial drivers.

@@ -120,7 +120,12 @@ void hart_init(unsigned long hartid)
 	h->hartid = hartid;
 	h->index = index;
 	h->m_sp = (unsigned long)__stack_top - index * CONFIG_STACK_SIZE;
-	atomic_store_ulong(&h->hsm_state, SBI_HSM_STATE_STOPPED);
+	/*
+	 * Not its first time here: a hart the platform took down and brought
+	 * back.
+	 */
+	if (!atomic_load_ulong(&h->present))
+		atomic_store_ulong(&h->hsm_state, SBI_HSM_STATE_STOPPED);
 	__asm__ __volatile__("mv tp, %0" : : "r"(h));
 	atomic_store_ulong(&h->present, 1);
 }

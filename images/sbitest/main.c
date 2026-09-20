@@ -142,6 +142,8 @@ struct mailbox {
 	unsigned long started; /* opaque seen by _secondary_start */
 	unsigned long resumed; /* opaque seen by _resume_start */
 	unsigned long ipis;
+	/* 0: the default type of the kind asked for */
+	unsigned long suspend_type;
 	unsigned long suspend_ret; /* retentive suspend returned */
 	long suspend_error;
 	unsigned long puc; /* serving the PuC model */
@@ -192,7 +194,10 @@ static void __noreturn secondary_loop(unsigned long hartid)
 			WRITE_ONCE(m->cmd, CMD_NONE);
 			csr_write(sie, SIP_SSIP);
 			ret = sbi_call3(SBI_EXT_HSM, SBI_HSM_HART_SUSPEND,
-					SBI_HSM_SUSPEND_RET_DEFAULT, 0, 0);
+					READ_ONCE(m->suspend_type) ?
+						READ_ONCE(m->suspend_type) :
+						SBI_HSM_SUSPEND_RET_DEFAULT,
+					0, 0);
 			csr_write(sie, 0);
 			WRITE_ONCE(m->suspend_error, ret.error);
 			atomic_add_ulong(&m->suspend_ret, 1);
@@ -201,7 +206,9 @@ static void __noreturn secondary_loop(unsigned long hartid)
 			WRITE_ONCE(m->cmd, CMD_NONE);
 			csr_write(sie, SIP_SSIP);
 			ret = sbi_call3(SBI_EXT_HSM, SBI_HSM_HART_SUSPEND,
-					SBI_HSM_SUSPEND_NON_RET_DEFAULT,
+					READ_ONCE(m->suspend_type) ?
+						READ_ONCE(m->suspend_type) :
+						SBI_HSM_SUSPEND_NON_RET_DEFAULT,
 					(unsigned long)_resume_start,
 					MAGIC ^ hartid);
 			/* Only reached when the call failed. */
@@ -662,6 +669,82 @@ static unsigned long puc_hart = ~UL(0);
  * With a PuC listening, starting and stopping a hart goes through it (the
  * monitor's RPMI HSM backend). Needs a secondary besides the PuC's.
  */
+/*
+ * The PuC's suspend types are the platform specific ones of
+ * sbi_hart_suspend(): the PuC is told, and the hart waits as it does for the
+ * default types (the model powers nothing down).
+ */
+static void test_suspend_platform(unsigned long other)
+{
+	struct mailbox *m = &mbox[other], saved = *m;
+	uint32_t suspends = puc_hsm_suspends;
+
+	CHECK(WAIT_FOR(hart_status(other) == SBI_HSM_STATE_STARTED),
+	      "hart %lu not started", other);
+	WRITE_ONCE(m->suspend_ret, 0);
+	WRITE_ONCE(m->suspend_type, PUC_SUSPEND_RET);
+	WRITE_ONCE(m->cmd, CMD_SUSPEND_RETENTIVE);
+	CHECK(WAIT_FOR(hart_status(other) == SBI_HSM_STATE_SUSPENDED),
+	      "hart %lu status %ld", other, hart_status(other));
+	CHECK(READ_ONCE(puc_hsm_suspends) == suspends + 1 &&
+	      READ_ONCE(puc_hsm_last_hart) == other &&
+	      READ_ONCE(puc_hsm_last_type) == PUC_SUSPEND_RET,
+	      "PuC saw %u suspends, hart %u, type %x",
+	      READ_ONCE(puc_hsm_suspends) - suspends,
+	      READ_ONCE(puc_hsm_last_hart), READ_ONCE(puc_hsm_last_type));
+	CHECK_RET(sbi_call2(SBI_EXT_IPI, SBI_IPI_SEND_IPI, 1, other),
+		  SBI_SUCCESS);
+	CHECK(WAIT_FOR(READ_ONCE(m->suspend_ret) == 1) &&
+	      READ_ONCE(m->suspend_error) == SBI_SUCCESS,
+	      "platform retentive suspend: error %ld",
+	      READ_ONCE(m->suspend_error));
+
+	/*
+	 * A platform type the PuC does not have; and one from the reserved
+	 * range.
+	 */
+	WRITE_ONCE(m->suspend_type, PUC_SUSPEND_RET + 1);
+	WRITE_ONCE(m->cmd, CMD_SUSPEND_RETENTIVE);
+	CHECK(WAIT_FOR(READ_ONCE(m->suspend_ret) == 2) &&
+	      READ_ONCE(m->suspend_error) == SBI_ERR_NOT_SUPPORTED,
+	      "unknown platform suspend type: error %ld",
+	      READ_ONCE(m->suspend_error));
+	WRITE_ONCE(m->suspend_type, 0x0fffffff);
+	WRITE_ONCE(m->cmd, CMD_SUSPEND_RETENTIVE);
+	CHECK(WAIT_FOR(READ_ONCE(m->suspend_ret) == 3) &&
+	      READ_ONCE(m->suspend_error) == SBI_ERR_INVALID_PARAM,
+	      "reserved suspend type: error %ld", READ_ONCE(m->suspend_error));
+	CHECK(READ_ONCE(puc_hsm_suspends) == suspends + 1,
+	      "the PuC was told of a suspend that was none");
+
+	/*
+	 * Non-retentive: what the PuC gets is the monitor's entry, not the
+	 * resume address.
+	 */
+	WRITE_ONCE(m->resumed, 0);
+	WRITE_ONCE(m->suspend_type, PUC_SUSPEND_NON_RET);
+	WRITE_ONCE(m->cmd, CMD_SUSPEND_NON_RETENTIVE);
+	CHECK(WAIT_FOR(hart_status(other) == SBI_HSM_STATE_SUSPENDED),
+	      "hart %lu status %ld", other, hart_status(other));
+	CHECK(READ_ONCE(puc_hsm_suspends) == suspends + 2 &&
+	      READ_ONCE(puc_hsm_last_type) == PUC_SUSPEND_NON_RET &&
+	      puc_hsm_last_addr == monitor_addr,
+	      "PuC saw type %x, address %llx", READ_ONCE(puc_hsm_last_type),
+	      (unsigned long long)puc_hsm_last_addr);
+	CHECK_RET(sbi_call2(SBI_EXT_IPI, SBI_IPI_SEND_IPI, 1, other),
+		  SBI_SUCCESS);
+	CHECK(WAIT_FOR(READ_ONCE(m->resumed) == (MAGIC ^ other)),
+	      "hart %lu did not resume", other);
+	CHECK(WAIT_FOR(READ_ONCE(m->ipis) == saved.ipis + 2),
+	      "hart %lu: %lu IPIs", other, READ_ONCE(m->ipis));
+
+	/* The tests that follow count from where they left off. */
+	WRITE_ONCE(m->suspend_type, 0);
+	WRITE_ONCE(m->suspend_ret, saved.suspend_ret);
+	WRITE_ONCE(m->resumed, saved.resumed);
+	WRITE_ONCE(m->ipis, saved.ipis);
+}
+
 static void test_hsm_platform(unsigned long puc)
 {
 	unsigned long h = 0, other = ~UL(0);
@@ -707,6 +790,8 @@ static void test_hsm_platform(unsigned long puc)
 	      "PuC saw %u starts, hart %u, address %llx",
 	      READ_ONCE(puc_hsm_starts) - starts, READ_ONCE(puc_hsm_last_hart),
 	      (unsigned long long)puc_hsm_last_addr);
+
+	test_suspend_platform(other);
 }
 #else
 static void test_hsm_platform(unsigned long puc)

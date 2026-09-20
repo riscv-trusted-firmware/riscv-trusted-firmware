@@ -13,6 +13,10 @@
  * A PuC that does not answer is taken for one that does not manage hart
  * power: harts then simply wait in WFI, which works everywhere. An answer
  * that says no is an error.
+ *
+ * Suspend: the PuC's suspend types are SBI HSM suspend types, the platform
+ * specific ones being what it adds to the SBI's two. The list is asked for
+ * when a hart first suspends, not at boot, when the PuC may not be up.
  */
 
 #include <arch/hart.h>
@@ -59,10 +63,85 @@ static void rpmi_hsm_hart_stop(unsigned long hartid)
 		pr_warn("rpmi-hsm: hart %lu stop refused (%d)\n", hartid, rc);
 }
 
+#define MAX_SUSPEND_TYPES CONFIG_HSM_RPMI_MAX_SUSPEND_TYPES
+
+static uint32_t suspend_types[MAX_SUSPEND_TYPES];
+static unsigned int nr_suspend_types;
+static bool suspend_types_known;
+
+/* (START_INDEX) -> (STATUS, REMAINING, RETURNED, SUSPEND_TYPE[RETURNED]) */
+static int suspend_types_fetch(void)
+{
+	uint32_t resp[3 + MAX_SUSPEND_TYPES] = {}, start = 0, remaining = 0;
+	unsigned int n = 0;
+	size_t len = 0;
+	int rc = 0;
+
+	do {
+		rc = rpmi_request(puc, RPMI_GROUP_HSM,
+				  RPMI_HSM_GET_SUSPEND_TYPES, &start,
+				  sizeof(start), resp, sizeof(resp), &len);
+		if (rc)
+			return rc;
+		if (len < 4 || (int32_t)resp[0])
+			return len < 4 ? RPMI_ERR_IO : (int32_t)resp[0];
+		if (len < 12 || len < 12 + 4 * (size_t)resp[2] ||
+		    (!resp[2] && resp[1]))
+			return RPMI_ERR_IO;
+		remaining = resp[1];
+		for (uint32_t i = 0; i < resp[2] && n < MAX_SUSPEND_TYPES; i++)
+			suspend_types[n++] = resp[3 + i];
+		start += resp[2];
+	} while (remaining && n < MAX_SUSPEND_TYPES);
+
+	/* Harts racing here have asked the same PuC the same question. */
+	nr_suspend_types = n;
+	suspend_types_known = true;
+	return 0;
+}
+
+static long rpmi_hsm_hart_suspend(unsigned long hartid, uint32_t type,
+				  unsigned long resume_addr)
+{
+	uint32_t req[4] = { (uint32_t)hartid, type, (uint32_t)resume_addr,
+			    (uint32_t)((uint64_t)resume_addr >> 32) };
+	uint32_t resp[1] = {};
+	int rc = 0;
+
+	/*
+	 * The SBI's own two types need nobody: the PuC hears of them if its
+	 * list is there and has them, and a hart that idles does not go asking
+	 * for the list. A platform type is the PuC's by definition.
+	 */
+	if (!suspend_types_known && (type == SBI_HSM_SUSPEND_RET_DEFAULT ||
+				     type == SBI_HSM_SUSPEND_NON_RET_DEFAULT))
+		return SBI_ERR_NOT_SUPPORTED;
+	rc = suspend_types_known ? 0 : suspend_types_fetch();
+	if (rc)
+		return silent(rc) ? SBI_ERR_NOT_SUPPORTED : SBI_ERR_FAILED;
+	for (unsigned int i = 0;; i++) {
+		if (i == nr_suspend_types)
+			return SBI_ERR_NOT_SUPPORTED;
+		if (suspend_types[i] == type)
+			break;
+	}
+
+	rc = rpmi_call(puc, RPMI_GROUP_HSM, RPMI_HSM_HART_SUSPEND, req, 4, resp,
+		       1);
+	if (!rc)
+		return SBI_SUCCESS;
+	if (!silent(rc))
+		pr_warn("rpmi-hsm: hart %lu suspend type %x refused (%d)\n",
+			hartid, type, rc);
+	return rc == RPMI_ERR_INVALID_PARAM ? SBI_ERR_INVALID_PARAM :
+					      SBI_ERR_FAILED;
+}
+
 static const struct hsm_ops rpmi_hsm_ops = {
 	.name = "rpmi",
 	.hart_start = rpmi_hsm_hart_start,
 	.hart_stop = rpmi_hsm_hart_stop,
+	.hart_suspend = rpmi_hsm_hart_suspend,
 };
 
 static int rpmi_hsm_probe(const void *fdt, int node)

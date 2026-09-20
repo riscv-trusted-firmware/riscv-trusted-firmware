@@ -13,6 +13,7 @@
 #include <spinlock.h>
 #include <suspend.h>
 #include <timer.h>
+#include <util.h>
 
 /* Serialises hart_start requests aimed at the same hart. */
 static unsigned long hsm_start_lock = SPINLOCK_UNLOCK;
@@ -77,9 +78,25 @@ static void hsm_wait_loop(void)
 	hsm_hart_enter(false);
 }
 
+/*
+ * A hart that lost its state in a non-retentive suspend the platform made
+ * real comes back through the monitor's entry, like a started one: what it
+ * resumes to is where a start would have put it.
+ */
+static void hsm_resume_from_reset(void)
+{
+	atomic_store_ulong(&this_hart()->hsm_state,
+			   SBI_HSM_STATE_RESUME_PENDING);
+	hsm_hart_enter(false);
+}
+
 void __noreturn hsm_hart_wait(void)
 {
-	atomic_store_ulong(&this_hart()->hsm_state, SBI_HSM_STATE_STOPPED);
+	struct hart *h = this_hart();
+
+	if (atomic_load_ulong(&h->hsm_state) == SBI_HSM_STATE_SUSPENDED)
+		hart_restart_stack(hsm_resume_from_reset);
+	atomic_store_ulong(&h->hsm_state, SBI_HSM_STATE_STOPPED);
 	hart_restart_stack(hsm_wait_loop);
 }
 
@@ -211,33 +228,47 @@ static void hsm_resume_loop(void)
 	hsm_hart_enter(true);
 }
 
-int hsm_hart_suspend(unsigned long type, unsigned long resume_addr,
-		     unsigned long arg)
+/* 'tell': a hart suspend of its own, not the last step of a system suspend. */
+static int hart_suspend(unsigned long type, unsigned long resume_addr,
+			unsigned long arg, bool tell)
 {
 	struct hart *h = this_hart();
-	bool retentive = false;
+	bool retentive = false, platform = false;
+	long rc = 0;
 
-	switch (type) {
-	case SBI_HSM_SUSPEND_RET_DEFAULT:
-		retentive = true;
-		break;
-	case SBI_HSM_SUSPEND_NON_RET_DEFAULT:
-		retentive = false;
-		break;
-	default:
-		/* Platform-specific types: none yet. The rest is reserved. */
-		if ((type >= SBI_HSM_SUSPEND_RET_PLATFORM &&
-		     type < SBI_HSM_SUSPEND_NON_RET_DEFAULT) ||
-		    type >= SBI_HSM_SUSPEND_NON_RET_PLATFORM)
-			return SBI_ERR_NOT_SUPPORTED;
+	/*
+	 * The default types, the platform's, and what is reserved in between.
+	 */
+	if (type > UL(0xffffffff) ||
+	    (type > SBI_HSM_SUSPEND_RET_DEFAULT &&
+	     type < SBI_HSM_SUSPEND_RET_PLATFORM) ||
+	    (type > SBI_HSM_SUSPEND_NON_RET_DEFAULT &&
+	     type < SBI_HSM_SUSPEND_NON_RET_PLATFORM))
 		return SBI_ERR_INVALID_PARAM;
-	}
+	retentive = type < SBI_HSM_SUSPEND_NON_RET_DEFAULT;
+	platform = type != SBI_HSM_SUSPEND_RET_DEFAULT &&
+		   type != SBI_HSM_SUSPEND_NON_RET_DEFAULT;
+	if (platform && !(hsm_ops && hsm_ops->hart_suspend))
+		return SBI_ERR_NOT_SUPPORTED;
 
 	if (!retentive && !smode_entry_ok(resume_addr))
 		return SBI_ERR_INVALID_ADDRESS;
 	if (!hsm_transition(h, SBI_HSM_STATE_STARTED,
 			    SBI_HSM_STATE_SUSPEND_PENDING))
 		return SBI_ERR_FAILED;
+
+	/*
+	 * The platform's part: it may take the hart down once it sees it
+	 * wait. Whatever it does, the wait below is what the hart does.
+	 */
+	rc = tell && hsm_ops && hsm_ops->hart_suspend ?
+		     hsm_ops->hart_suspend(h->hartid, (uint32_t)type,
+					   monitor_base()) :
+		     SBI_SUCCESS;
+	if (rc && platform) {
+		atomic_store_ulong(&h->hsm_state, SBI_HSM_STATE_STARTED);
+		return (int)rc;
+	}
 
 	if (!retentive) {
 		h->start_addr = resume_addr;
@@ -251,6 +282,12 @@ int hsm_hart_suspend(unsigned long type, unsigned long resume_addr,
 	atomic_store_ulong(&h->hsm_state, SBI_HSM_STATE_RESUME_PENDING);
 	atomic_store_ulong(&h->hsm_state, SBI_HSM_STATE_STARTED);
 	return SBI_SUCCESS;
+}
+
+int hsm_hart_suspend(unsigned long type, unsigned long resume_addr,
+		     unsigned long arg)
+{
+	return hart_suspend(type, resume_addr, arg, true);
 }
 
 int hsm_system_suspend(uint32_t sleep_type, unsigned long resume_addr,
@@ -287,8 +324,8 @@ int hsm_system_suspend(uint32_t sleep_type, unsigned long resume_addr,
 		if (rc)
 			return (int)rc;
 	}
-	return hsm_hart_suspend(SBI_HSM_SUSPEND_NON_RET_DEFAULT, resume_addr,
-				arg);
+	return hart_suspend(SBI_HSM_SUSPEND_NON_RET_DEFAULT, resume_addr, arg,
+			    false);
 }
 
 long hsm_hart_state(unsigned long hartid)

@@ -31,6 +31,7 @@
 #define MAX_DATA (SLOT_SIZE - RPMI_MSG_HDR_SIZE)
 
 uint32_t puc_hsm_starts, puc_hsm_stops, puc_hsm_last_hart;
+uint32_t puc_hsm_suspends, puc_hsm_last_type;
 uint64_t puc_hsm_last_addr;
 uint32_t puc_hsm_refuse;
 uint32_t puc_reset_queries;
@@ -300,6 +301,23 @@ static unsigned int serve_hsm(const struct rpmi_hdr *hdr, const uint32_t *req,
 {
 	resp[0] = RPMI_SUCCESS;
 	switch (hdr->service) {
+	case RPMI_HSM_GET_SUSPEND_TYPES:
+		/* One at a time, to make the monitor come back for more. */
+		if (req[0] >= 2) {
+			resp[1] = 0;
+			resp[2] = 0;
+			return 3;
+		}
+		resp[1] = 1 - req[0];
+		resp[2] = 1;
+		resp[3] = req[0] ? PUC_SUSPEND_NON_RET : PUC_SUSPEND_RET;
+		return 4;
+	case RPMI_HSM_HART_SUSPEND:
+		WRITE_ONCE(puc_hsm_last_hart, req[0]);
+		WRITE_ONCE(puc_hsm_last_type, req[1]);
+		puc_hsm_last_addr = reg_pair_to_64(req[3], req[2]);
+		atomic_inc32(&puc_hsm_suspends);
+		return 1;
 	case RPMI_HSM_HART_START:
 		if (READ_ONCE(puc_hsm_refuse)) {
 			resp[0] = (uint32_t)RPMI_ERR_DENIED;

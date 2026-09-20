@@ -7,7 +7,13 @@ config HSM_RPMI
 	bool "RPMI HSM service group"
 	depends on RPMI
 	help
-	  Tell the platform microcontroller when harts are started and
-	  stopped (SBI HSM), so that it can power them up and down.
+	  Tell the platform microcontroller when harts are started, stopped
+	  and suspended (SBI HSM), so that it can power them up and down. Its
+	  suspend types are the platform specific ones of sbi_hart_suspend().
+
+config HSM_RPMI_MAX_SUSPEND_TYPES
+	int "Most suspend types of a PuC"
+	depends on HSM_RPMI
+	default 8
 
 endmenu

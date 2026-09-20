@@ -121,6 +121,10 @@ extern uint32_t puc_sysmsi_requests;
 
 /* What the model saw of the M-mode consumers. */
 extern uint32_t puc_hsm_starts, puc_hsm_stops, puc_hsm_last_hart;
+extern uint32_t puc_hsm_suspends, puc_hsm_last_type;
+/* The model's suspend types: platform specific ones, as the SBI sees them. */
+#define PUC_SUSPEND_RET U(0x10000001)
+#define PUC_SUSPEND_NON_RET U(0x90000001)
 extern uint64_t puc_hsm_last_addr;
 extern uint32_t puc_hsm_refuse; /* answer HSM_HART_START with DENIED */
 extern uint32_t puc_reset_queries;
