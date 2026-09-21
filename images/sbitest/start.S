@@ -198,3 +198,23 @@ dbtr_target:
 	nop
 .option pop
 	ret
+
+	/*
+	 * long dbtr_icount_run(ext, fid): install the one trigger of the shared
+	 * memory and run into a sled of nops, one of which an instruction count
+	 * trigger gets to skip.
+	 */
+	.globl dbtr_icount_run
+	.balign	4
+dbtr_icount_run:
+.option push
+.option norvc
+	mv	a7, a0
+	mv	a6, a1
+	li	a0, 1
+	ecall
+	.rept	16
+	nop
+	.endr
+.option pop
+	ret

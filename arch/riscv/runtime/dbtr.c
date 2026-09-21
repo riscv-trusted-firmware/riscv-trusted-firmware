@@ -10,6 +10,11 @@
  * takes it directly. The monitor only programs the triggers, and makes
  * sure none of them can fire in M-mode or belongs to a debugger (the m and
  * dmode bits of a configuration must be zero).
+ *
+ * The trigger types differ in where tdata1 keeps the modes, the hit bits
+ * and the chain bit: trigger_types[] has them, and a type that is not in
+ * it is not supported (the legacy type 1, and the external trigger of type
+ * 7, which has no modes to keep it out of M-mode with).
  */
 
 #include <arch/dbtr.h>
@@ -23,19 +28,66 @@
 #define TDATA1_TYPE(v) ((v) >> TDATA1_TYPE_SHIFT)
 #define TDATA1_DMODE BIT(__RISCV_XLEN__ - 5)
 #define TYPE_MCONTROL 2
+#define TYPE_ICOUNT 3
+#define TYPE_ITRIGGER 4
+#define TYPE_ETRIGGER 5
 #define TYPE_MCONTROL6 6
+#define TYPE_COUNT 16
 
-/* mcontrol and mcontrol6 agree on these; vs and vu only exist in mcontrol6. */
-#define MC_U BIT(3)
-#define MC_S BIT(4)
-#define MC_M BIT(6)
-#define MC_CHAIN BIT(11)
-#define MC6_VU BIT(23)
-#define MC6_VS BIT(24)
-/* Set by the hardware when the trigger fires: not part of a configuration. */
-#define MC_HIT BIT(20)
-#define MC6_HIT0 BIT(22)
-#define MC6_HIT1 BIT(25)
+/* Where a trigger type keeps what the monitor has to know of tdata1. */
+struct trigger_type {
+	unsigned long u, s, m, vu, vs;
+	unsigned long chain;
+	/*
+	 * Set by the hardware as the trigger fires: not part of a
+	 * configuration.
+	 */
+	unsigned long hit;
+};
+
+static const struct trigger_type trigger_types[TYPE_COUNT] = {
+	[TYPE_MCONTROL] = {
+		.u = BIT(3),
+		.s = BIT(4),
+		.m = BIT(6),
+		.chain = BIT(11),
+		.hit = BIT(20),
+	},
+	[TYPE_MCONTROL6] = {
+		.u = BIT(3),
+		.s = BIT(4),
+		.m = BIT(6),
+		.vu = BIT(23),
+		.vs = BIT(24),
+		.chain = BIT(11),
+		.hit = BIT(22) | BIT(25),
+	},
+	/* hit, and pending: the count ran out in a mode that cannot trap yet */
+	[TYPE_ICOUNT] = {
+		.u = BIT(6),
+		.s = BIT(7),
+		.m = BIT(9),
+		.vu = BIT(25),
+		.vs = BIT(26),
+		.hit = BIT(24) | BIT(8),
+	},
+	[TYPE_ITRIGGER] = {
+		.u = BIT(6),
+		.s = BIT(7),
+		.m = BIT(9),
+		.vu = BIT(11),
+		.vs = BIT(12),
+		.hit = BIT(__RISCV_XLEN__ - 6),
+	},
+	[TYPE_ETRIGGER] = {
+		.u = BIT(6),
+		.s = BIT(7),
+		.m = BIT(9),
+		.vu = BIT(11),
+		.vs = BIT(12),
+		.hit = BIT(__RISCV_XLEN__ - 6),
+	},
+};
 
 #define STATE_MAPPED BIT(0)
 #define STATE_U BIT(1)
@@ -77,16 +129,22 @@ static struct dbtr_hart *this_dbtr(void)
 	return this_domain_hart_slot(dbtr_harts, sizeof(*dbtr_harts));
 }
 
-static unsigned long mode_bits(unsigned long tdata1)
+/* All zero for a type that is not supported. */
+static const struct trigger_type *type_of(unsigned long tdata1)
 {
-	return MC_U | MC_S |
-	       (TDATA1_TYPE(tdata1) == TYPE_MCONTROL6 ? MC6_VU | MC6_VS : 0);
+	return &trigger_types[TDATA1_TYPE(tdata1)];
 }
 
-static unsigned long hit_bits(unsigned long tdata1)
+static unsigned long mode_bits(unsigned long tdata1)
 {
-	return TDATA1_TYPE(tdata1) == TYPE_MCONTROL6 ? MC6_HIT0 | MC6_HIT1 :
-						       MC_HIT;
+	const struct trigger_type *t = type_of(tdata1);
+
+	return t->u | t->s | t->vu | t->vs;
+}
+
+static bool chained(unsigned long tdata1)
+{
+	return tdata1 & type_of(tdata1)->chain;
 }
 
 /*
@@ -186,6 +244,8 @@ unsigned long dbtr_num_triggers(unsigned long tdata1)
 
 	if (!tdata1)
 		return d->count;
+	if (!type_of(tdata1)->s)
+		return 0;
 	for (unsigned int i = 0; i < d->count; i++)
 		n += (d->types[i] >> TDATA1_TYPE(tdata1)) & 1;
 	return n;
@@ -212,12 +272,12 @@ long dbtr_set_shmem(unsigned long lo, unsigned long hi, unsigned long flags)
 /* SBI_SUCCESS, or why the configuration cannot be a trigger of S-mode. */
 static long config_check(const struct dbtr_entry *cfg)
 {
-	unsigned long type = TDATA1_TYPE(cfg->tdata1);
+	const struct trigger_type *t = type_of(cfg->tdata1);
 
-	if ((cfg->tdata1 & TDATA1_DMODE) || (cfg->tdata1 & MC_M))
-		return SBI_ERR_INVALID_PARAM;
-	if (type != TYPE_MCONTROL && type != TYPE_MCONTROL6)
+	if (!t->s)
 		return SBI_ERR_NOT_SUPPORTED;
+	if ((cfg->tdata1 & TDATA1_DMODE) || (cfg->tdata1 & t->m))
+		return SBI_ERR_INVALID_PARAM;
 	return SBI_SUCCESS;
 }
 
@@ -237,7 +297,7 @@ static bool hw_program(struct dbtr_hart *d, unsigned int idx,
 	csr_write(CSR_TDATA1, cfg->tdata1);
 
 	got = csr_read(CSR_TDATA1);
-	if ((got ^ cfg->tdata1) & ~hit_bits(cfg->tdata1)) {
+	if ((got ^ cfg->tdata1) & ~type_of(cfg->tdata1)->hit) {
 		hw_clear(idx);
 		return false;
 	}
@@ -246,19 +306,18 @@ static bool hw_program(struct dbtr_hart *d, unsigned int idx,
 
 static unsigned long state_of(unsigned int idx, unsigned long tdata1)
 {
+	const struct trigger_type *t = type_of(tdata1);
 	unsigned long state = STATE_MAPPED | STATE_HAVE_HW |
 			      SHIFT_UL(idx, STATE_HW_IDX_SHIFT);
 
-	if (tdata1 & MC_U)
+	if (tdata1 & t->u)
 		state |= STATE_U;
-	if (tdata1 & MC_S)
+	if (tdata1 & t->s)
 		state |= STATE_S;
-	if (TDATA1_TYPE(tdata1) == TYPE_MCONTROL6) {
-		if (tdata1 & MC6_VU)
-			state |= STATE_VU;
-		if (tdata1 & MC6_VS)
-			state |= STATE_VS;
-	}
+	if (tdata1 & t->vu)
+		state |= STATE_VU;
+	if (tdata1 & t->vs)
+		state |= STATE_VS;
 	return state;
 }
 
@@ -343,7 +402,7 @@ long dbtr_install(unsigned long count, unsigned long *failed)
 	for (unsigned long i = 0; i < count; i++) {
 		cfg[i] = mem[i];
 		rc = config_check(&cfg[i]);
-		if (!rc && i == count - 1 && (cfg[i].tdata1 & MC_CHAIN))
+		if (!rc && i == count - 1 && chained(cfg[i].tdata1))
 			rc = SBI_ERR_INVALID_PARAM;
 		if (rc) {
 			*failed = i;
@@ -353,7 +412,7 @@ long dbtr_install(unsigned long count, unsigned long *failed)
 	for (unsigned long i = 0, len; i < count; i += len) {
 		int start = 0;
 
-		for (len = 1; cfg[i + len - 1].tdata1 & MC_CHAIN; len++)
+		for (len = 1; chained(cfg[i + len - 1].tdata1); len++)
 			;
 		start = find_run(d, &cfg[i], len, taken);
 		if (start < 0) {
@@ -412,7 +471,7 @@ long dbtr_update(unsigned long count, unsigned long *failed)
 		csr_write(CSR_TSELECT, cfg.idx);
 		cur = csr_read(CSR_TDATA1);
 		if (TDATA1_TYPE(cur) != TDATA1_TYPE(cfg.tdata1) ||
-		    ((cur ^ cfg.tdata1) & MC_CHAIN))
+		    chained(cur) != chained(cfg.tdata1))
 			return entries_put(SBI_ERR_INVALID_PARAM);
 		if (!hw_program(d, (unsigned int)cfg.idx, &cfg)) {
 			d->state[cfg.idx] = 0;
@@ -439,6 +498,7 @@ static long set_op_apply(unsigned long base, unsigned long mask, enum set_op op)
 
 	for (unsigned int i = 0; i < __RISCV_XLEN__; i++) {
 		unsigned long idx = base + i, state = 0, tdata1 = 0, modes = 0;
+		const struct trigger_type *t = NULL;
 
 		if (!(mask & BIT(i)))
 			continue;
@@ -451,11 +511,12 @@ static long set_op_apply(unsigned long base, unsigned long mask, enum set_op op)
 		state = d->state[idx];
 		csr_write(CSR_TSELECT, idx);
 		tdata1 = csr_read(CSR_TDATA1);
+		t = type_of(tdata1);
 		if (op == SET_ENABLE) {
-			modes |= state & STATE_U ? MC_U : 0;
-			modes |= state & STATE_S ? MC_S : 0;
-			modes |= state & STATE_VU ? MC6_VU : 0;
-			modes |= state & STATE_VS ? MC6_VS : 0;
+			modes |= state & STATE_U ? t->u : 0;
+			modes |= state & STATE_S ? t->s : 0;
+			modes |= state & STATE_VU ? t->vu : 0;
+			modes |= state & STATE_VS ? t->vs : 0;
 		}
 		csr_write(CSR_TDATA1, (tdata1 & ~mode_bits(tdata1)) | modes);
 	}

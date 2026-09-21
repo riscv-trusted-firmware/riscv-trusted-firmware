@@ -18,7 +18,7 @@ and what is still missing.
 | SUSP      | `SUSP` | suspend to RAM as an M-mode wait with all other harts stopped (`CONFIG_SBI_SUSP`, on for QEMU virt) |
 | FWFT      | `FWFT` | misaligned exception delegation; landing pad, shadow stack, double trap, PTE A/D updating and pointer masking where the hart has them; lock flag |
 | SSE       | `SSE`  | all ten functions; sources: the software injected local and global events, PMU counter overflow (Sscofpmf), double trap (Ssdbltrp) |
-| DBTR      | `DBTR` | all eight functions, on harts with Sdtrig; address / data match triggers (mcontrol, mcontrol6), chains included |
+| DBTR      | `DBTR` | all eight functions, on harts with Sdtrig; address / data match triggers (mcontrol, mcontrol6) with chains, instruction count, interrupt and exception triggers (icount, itrigger, etrigger) |
 | MPXY      | `MPXY` | all eight functions; channels carry RPMI service groups (see below); notification events signalled by MSI or SSE, or polled |
 | PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart, `event_get_info`, counter snapshots |
 | DBCN      | `DBCN` | write, read, write_byte (`CONFIG_SBI_DBCN`) |
@@ -287,7 +287,11 @@ index is the hardware trigger's index, so a chain gets contiguous indices
 by getting contiguous hardware triggers. Configurations must have dmode and
 m clear, and are taken all or nothing: validated and placed first, then
 programmed, with a read-back that turns a WARL refusal into
-`SBI_ERR_NOT_SUPPORTED`. "Off" is the trigger's type with nothing else set,
+`SBI_ERR_NOT_SUPPORTED`. The trigger types keep their mode, hit and chain
+bits in different places of tdata1 (`trigger_types[]`): address / data match
+(mcontrol, mcontrol6), instruction count, interrupt and exception triggers
+are there; the legacy type 1 and the external trigger (type 7, which has no
+mode bits to keep it out of M-mode with) are `SBI_ERR_NOT_SUPPORTED`. "Off" is the trigger's type with nothing else set,
 since tdata1 may refuse to read as zero (QEMU). A trigger that fires is a
 breakpoint exception, which is delegated: the monitor is not involved.
 
@@ -508,8 +512,7 @@ with `IMAGE_SBITEST` disabled.
 
 ## Gaps
 
-1. SSE RAS events (no source yet); DBTR trigger types other than address /
-   data match.
+1. SSE RAS events (no source yet).
 2. **RPMI**: a wired P2A doorbell interrupt (an MSI one is there). Of the
    groups a firmware can serve itself, request forwarding between domains
    and the management mode built on it are there; the TEE group waits for
@@ -523,4 +526,5 @@ with `IMAGE_SBITEST` disabled.
 
 The H-extension paths (trap redirection from VS/VU-mode, `hfence` on a real
 guest) are written after the specification but have not run under a
-hypervisor yet.
+hypervisor yet. The instruction count, interrupt and exception debug
+triggers have nothing in QEMU 8.2 to run against.

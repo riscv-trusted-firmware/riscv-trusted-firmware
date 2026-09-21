@@ -34,6 +34,13 @@
 #define MC_S BIT(4)
 #define MC_M BIT(6)
 #define MC_CHAIN BIT(11)
+/* icount, itrigger and etrigger keep their modes elsewhere. */
+#define IC_COUNT(n) SHIFT_UL(n, 10)
+#define IC_U BIT(6)
+#define IC_S BIT(7)
+#define IC_M BIT(9)
+#define ET_VU BIT(11)
+#define STATE_U BIT(1)
 #define STATE_MAPPED BIT(0)
 #define STATE_S BIT(2)
 
@@ -61,6 +68,97 @@ static void read_watched(void)
 	if (!trap_count)
 		CHECK((uint32_t)val == 0x77a7c4ed,
 		      "watched variable read as %lx", val);
+}
+
+/*
+ * The types that are not an address match keep the modes in other bits:
+ * what is a chain bit there is a mode or a count here.
+ */
+static void test_other_types(void)
+{
+	struct sbiret ret = {};
+	unsigned long idx = 0;
+
+	if (sbi_call1(SBI_EXT_DBTR, FID_NUM_TRIGGERS, TDATA1_TYPE(3)).value) {
+		shmem[0].tdata1 = TDATA1_TYPE(3) | IC_M | IC_S | IC_COUNT(2);
+		shmem[0].tdata2 = 0;
+		shmem[0].tdata3 = 0;
+		CHECK_RET(sbi_call1(SBI_EXT_DBTR, FID_INSTALL, 1),
+			  SBI_ERR_INVALID_PARAM);
+
+		/*
+		 * A count with bit 11 set, in U-mode only: never runs out here.
+		 */
+		shmem[0].tdata1 = TDATA1_TYPE(3) | IC_U | IC_COUNT(3);
+		CHECK_RET(sbi_call1(SBI_EXT_DBTR, FID_INSTALL, 1), SBI_SUCCESS);
+		idx = shmem[0].idx;
+		CHECK_RET(sbi_call2(SBI_EXT_DBTR, FID_DISABLE, idx, 1),
+			  SBI_SUCCESS);
+		CHECK_RET(sbi_call2(SBI_EXT_DBTR, FID_READ, idx, 1),
+			  SBI_SUCCESS);
+		CHECK((shmem[0].idx & (STATE_MAPPED | STATE_U | STATE_S)) ==
+		      (STATE_MAPPED | STATE_U) &&
+		      !(shmem[0].tdata1 & (IC_U | IC_S)) &&
+		      (shmem[0].tdata1 & IC_COUNT(0x3fff)) ==
+				      IC_COUNT(3),
+		      "icount, disabled: state %lx tdata1 %lx", shmem[0].idx,
+		      shmem[0].tdata1);
+		CHECK_RET(sbi_call2(SBI_EXT_DBTR, FID_ENABLE, idx, 1),
+			  SBI_SUCCESS);
+		CHECK_RET(sbi_call2(SBI_EXT_DBTR, FID_READ, idx, 1),
+			  SBI_SUCCESS);
+		CHECK((shmem[0].tdata1 & (IC_U | IC_S)) == IC_U,
+		      "icount, enabled: tdata1 %lx", shmem[0].tdata1);
+		CHECK_RET(sbi_call2(SBI_EXT_DBTR, FID_UNINSTALL, idx, 1),
+			  SBI_SUCCESS);
+
+		/* In S-mode: it runs out in the sled, once. */
+		shmem[0].tdata1 = TDATA1_TYPE(3) | IC_S | IC_COUNT(3);
+		WRITE_ONCE(trap_count, 0);
+		WRITE_ONCE(trap_expected, true);
+		CHECK(dbtr_icount_run(SBI_EXT_DBTR, FID_INSTALL) == SBI_SUCCESS,
+		      "icount in S-mode not installed");
+		WRITE_ONCE(trap_expected, false);
+		CHECK(trap_count == 1 && trap_cause == CAUSE_BREAKPOINT,
+		      "icount: %lu traps, cause %lu", trap_count, trap_cause);
+		CHECK_RET(sbi_call2(SBI_EXT_DBTR, FID_UNINSTALL, shmem[0].idx,
+				    1),
+			  SBI_SUCCESS);
+	} else {
+		printf("  no instruction count trigger\n");
+	}
+
+	/*
+	 * Interrupt and exception triggers: there, or refused by the hardware.
+	 */
+	for (unsigned long type = 4; type <= 5; type++) {
+		bool have = sbi_call1(SBI_EXT_DBTR, FID_NUM_TRIGGERS,
+				      TDATA1_TYPE(type))
+				    .value;
+
+		shmem[0].tdata1 = TDATA1_TYPE(type) | IC_M | IC_U;
+		shmem[0].tdata2 = 0;
+		ret = sbi_call1(SBI_EXT_DBTR, FID_INSTALL, 1);
+		CHECK_RET(ret, SBI_ERR_INVALID_PARAM);
+		/*
+		 * vu is where an address match has its chain bit: not a chain.
+		 */
+		shmem[0].tdata1 = TDATA1_TYPE(type) | IC_U | ET_VU;
+		ret = sbi_call1(SBI_EXT_DBTR, FID_INSTALL, 1);
+		if (!have) {
+			CHECK(ret.error == SBI_ERR_FAILED,
+			      "type %lu: install gives %ld", type, ret.error);
+			continue;
+		}
+		/* vu is only there with the H extension. */
+		CHECK(ret.error == SBI_SUCCESS ||
+		      ret.error == SBI_ERR_NOT_SUPPORTED,
+		      "type %lu: install gives %ld", type, ret.error);
+		if (!ret.error)
+			CHECK_RET(sbi_call2(SBI_EXT_DBTR, FID_UNINSTALL,
+					    shmem[0].idx, 1),
+				  SBI_SUCCESS);
+	}
 }
 
 void test_dbtr(void)
@@ -192,6 +290,7 @@ void test_dbtr(void)
 	/* Clean up whatever the fill loop installed. */
 	for (unsigned long i = 0; i < total; i++)
 		sbi_call2(SBI_EXT_DBTR, FID_UNINSTALL, i, 1);
+	test_other_types();
 	CHECK_RET(sbi_call3(SBI_EXT_DBTR, FID_SET_SHMEM, ~UL(0), ~UL(0), 0),
 		  SBI_SUCCESS);
 	CHECK_RET(sbi_call0(SBI_EXT_DBTR, 8), SBI_ERR_NOT_SUPPORTED);
