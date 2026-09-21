@@ -187,6 +187,22 @@ long domain_enter(struct trap_regs *regs, struct domain *target,
  * hart yet, then to the root domain.
  */
 long domain_exit(struct trap_regs *regs, unsigned long value);
+/*
+ * The same two moves for a service that uses them as its transport (the
+ * MPXY bridge, <mpxy.h>) rather than for a call that asks for them: the
+ * context that is left has its registers as it is to find them, and gets
+ * no (error, value) when the hart comes back. domain_switch_to() only
+ * goes where the hart would run (domain_enterable()): a context that
+ * waits to be entered again, or the boot of 'target' on its boot hart.
+ * domain_switch_back() goes back to the context that entered this one;
+ * without one, 'first' is booted if this hart is its boot hart and has
+ * not done so yet, and that is all (SBI_ERR_DENIED).
+ */
+bool domain_enterable(const struct domain *target);
+long domain_switch_to(struct trap_regs *regs, struct domain *target);
+long domain_switch_back(struct trap_regs *regs, struct domain *first);
+/* The domain whose context waits for this one to exit, -1 if none does. */
+int domain_caller_key(void);
 /* Start a stopped domain at its next stage, on its boot hart. */
 long domain_start(struct domain *dom);
 /*

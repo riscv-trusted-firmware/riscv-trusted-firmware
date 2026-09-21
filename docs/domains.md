@@ -188,6 +188,27 @@ today `riscv,rpmi-mpxy-mm-domain` for management mode. MPXY channels
 belong to the domain named by `riscv,domain` in their node and
 are invisible to the others.
 
+Domains that share a hart need no second one for it: a bridge node
+(`riscv,rpmi-mpxy-reqfwd-bridge`, [sbi.md](sbi.md)) has the hart that
+makes the request carry it over and bring the answer back.
+
+```dts
+untrusted-to-trusted-bridge {
+    compatible = "riscv,rpmi-mpxy-reqfwd-bridge";
+    riscv,domain = <&tdomain>;                 /* takes the requests */
+    riscv,sbi-mpxy-channel-id = <0x2>;
+    source0 {
+        compatible = "riscv,rpmi-mpxy-reqfwd-mm";
+        riscv,domain = <&udomain>;             /* makes them */
+        riscv,sbi-mpxy-channel-id = <0x1>;
+        riscv,mm-memregion = <&mmmem>;
+    };
+};
+```
+
+With harts of their own on both sides, the two channels can also be nodes
+of their own:
+
 ```dts
 reqfwd-tdom {
     compatible = "riscv,rpmi-mpxy-request-forward";

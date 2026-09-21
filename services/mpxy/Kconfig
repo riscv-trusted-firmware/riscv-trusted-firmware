@@ -49,12 +49,14 @@ config MPXY_RPMI_FW
 	  domain takes the requests forwarded to it and answers them;
 	  "riscv,rpmi-mpxy-mm-domain" nodes are MANAGEMENT_MODE channels
 	  whose MM_COMMUNICATE requests are forwarded to the domain that
-	  hosts the management mode.
+	  hosts the management mode. "riscv,rpmi-mpxy-reqfwd-bridge" nodes
+	  are both at once, and also work between domains that share a hart:
+	  the hart goes over with the request and comes back with the answer.
 
 config MPXY_RPMI_FW_MAX_CHANNELS
 	int "Maximum number of channels served by the monitor"
 	depends on MPXY_RPMI_FW
-	default 4
+	default 8
 
 config MPXY_RPMI_MAX_CHANNELS
 	int "Maximum number of RPMI channels"

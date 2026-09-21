@@ -433,6 +433,37 @@ bindings are the ones proposed for the same, under `riscv,` names.
   (`RPMI_ERR_NO_DATA`) instead of landing in a buffer that is gone, and an
   answer that claims more output than the caller made room for is
   `RPMI_ERR_IO`.
+* `riscv,rpmi-mpxy-reqfwd-bridge` is both in one node, in the shape
+  proposed for the MPXY bridge: the node
+  is the REQUEST_FORWARD channel of the domain its `riscv,domain` names,
+  and its child nodes are the channels requests come from, each with a
+  `riscv,domain` and a `riscv,sbi-mpxy-channel-id` of its own. A child
+  says which service group it carries: `riscv,rpmi-mpxy-reqfwd-mm` is a
+  MANAGEMENT_MODE channel as above (with `riscv,mm-memregion`), hosted by
+  the bridge's domain. A `...-tee` child is reported and left out until
+  that group is ratified.
+
+**The bridge's transport.** Domains with harts of their own use the queue.
+A bridge also serves domains that share a hart, which is what a trusted
+environment without harts next to an operating system is: the hart that has
+the request takes it over (`domain_switch_to()`), with the message in a
+slot the monitor keeps per source domain and hart. The target finds it as
+its current message, and `REQFWD_COMPLETE_CURRENT_MESSAGE` brings the hart
+back with the response; the target's call returns the next time the hart
+comes. A target that asks for a message when there is none gives the hart
+up as well, to the context that entered it, or, while the machine boots,
+for a source domain to boot on it; its `RETRIEVE` is made again when the
+hart is back, and then has a message. Only a hart with nowhere to go gets
+`RPMI_ERR_NO_DATA`. So a target can be as simple as a loop of retrieve and
+complete, booted first on the shared hart. A request whose target gives
+the hart back without completing it is `RPMI_ERR_IO`; one from a hart that
+cannot go to the target (not a hart of that domain, or a hart the domain
+has yet to be started on) takes the queue, for a hart of the target's own
+to serve. There is no time limit on a request that travels with the hart:
+the hart is not there to wait. The moves are made by the SBI call once
+the channel operation is done and the shared memory let go of
+(`mpxy_switch_pending()`), and the answer is written when the context
+that sent the request has the hart again (`mpxy_context_resumed()`).
 
 Messages and responses are bounced through the monitor's memory (the
 producer's stack), since a hart's M-mode is not at home in another domain's

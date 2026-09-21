@@ -143,6 +143,35 @@ long mpxy_get_notifications(unsigned long channel_id, unsigned long *bytes);
 /* No shared memory set. */
 #define MPXY_SHMEM_NONE (~UL(0))
 
+/*
+ * The bridge between domains that share a hart (mpxy_rpmi_fw.c) moves the
+ * hart instead of the message: a send, a retrieve or a complete ends with
+ * the hart in the other domain. The channel operation only asks for that;
+ * the SBI call makes the move once the shared memory is let go of
+ * (mpxy_switch_pending(): true when 'regs' is another context's by now,
+ * results and all), and a context that sent a message gets its answer
+ * when the hart is back in it (mpxy_context_resumed(), from the switch).
+ */
+struct trap_regs;
+#ifdef CONFIG_MPXY_RPMI_FW
+bool mpxy_switch_pending(struct trap_regs *regs, long error, long value);
+void mpxy_context_resumed(struct trap_regs *regs);
+#else
+static inline bool mpxy_switch_pending(struct trap_regs *regs, long error,
+				       long value)
+{
+	return false;
+}
+
+static inline void mpxy_context_resumed(struct trap_regs *regs)
+{
+}
+#endif
+/*
+ * The calling hart's shared memory, NULL without: inside mpxy_shmem_access().
+ */
+uint32_t *mpxy_hart_shmem(void);
+
 #ifdef CONFIG_MPXY
 void mpxy_indicate(void);
 void mpxy_hart_init(void);

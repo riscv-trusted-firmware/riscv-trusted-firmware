@@ -105,11 +105,11 @@ static void test_shmem(void)
 }
 
 /*
- * The PuC's four, and with domains the one of ours the monitor serves
+ * The PuC's four, and with domains the two of ours the monitor serves
  * (domain.c).
  */
 #ifdef CONFIG_QEMU_VIRT_DOMAINS
-#define NR_CHANNELS 5
+#define NR_CHANNELS 6
 #else
 #define NR_CHANNELS 4
 #endif

@@ -346,6 +346,42 @@ static int assign_cpu(void *fdt, unsigned long hartid, uint32_t domain)
 
 #define DOM_CHANNEL_MM 0x3000
 #define DOM_CHANNEL_REQFWD 0x3001
+#define DOM_CHANNEL_BRIDGE 0x3002
+#define DOM_CHANNEL_BRIDGE_MM 0x3003
+
+/*
+ * The same service through a bridge: the target's channel, the source's in it.
+ */
+static int add_bridge(void *fdt, uint32_t target, uint32_t source,
+		      uint32_t memregion)
+{
+	int soc = fdt_path_offset(fdt, "/soc"), node = 0, rc = 0;
+
+	node = fdt_add_subnode(fdt, soc < 0 ? 0 : soc,
+			       "untrusted-to-trusted-bridge");
+	if (node < 0)
+		return node;
+	rc = set_string(fdt, node, "compatible",
+			"riscv,rpmi-mpxy-reqfwd-bridge");
+	if (!rc)
+		rc = fdt_setprop_u32(fdt, node, "riscv,domain", target);
+	if (!rc)
+		rc = fdt_setprop_u32(fdt, node, "riscv,sbi-mpxy-channel-id",
+				     DOM_CHANNEL_BRIDGE);
+	node = rc ? rc : fdt_add_subnode(fdt, node, "source0");
+	if (node < 0)
+		return node;
+	rc = set_string(fdt, node, "compatible", "riscv,rpmi-mpxy-reqfwd-mm");
+	if (!rc)
+		rc = fdt_setprop_u32(fdt, node, "riscv,domain", source);
+	if (!rc)
+		rc = fdt_setprop_u32(fdt, node, "riscv,sbi-mpxy-channel-id",
+				     DOM_CHANNEL_BRIDGE_MM);
+	if (!rc)
+		rc = fdt_setprop_u32(fdt, node, "riscv,mm-memregion",
+				     memregion);
+	return rc;
+}
 
 static int add_channel(void *fdt, const char *name, const char *compatible,
 		       uint32_t id, uint32_t owner, uint32_t target,
@@ -477,6 +513,8 @@ static int domains_fdt_prepare(void *fdt)
 		rc = add_channel(fdt, "reqfwd-trusted",
 				 "riscv,rpmi-mpxy-request-forward",
 				 DOM_CHANNEL_REQFWD, dom[0], 0, 0);
+	if (!rc)
+		rc = add_bridge(fdt, dom[0], dom[1], mem[SHARED]);
 	return rc;
 }
 

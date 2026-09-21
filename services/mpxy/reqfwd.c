@@ -36,8 +36,11 @@ struct reqfwd_queue {
 	bool served;
 	struct reqfwd_message *head, **tail;
 	size_t count;
-	void (*notify)(void *arg);
-	void *arg;
+	/* Who serves it: a channel, or a channel and a bridge. */
+	struct {
+		void (*notify)(void *arg);
+		void *arg;
+	} server[2];
 };
 
 /* One per domain, from the heap when the first of them gets served. */
@@ -58,14 +61,20 @@ struct reqfwd_queue *reqfwd_serve(unsigned int key, void (*notify)(void *arg),
 	/* Boot time: the channel drivers' probes. */
 	if (!queues)
 		queues = heap_alloc_array(domain_keys(), sizeof(*queues));
-	q = &queues[key];
-	if (key >= domain_keys() || q->served)
+	if (key >= domain_keys())
 		return NULL;
-	q->tail = &q->head;
-	q->notify = notify;
-	q->arg = arg;
-	q->served = true;
-	return q;
+	q = &queues[key];
+	for (unsigned int i = 0; i < ARRAY_SIZE(q->server); i++) {
+		if (q->server[i].notify)
+			continue;
+		if (!q->served)
+			q->tail = &q->head;
+		q->server[i].notify = notify;
+		q->server[i].arg = arg;
+		q->served = true;
+		return q;
+	}
+	return NULL;
 }
 
 /* Out of the queue, wherever it is; called with the lock held. */
@@ -104,8 +113,9 @@ int reqfwd_send(struct reqfwd_queue *q, const void *msg, size_t msg_len,
 	spin_unlock(&q->lock);
 
 	/* A domain that works through its queue gets to this one by itself. */
-	if (first && q->notify)
-		q->notify(q->arg);
+	for (unsigned int i = 0; first && i < ARRAY_SIZE(q->server); i++)
+		if (q->server[i].notify)
+			q->server[i].notify(q->server[i].arg);
 
 	while ((state = atomic_load_ulong(&m.state)) < COMPLETED) {
 		if (timer_available() && timer_now() > until) {
@@ -185,6 +195,16 @@ int reqfwd_complete(struct reqfwd_queue *q, const void *rsp, size_t rsp_len,
 	*left = q->count;
 	spin_unlock(&q->lock);
 	return rc;
+}
+
+size_t reqfwd_count(struct reqfwd_queue *q)
+{
+	size_t count = 0;
+
+	spin_lock(&q->lock);
+	count = q->count;
+	spin_unlock(&q->lock);
+	return count;
 }
 
 size_t reqfwd_peek(struct reqfwd_queue *q, void *buf, size_t max)

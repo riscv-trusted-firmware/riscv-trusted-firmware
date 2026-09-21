@@ -268,6 +268,7 @@ static void test_trusted_smp(unsigned long other)
 #define RPMI_MM_COMMUNICATE 3
 
 static uint32_t mm_page[1024] __aligned(4096);
+static unsigned long mm_channel = DOM_CHANNEL_MM;
 
 /*
  * MM_COMMUNICATE of 'size' input bytes: the STATUS, the returned size in *out.
@@ -281,7 +282,7 @@ static long mm_communicate(uint32_t in_off, uint32_t size, uint32_t out_off,
 	mm_page[1] = size;
 	mm_page[2] = out_off;
 	mm_page[3] = out_size;
-	ret = sbi_call3(SBI_EXT_MPXY, MPXY_SEND_WITH_RESP, DOM_CHANNEL_MM,
+	ret = sbi_call3(SBI_EXT_MPXY, MPXY_SEND_WITH_RESP, mm_channel,
 			RPMI_MM_COMMUNICATE, 16);
 	if (ret.error || ret.value != 8)
 		return ret.error ? ret.error : -100;
@@ -389,6 +390,58 @@ static void test_mm(unsigned long other)
 	sbi_call3(SBI_EXT_MPXY, MPXY_SET_SHMEM, ~UL(0), ~UL(0), 0);
 }
 
+/*
+ * The same service through a bridge, which needs no second hart: the one
+ * that has the request takes it to the trusted domain and brings the
+ * answer back.
+ */
+static void test_bridge(void)
+{
+	uint32_t got = 0;
+	struct sbiret ret = {};
+	long rc = 0;
+
+	printf("  bridge\n");
+	CHECK_RET(sbi_call3(SBI_EXT_MPXY, MPXY_SET_SHMEM,
+			    (unsigned long)mm_page, 0, 0),
+		  SBI_SUCCESS);
+	CHECK_RET(sbi_call3(SBI_EXT_MPXY, MPXY_READ_ATTRS, DOM_CHANNEL_BRIDGE,
+			    0, 1),
+		  SBI_ERR_NOT_SUPPORTED);
+	ret = sbi_call3(SBI_EXT_MPXY, MPXY_READ_ATTRS, DOM_CHANNEL_BRIDGE_MM,
+			UL(0x80000000), 1);
+	CHECK(!ret.error && mm_page[0] == 0xb,
+	      "bridged MM channel: %ld, group %x", ret.error, mm_page[0]);
+	mm_channel = DOM_CHANNEL_BRIDGE_MM;
+
+	/*
+	 * The trusted domain waits in its exit call, not for requests: the
+	 * hart goes there, comes back without an answer, and that is an error.
+	 */
+	rc = mm_communicate(MM_IN_OFFSET, 4, MM_OUT_OFFSET, 4, &got);
+	CHECK(rc == -13, "a request nobody completed: %ld", rc);
+	CHECK_RET(sbi_call1(SBI_EXT_MPXY, 2, 0), SBI_SUCCESS);
+
+	/* Its first look for a request finds none and gives the hart back. */
+	ret = enter(TCMD(TCMD_BRIDGE_SERVE, 3));
+	CHECK(!ret.error && ret.value == 0, "serving the bridge: %ld %lx",
+	      ret.error, ret.value);
+	mm_round_trip(16, 5);
+	mm_round_trip(MM_AREA_SIZE, 6);
+	mm_round_trip(64, 7);
+	/*
+	 * Through with its three: the next entry finds it back at its commands.
+	 */
+	ret = enter(TCMD(TCMD_ECHO, 0));
+	CHECK(!ret.error && ret.value == 3, "the bridge's server: %ld %lx",
+	      ret.error, ret.value);
+	CHECK(enter(TCMD(TCMD_ECHO, 5)).value == 16,
+	      "the trusted domain after serving");
+
+	mm_channel = DOM_CHANNEL_MM;
+	sbi_call3(SBI_EXT_MPXY, MPXY_SET_SHMEM, ~UL(0), ~UL(0), 0);
+}
+
 static void test_island(unsigned long boot)
 {
 	unsigned long island = 0;
@@ -475,6 +528,9 @@ void test_domains(unsigned long boot, unsigned long other)
 	if (sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_MPXY)
 	    .value)
 		test_mm(other);
+	if (sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_MPXY)
+	    .value)
+		test_bridge();
 	if (count == 4)
 		test_island(boot);
 

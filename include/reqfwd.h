@@ -27,9 +27,10 @@
 struct reqfwd_queue;
 
 /*
- * The queue of domain 'key', NULL before anybody serves it (reqfwd_serve()).
- * 'notify' is called, with no lock held and on the producer's hart, when a
- * message arrives in an empty queue.
+ * The queue of domain 'key', NULL before anybody serves it (reqfwd_serve();
+ * NULL there when two do already: a channel and a bridge is what a domain
+ * may have). 'notify' is called, with no lock held and on the producer's hart,
+ * when a message arrives in an empty queue.
  */
 struct reqfwd_queue *reqfwd_queue_of(unsigned int key);
 struct reqfwd_queue *reqfwd_serve(unsigned int key, void (*notify)(void *arg),
@@ -56,6 +57,8 @@ int reqfwd_retrieve(struct reqfwd_queue *q, size_t start, void *buf, size_t max,
 		    size_t *returned, size_t *remaining);
 int reqfwd_complete(struct reqfwd_queue *q, const void *rsp, size_t rsp_len,
 		    size_t *left);
+/* How many messages wait in it. */
+size_t reqfwd_count(struct reqfwd_queue *q);
 /* The first bytes of the current message, for who announces it; 0: none. */
 size_t reqfwd_peek(struct reqfwd_queue *q, void *buf, size_t max);
 

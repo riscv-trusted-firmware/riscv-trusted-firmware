@@ -250,11 +250,14 @@ void services_clean(unsigned long *mem)
 #define RPMI_ERR_NO_DATA (-14)
 #define MM_MSI_DATA U(0xfeed)
 
-static long reqfwd_call(uint32_t *page, unsigned long service,
-			unsigned long len)
+/*
+ * 'channel': the one the requests are taken from, the queue's or the bridge's.
+ */
+static long reqfwd_call(unsigned long channel, uint32_t *page,
+			unsigned long service, unsigned long len)
 {
 	struct sbiret ret = sbi_call3(SBI_EXT_MPXY, MPXY_SEND_WITH_RESP,
-				      DOM_CHANNEL_REQFWD, service, len);
+				      channel, service, len);
 
 	return ret.error ? ret.error : (long)(int32_t)page[0];
 }
@@ -272,8 +275,8 @@ static uint64_t time_now(void)
  * One forwarded MM_COMMUNICATE, already retrieved into 'msg' (header, then
  * data).
  */
-static void mm_communicate(uint32_t *page, const uint32_t *msg,
-			   unsigned long *flags)
+static void mm_communicate(unsigned long channel, uint32_t *page,
+			   const uint32_t *msg, unsigned long *flags)
 {
 	vaddr_t in = (vaddr_t)DOM_SHARED + msg[2];
 	vaddr_t out = (vaddr_t)DOM_SHARED + msg[4];
@@ -290,9 +293,10 @@ static void mm_communicate(uint32_t *page, const uint32_t *msg,
 			;
 		page[0] = 0;
 		page[1] = 0;
-		DOM_SHARED->mm_dropped =
-			(unsigned long)(reqfwd_call(page, REQFWD_COMPLETE, 8) +
-					1);
+		WRITE_ONCE(DOM_SHARED->mm_dropped,
+			   (unsigned long)(reqfwd_call(channel, page,
+						       REQFWD_COMPLETE, 8) +
+					   1));
 		return;
 	}
 	if (size > msg[5])
@@ -301,7 +305,7 @@ static void mm_communicate(uint32_t *page, const uint32_t *msg,
 		io_write8(out + i, io_read8(in + size - 1 - i) ^ MM_XOR);
 	page[0] = 0;
 	page[1] = size;
-	if (reqfwd_call(page, REQFWD_COMPLETE, 8))
+	if (reqfwd_call(channel, page, REQFWD_COMPLETE, 8))
 		*flags |= MM_BAD;
 }
 
@@ -329,7 +333,8 @@ static unsigned long mm_serve(unsigned long hartid, unsigned long count)
 	/* To be told of a message: the group's one event, and an MSI for it. */
 	page[0] = 1;
 	page[1] = 1;
-	if (reqfwd_call(page, REQFWD_ENABLE_NOTIFICATION, 8))
+	if (reqfwd_call(DOM_CHANNEL_REQFWD, page, REQFWD_ENABLE_NOTIFICATION,
+			8))
 		flags |= MM_BAD;
 	io_write32(msi, 0);
 	page[0] = 1;
@@ -380,7 +385,8 @@ static unsigned long mm_serve(unsigned long hartid, unsigned long count)
 		for (;;) {
 			do {
 				page[0] = (uint32_t)got;
-				rc = reqfwd_call(page, REQFWD_RETRIEVE, 4);
+				rc = reqfwd_call(DOM_CHANNEL_REQFWD, page,
+						 REQFWD_RETRIEVE, 4);
 				if (rc || got + page[2] > sizeof(msg))
 					break;
 				for (uint32_t i = 0; i < page[2]; i += 4)
@@ -397,7 +403,7 @@ static unsigned long mm_serve(unsigned long hartid, unsigned long count)
 			}
 			if (pieces > 1)
 				flags |= MM_SAW_PIECES;
-			mm_communicate(page, msg, &flags);
+			mm_communicate(DOM_CHANNEL_REQFWD, page, msg, &flags);
 			served++;
 			got = 0;
 			pieces = 0;
@@ -409,6 +415,39 @@ static unsigned long mm_serve(unsigned long hartid, unsigned long count)
 unsigned long instret_coarse(void)
 {
 	return (csr_read(instret) >> 16) & INSTRET_COARSE_MASK;
+}
+
+/*
+ * Requests of the bridge. Nothing here gives the hart back: asking for a
+ * message when there is none does, and so does completing one; either call
+ * returns when the hart comes with the next request.
+ */
+static unsigned long bridge_serve(unsigned long hartid, unsigned long count)
+{
+	uint32_t *page = (uint32_t *)(DOM_TMEM + 0x40000 + 0x1000 * hartid);
+	unsigned long flags = 0, served = 0;
+	uint32_t msg[8] = {};
+
+	if (sbi_call3(SBI_EXT_MPXY, MPXY_SET_SHMEM, (unsigned long)page, 0, 0)
+	    .error)
+		return MM_BAD;
+	while (served < count) {
+		page[0] = 0;
+		/* One piece: the bridge's channel has room for the 24 bytes. */
+		if (reqfwd_call(DOM_CHANNEL_BRIDGE, page, REQFWD_RETRIEVE, 4) ||
+		    page[1] || page[2] != 24) {
+			flags |= MM_BAD;
+			break;
+		}
+		for (uint32_t i = 0; i < 6; i++)
+			msg[i] = page[3 + i];
+		if ((msg[0] & 0xffff) != RPMI_GROUP_MM)
+			flags |= MM_BAD;
+		mm_communicate(DOM_CHANNEL_BRIDGE, page, msg, &flags);
+		served++;
+	}
+	sbi_call3(SBI_EXT_MPXY, MPXY_SET_SHMEM, ~UL(0), ~UL(0), 0);
+	return served | flags;
 }
 
 /* Exit with 'value', and again with the answer to every command that comes. */
@@ -455,6 +494,9 @@ static void __noreturn trusted_serve(unsigned long hartid, unsigned long value)
 			break;
 		case TCMD_HYP_GET:
 			value = hyp_holds(param);
+			break;
+		case TCMD_BRIDGE_SERVE:
+			value = bridge_serve(hartid, param);
 			break;
 		case TCMD_WAIT:
 			WRITE_ONCE(DOM_SHARED->waiting, hartid + 1);

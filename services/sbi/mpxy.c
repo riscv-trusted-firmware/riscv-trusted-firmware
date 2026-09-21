@@ -64,6 +64,9 @@ static struct service_ret sbi_mpxy_ecall(unsigned long eid, unsigned long fid,
 		mpxy_shmem_access(true);
 		ret = sbi_mpxy_shmem_call(fid, regs);
 		mpxy_shmem_access(false);
+		/* A message that travels by the hart changing domain: now. */
+		if (mpxy_switch_pending(regs, ret.error, ret.value))
+			return (struct service_ret){ .keep_regs = true };
 		return ret;
 	}
 }

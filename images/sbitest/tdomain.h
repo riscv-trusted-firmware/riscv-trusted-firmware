@@ -54,6 +54,12 @@ struct dom_shared {
  */
 #define DOM_CHANNEL_MM UL(0x3000)
 #define DOM_CHANNEL_REQFWD UL(0x3001)
+/*
+ * The same through a bridge: "trusted" serves it on the hart the request comes
+ * with.
+ */
+#define DOM_CHANNEL_BRIDGE UL(0x3002)
+#define DOM_CHANNEL_BRIDGE_MM UL(0x3003)
 #define MM_IN_OFFSET U(0x400)
 #define MM_OUT_OFFSET U(0x600)
 #define MM_AREA_SIZE U(0x200)
@@ -97,6 +103,11 @@ struct dom_shared {
 #define TCMD_HYP_SET \
 	10 /* hyp_set(param): bit 0: the CSRs were not as out of reset */
 #define TCMD_HYP_GET 11 /* hyp_holds(param) */
+/*
+ * Serve param requests of the bridge, each on the hart it comes with; the
+ * exit after the last: count | MM_BAD.
+ */
+#define TCMD_BRIDGE_SERVE 12
 
 /*
  * A hypervisor's CSRs (harts with the H extension): some of HS-level and

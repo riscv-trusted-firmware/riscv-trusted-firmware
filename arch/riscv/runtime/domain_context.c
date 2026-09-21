@@ -109,6 +109,8 @@ struct domain_context {
 	enum context_state state;
 	struct domain_context *caller; /* to go back to on exit */
 	bool ipi; /* an S-mode IPI came while it waited */
+	/* Left by domain_switch_*(): its registers are what it is to find. */
+	bool quiet;
 	struct trap_regs regs;
 	unsigned long sie, sip, stvec, sscratch, sepc, scause, stval, satp;
 	unsigned long scounteren, senvcfg;
@@ -522,12 +524,13 @@ static void context_restore(struct domain_context *ctx, bool fresh)
 }
 
 static void context_park(struct domain_context *ctx, enum context_state state,
-			 const struct trap_regs *regs)
+			 const struct trap_regs *regs, bool quiet)
 {
 	struct hart *h = this_hart();
 
 	context_save(ctx, regs);
 	ctx->state = state;
+	ctx->quiet = quiet;
 	hartmask_set_atomic(&h->domain->parked, h->index);
 }
 
@@ -597,11 +600,15 @@ static void context_switch(struct domain_context *to, struct trap_regs *regs,
 			spin_unlock(&domain_lock);
 			hsm_hart_force_stop();
 		}
-	} else {
+	} else if (!to->quiet) {
 		to->regs.a0 = (unsigned long)error;
 		to->regs.a1 = value;
 	}
+	to->quiet = false;
 	context_restore(to, fresh);
+	/* A message this context sent through the switch: what came of it. */
+	if (!fresh)
+		mpxy_context_resumed(&to->regs);
 	if (regs)
 		*regs = to->regs;
 }
@@ -611,8 +618,8 @@ static bool caller_waits(const struct domain_context *ctx)
 	return ctx->caller && ctx->caller->state == CONTEXT_CALLING;
 }
 
-long domain_enter(struct trap_regs *regs, struct domain *target,
-		  unsigned long arg)
+static long enter(struct trap_regs *regs, struct domain *target,
+		  unsigned long arg, bool quiet)
 {
 	unsigned int self = this_hart_index();
 	struct domain_context *cur = NULL, *to = NULL;
@@ -638,14 +645,55 @@ long domain_enter(struct trap_regs *regs, struct domain *target,
 		return rc;
 	}
 
-	context_park(cur, CONTEXT_CALLING, regs);
+	context_park(cur, CONTEXT_CALLING, regs, quiet);
 	to->caller = cur;
 	context_switch(to, regs, SBI_SUCCESS, arg);
 	spin_unlock(&domain_lock);
 	return SBI_SUCCESS;
 }
 
-long domain_exit(struct trap_regs *regs, unsigned long value)
+long domain_enter(struct trap_regs *regs, struct domain *target,
+		  unsigned long arg)
+{
+	return enter(regs, target, arg, false);
+}
+
+/*
+ * Only where the hart gets somewhere: a context that waits to be entered
+ * again, or the domain's boot here. Any other hart would be stopped for
+ * the domain to start it, and the caller with it.
+ */
+bool domain_enterable(const struct domain *target)
+{
+	unsigned int self = this_hart_index();
+	enum context_state state = 0;
+
+	if (target == this_domain() ||
+	    !hartmask_test(&target->possible, self) ||
+	    atomic_load_ulong(&target->stopping))
+		return false;
+	/* The hart's own contexts: nobody else moves them. */
+	state = context_of(target, self)->state;
+	return state == CONTEXT_IDLE ||
+	       (state == CONTEXT_NONE && target->boot_hart == (int)self);
+}
+
+long domain_switch_to(struct trap_regs *regs, struct domain *target)
+{
+	return domain_enterable(target) ? enter(regs, target, 0, true) :
+					  SBI_ERR_DENIED;
+}
+
+int domain_caller_key(void)
+{
+	const struct domain_context *cur =
+		context_of(this_domain(), this_hart_index());
+
+	return caller_waits(cur) ? (int)domain_of(cur->caller)->index : -1;
+}
+
+static long leave(struct trap_regs *regs, unsigned long value, bool quiet,
+		  struct domain *first)
 {
 	unsigned int self = this_hart_index();
 	struct domain_context *cur = NULL, *to = NULL;
@@ -654,6 +702,21 @@ long domain_exit(struct trap_regs *regs, unsigned long value)
 	cur = context_of(this_domain(), self);
 	if (caller_waits(cur)) {
 		to = cur->caller;
+	} else if (quiet) {
+		/*
+		 * No one to go back to: 'first' gets its boot, if it is due one
+		 * here.
+		 */
+		if (first && first != this_domain() &&
+		    first->boot_hart == (int)self &&
+		    hartmask_test(&first->possible, self) &&
+		    !atomic_load_ulong(&first->stopping) &&
+		    context_of(first, self)->state == CONTEXT_NONE &&
+		    domain_range_ok(first, first->next_addr, 4,
+				    DOMAIN_PERM_SU_X))
+			to = context_of(first, self);
+		if (to)
+			to->caller = NULL;
 	} else {
 		/*
 		 * Booting: the domains that have not had this hart yet, root
@@ -679,10 +742,20 @@ long domain_exit(struct trap_regs *regs, unsigned long value)
 	}
 
 	cur->caller = NULL;
-	context_park(cur, CONTEXT_IDLE, regs);
+	context_park(cur, CONTEXT_IDLE, regs, quiet);
 	context_switch(to, regs, SBI_SUCCESS, value);
 	spin_unlock(&domain_lock);
 	return SBI_SUCCESS;
+}
+
+long domain_exit(struct trap_regs *regs, unsigned long value)
+{
+	return leave(regs, value, false, NULL);
+}
+
+long domain_switch_back(struct trap_regs *regs, struct domain *first)
+{
+	return leave(regs, 0, true, first);
 }
 
 void domain_context_started(void)

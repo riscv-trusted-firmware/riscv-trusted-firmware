@@ -28,7 +28,29 @@
  *   domains have; the monitor checks offsets against it and never touches
  *   it.
  *
+ *   "riscv,rpmi-mpxy-reqfwd-bridge": a REQUEST_FORWARD channel like the
+ *   first, of the domain "riscv,domain" names, with the channels it takes
+ *   requests from as child nodes, each with its own "riscv,domain" and
+ *   "riscv,sbi-mpxy-channel-id":
+ *   "riscv,rpmi-mpxy-reqfwd-mm" is a MANAGEMENT_MODE channel as above,
+ *   hosted by the bridge's domain.
+ *
  * The bindings are the ones proposed for the same, under "riscv," names.
+ *
+ * How a request travels. Domains with harts of their own have the queue of
+ * <reqfwd.h>: the producer waits in M-mode while a hart of the target
+ * domain retrieves and completes the message. Through a bridge, domains
+ * that share a hart need no second hart: the hart itself goes over
+ * (<domain.h>, domain_switch_to()) with the message in a slot the monitor
+ * keeps per domain and hart, the target finds it as its current message,
+ * and completing it brings the hart back with the response. A bridge's
+ * target that asks for a message when there is none gives the hart back
+ * as well, to whoever entered it, or for a source domain to boot on it;
+ * its RETRIEVE is run again when the hart returns, and then has a message.
+ * Only where the hart has nowhere to go is the answer RPMI_ERR_NO_DATA. A
+ * request for a bridge's domain from a hart that cannot go there (the
+ * domain is not one the hart may run, or it runs there already some calls
+ * down) takes the queue.
  */
 
 #include <arch/hart.h>
@@ -37,6 +59,7 @@
 #include <domain.h>
 #include <driver.h>
 #include <fdt_util.h>
+#include <heap.h>
 #include <ipi.h>
 #include <libfdt.h>
 #include <log.h>
@@ -63,7 +86,11 @@ struct fw_channel {
 	bool wakeup_ssip;
 	unsigned long notify_enabled;
 	unsigned long new_message; /* atomic: announced, not fetched yet */
+	/* ... of a bridge: the channels it takes requests from */
+	bool bridge;
+	struct fw_channel *sources, *next_source;
 	/* MANAGEMENT_MODE */
+	struct fw_channel *bridge_target; /* NULL: by the queue alone */
 	unsigned int target;
 	uint64_t shmem_base, shmem_size;
 	unsigned long token; /* atomic */
@@ -71,6 +98,59 @@ struct fw_channel {
 
 static struct fw_channel pool[CONFIG_MPXY_RPMI_FW_MAX_CHANNELS];
 static unsigned int pool_used;
+
+/*
+ * A message that travels with the hart, per source domain and hart. The
+ * largest a source forwards is MM_COMMUNICATE, and its answer two words.
+ */
+enum { SLOT_FREE, SLOT_SENT, SLOT_RETRIEVED, SLOT_COMPLETED, SLOT_FAILED };
+
+struct bridge_slot {
+	unsigned int state;
+	int error; /* SLOT_FAILED: why */
+	const struct fw_channel *to;
+	uint32_t out_size; /* MM_COMMUNICATE: the output area's */
+	size_t msg_len, rsp_len;
+	uint32_t msg[2 + 4], rsp[2];
+};
+
+/* What a channel operation leaves for mpxy_switch_pending(), per hart. */
+enum { SWITCH_NONE, SWITCH_TO, SWITCH_BACK, SWITCH_YIELD };
+
+struct switch_request {
+	unsigned int kind;
+	struct fw_channel *ch; /* TO: the source, YIELD: the bridge */
+};
+
+/* There with the first bridge. */
+static struct bridge_slot *slots;
+static struct switch_request *requests;
+
+static struct bridge_slot *slot_of(unsigned int key)
+{
+	return domain_hart_slot(slots, sizeof(*slots), key, this_hart_index());
+}
+
+static void switch_request(unsigned int kind, struct fw_channel *ch)
+{
+	requests[this_hart_index()] =
+		(struct switch_request){ .kind = kind, .ch = ch };
+}
+
+/* The message the hart came to channel 'c' with, NULL if it did not. */
+static struct bridge_slot *slot_for(const struct fw_channel *c)
+{
+	int key = domain_caller_key();
+	struct bridge_slot *s = NULL;
+
+	if (!slots || key < 0)
+		return NULL;
+	s = slot_of((unsigned int)key);
+	return s->to == c && (s->state == SLOT_SENT ||
+			      s->state == SLOT_RETRIEVED) ?
+		       s :
+		       NULL;
+}
 
 /* The channel is the first member, and as well aligned as what is around it. */
 static struct fw_channel *to_fw(struct mpxy_channel *ch)
@@ -151,6 +231,7 @@ static long reqfwd_service(struct fw_channel *c, uint32_t service,
 			   unsigned long resp_max, unsigned long *resp_len)
 {
 	size_t returned = 0, remaining = 0, left = 0, max = 0;
+	struct bridge_slot *s = slot_for(c);
 	int rc = 0;
 
 	switch (service) {
@@ -167,8 +248,29 @@ static long reqfwd_service(struct fw_channel *c, uint32_t service,
 		 */
 		max = MIN((unsigned long)c->ch.msg_data_max_len, resp_max);
 		max = ROUNDDOWN2(max - 12, 4);
-		rc = reqfwd_retrieve(c->queue, buf[0], &buf[3], max, &returned,
-				     &remaining);
+		if (s && buf[0] >= s->msg_len) {
+			rc = RPMI_ERR_INVALID_PARAM;
+		} else if (s) {
+			returned = MIN(s->msg_len - buf[0], max);
+			remaining = s->msg_len - buf[0] - returned;
+			memcpy(&buf[3], (const char *)s->msg + buf[0],
+			       returned);
+			s->state = SLOT_RETRIEVED;
+			rc = RPMI_SUCCESS;
+		} else {
+			rc = reqfwd_retrieve(c->queue, buf[0], &buf[3], max,
+					     &returned, &remaining);
+		}
+		if (rc == RPMI_ERR_NO_DATA && c->bridge) {
+			/*
+			 * Somebody else's turn on this hart, if there is
+			 * somebody; the request stays as it is, to be made
+			 * again.
+			 */
+			switch_request(SWITCH_YIELD, c);
+			*resp_len = 4;
+			return SBI_SUCCESS;
+		}
 		if (rc)
 			return status_only(buf, resp_len, rc);
 		buf[0] = RPMI_SUCCESS;
@@ -184,7 +286,24 @@ static long reqfwd_service(struct fw_channel *c, uint32_t service,
 		if (len < 4 || !IS_ALIGNED(len, 4))
 			return status_only(buf, resp_len,
 					   RPMI_ERR_INVALID_PARAM);
-		rc = reqfwd_complete(c->queue, buf, len, &left);
+		if (s && s->state == SLOT_RETRIEVED) {
+			bool fits = len <= sizeof(s->rsp);
+
+			if (fits)
+				memcpy(s->rsp, buf, len);
+			s->rsp_len = len;
+			s->state = fits ? SLOT_COMPLETED : SLOT_FAILED;
+			s->error = RPMI_ERR_BAD_RANGE;
+			rc = fits ? RPMI_SUCCESS : RPMI_ERR_BAD_RANGE;
+			left = reqfwd_count(c->queue);
+			/*
+			 * The hart takes the answer back, and this call returns
+			 * later.
+			 */
+			switch_request(SWITCH_BACK, c);
+		} else {
+			rc = reqfwd_complete(c->queue, buf, len, &left);
+		}
 		buf[0] = (uint32_t)rc;
 		buf[1] = (uint32_t)left;
 		*resp_len = 8;
@@ -264,13 +383,6 @@ static long mm_service(struct fw_channel *c, uint32_t service, uint32_t *buf,
 		rc = RPMI_ERR_INVALID_ADDR;
 		goto out;
 	}
-	/* The domain that hosts it has to be there to take requests. */
-	queue = reqfwd_queue_of(c->target);
-	if (!queue) {
-		rc = RPMI_ERR_NOT_SUPPORTED;
-		goto out;
-	}
-
 	/* The message a PuC would have been sent. */
 	fwd.hdr = (struct rpmi_hdr){
 		.group = RPMI_GROUP_MANAGEMENT_MODE,
@@ -281,6 +393,32 @@ static long mm_service(struct fw_channel *c, uint32_t service, uint32_t *buf,
 	};
 	memcpy(fwd.data, buf, sizeof(fwd.data));
 	out_size = buf[3];
+
+	/* With this very hart, where that gets the request there... */
+	if (c->bridge_target && domain_enterable(domain_by_index(c->target))) {
+		struct bridge_slot *s = slot_of(this_domain_key());
+
+		*s = (struct bridge_slot){
+			.state = SLOT_SENT,
+			.to = c->bridge_target,
+			.out_size = out_size,
+			.msg_len = sizeof(fwd),
+		};
+		memcpy(s->msg, &fwd, sizeof(fwd));
+		/* The answer is mpxy_context_resumed()'s to give. */
+		switch_request(SWITCH_TO, c);
+		*resp_len = 8;
+		return SBI_SUCCESS;
+	}
+	/*
+	 * ... or else the domain that hosts it has to be there to take
+	 * requests.
+	 */
+	queue = reqfwd_queue_of(c->target);
+	if (!queue) {
+		rc = RPMI_ERR_NOT_SUPPORTED;
+		goto out;
+	}
 
 	rc = reqfwd_send(queue, &fwd, sizeof(fwd), rsp, sizeof(rsp), &rsp_len,
 			 c->ch.completion_timeout_us);
@@ -301,6 +439,106 @@ out:
 	buf[1] = 0;
 	*resp_len = 8;
 	return SBI_SUCCESS;
+}
+
+/*
+ * ---- messages that travel with the hart -----------------------------------
+ */
+
+/* The answer to the MM_COMMUNICATE the context sent before the hart left it. */
+void mpxy_context_resumed(struct trap_regs *regs)
+{
+	struct bridge_slot *s = NULL;
+	uint32_t *mem = NULL, status = 0, written = 0;
+
+	if (!slots)
+		return;
+	s = slot_of(this_domain_key());
+	if (s->state == SLOT_FREE)
+		return;
+
+	if (s->state == SLOT_FAILED)
+		status = (uint32_t)s->error;
+	else if (s->state != SLOT_COMPLETED || s->rsp_len != sizeof(s->rsp) ||
+		 s->rsp[1] > s->out_size)
+		/*
+		 * The hart is back without an answer, or with one not to pass
+		 * on.
+		 */
+		status = (uint32_t)RPMI_ERR_IO;
+	else
+		status = s->rsp[0], written = s->rsp[1];
+	s->state = SLOT_FREE;
+
+	mpxy_shmem_access(true);
+	mem = mpxy_hart_shmem();
+	if (mem) {
+		mem[0] = status;
+		mem[1] = written;
+	}
+	mpxy_shmem_access(false);
+	regs->a0 = SBI_SUCCESS;
+	regs->a1 = 8;
+}
+
+bool mpxy_switch_pending(struct trap_regs *regs, long error, long value)
+{
+	struct switch_request *r = NULL;
+	struct bridge_slot *s = NULL;
+	unsigned int kind = 0;
+	uint32_t *mem = NULL;
+
+	if (!requests)
+		return false;
+	r = &requests[this_hart_index()];
+	kind = r->kind;
+	r->kind = SWITCH_NONE;
+
+	switch (kind) {
+	case SWITCH_TO:
+		if (domain_switch_to(regs, domain_by_index(r->ch->target))) {
+			/*
+			 * It could a moment ago: its domain is being stopped.
+			 */
+			s = slot_of(this_domain_key());
+			s->state = SLOT_FAILED;
+			s->error = RPMI_ERR_BUSY;
+			mpxy_context_resumed(regs);
+		}
+		return true;
+	case SWITCH_BACK:
+		/* What COMPLETE returns, whenever this context runs again. */
+		regs->a0 = (unsigned long)error;
+		regs->a1 = (unsigned long)value;
+		domain_switch_back(regs, NULL);
+		return true;
+	case SWITCH_YIELD:
+		/*
+		 * The ecall once more when the hart is back: by then there is a
+		 * message.
+		 */
+		regs->mepc -= 4;
+		if (!domain_switch_back(regs, NULL))
+			return true;
+		for (struct fw_channel *src = r->ch->sources; src;
+		     src = src->next_source) {
+			struct domain *owner =
+				domain_by_index(src->ch.owner - 1);
+
+			if (!domain_switch_back(regs, owner))
+				return true;
+		}
+		/* Nowhere to go: the queue is empty, and that is the answer. */
+		regs->mepc += 4;
+		mpxy_shmem_access(true);
+		mem = mpxy_hart_shmem();
+		if (mem)
+			mem[0] = (uint32_t)RPMI_ERR_NO_DATA;
+		mpxy_shmem_access(false);
+		return false;
+	default:
+		return false;
+	}
 }
 
 /*
@@ -402,19 +640,20 @@ static int reqfwd_probe(const void *fdt, int node)
 	return 0;
 }
 
-static int mm_probe(const void *fdt, int node)
+/*
+ * Management mode of the node's domain, hosted by 'target' (behind 'bridge', if
+ * any).
+ */
+static int mm_channel_add(const void *fdt, int node,
+			  const struct domain *target,
+			  struct fw_channel *bridge)
 {
-	const struct domain *target = NULL;
 	struct fw_channel *c = NULL;
 	const fdt32_t *base = NULL;
 	uint32_t order = 0, phandle = 0;
 	int region = 0, len = 0;
 
-	if (node < 0)
-		return 0;
 	c = fw_channel_new(fdt, node, RPMI_GROUP_MANAGEMENT_MODE);
-	target = domain_by_phandle(fdt_prop_u32(fdt, node,
-						"riscv,reqfwd-target", 0));
 	phandle = fdt_prop_u32(fdt, node, "riscv,mm-memregion", 0);
 	region = fdt_node_offset_by_phandle(fdt, phandle);
 	if (!c || !target || target == c->owner || region < 0 ||
@@ -432,8 +671,69 @@ static int mm_probe(const void *fdt, int node)
 	if (mpxy_channel_register(&c->ch))
 		return -1;
 	pool_used++;
-	pr_info("mpxy: channel %x, management mode of domain %s hosted by %s\n",
-		c->ch.id, c->owner->name, target->name);
+	if (bridge) {
+		c->bridge_target = bridge;
+		c->next_source = bridge->sources;
+		bridge->sources = c;
+	}
+	pr_info("mpxy: channel %x, management mode of domain %s hosted by %s%s\n",
+		c->ch.id, c->owner->name, target->name,
+		bridge ? ", bridged" : "");
+	return 0;
+}
+
+static int mm_probe(const void *fdt, int node)
+{
+	uint32_t target = 0;
+
+	if (node < 0)
+		return 0;
+	target = fdt_prop_u32(fdt, node, "riscv,reqfwd-target", 0);
+	return mm_channel_add(fdt, node, domain_by_phandle(target), NULL);
+}
+
+static const char *const bridge_mm_compatible[] = { "riscv,rpmi-mpxy-reqfwd-mm",
+						    NULL };
+
+static int bridge_probe(const void *fdt, int node)
+{
+	struct fw_channel *c = NULL;
+	int child = 0;
+
+	if (node < 0)
+		return 0;
+	c = fw_channel_new(fdt, node, RPMI_GROUP_REQUEST_FORWARD);
+	if (!c)
+		return -1;
+	c->bridge = true;
+	c->wakeup_ssip = fdt_getprop(fdt, node, "riscv,wakeup-ssip", NULL);
+	c->ch.capability |= MPXY_CAP_GET_NOTIFICATIONS;
+	c->queue = reqfwd_serve(c->owner->index, reqfwd_notify, c);
+	if (!c->queue || mpxy_channel_register(&c->ch))
+		return -1;
+	pool_used++;
+	if (!slots) {
+		slots = domain_hart_alloc(sizeof(*slots));
+		requests =
+			heap_alloc_array(hart_table_size(), sizeof(*requests));
+	}
+	pr_info("mpxy: channel %x, bridge to domain %s\n", c->ch.id,
+		c->owner->name);
+
+	fdt_for_each_subnode(child, fdt, node) {
+		const char *name = fdt_get_name(fdt, child, NULL);
+
+		/*
+		 * What is forwarded is a service group's messages: the ones
+		 * known here.
+		 */
+		if (!fdt_node_compatible_any(fdt, child, bridge_mm_compatible))
+			pr_warn("mpxy: bridge source %s: not a service group served here\n",
+				name);
+		else if (mm_channel_add(fdt, child, c->owner, c))
+			pr_warn("mpxy: bridge source %s: ignored (bad node)\n",
+				name);
+	}
 	return 0;
 }
 
@@ -443,6 +743,9 @@ static const char *const reqfwd_compatible[] = {
 
 static const char *const mm_compatible[] = { "riscv,rpmi-mpxy-mm-domain",
 					     NULL };
+static const char *const bridge_compatible[] = {
+	"riscv,rpmi-mpxy-reqfwd-bridge", NULL
+};
 
 DRIVER_DEFINE(mpxy_rpmi_reqfwd) = {
 	.name = "mpxy-rpmi-request-forward",
@@ -450,6 +753,30 @@ DRIVER_DEFINE(mpxy_rpmi_reqfwd) = {
 	.stage = DRIVER_STAGE_LATE,
 	.mmode_only = true,
 	.probe = reqfwd_probe,
+};
+
+DRIVER_DEFINE(mpxy_rpmi_reqfwd_bridge) = {
+	.name = "mpxy-rpmi-reqfwd-bridge",
+	.compatible = bridge_compatible,
+	.stage = DRIVER_STAGE_LATE,
+	.mmode_only = true,
+	.probe = bridge_probe,
+};
+
+/*
+ * A bridge's source is its bridge's to probe; the monitor's alone all the same.
+ */
+static int bridge_source_probe(const void *fdt, int node)
+{
+	return 0;
+}
+
+DRIVER_DEFINE(mpxy_rpmi_reqfwd_source) = {
+	.name = "mpxy-rpmi-reqfwd-source",
+	.compatible = bridge_mm_compatible,
+	.stage = DRIVER_STAGE_LATE,
+	.mmode_only = true,
+	.probe = bridge_source_probe,
 };
 
 DRIVER_DEFINE(mpxy_rpmi_mm_domain) = {

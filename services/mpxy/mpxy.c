@@ -151,6 +151,11 @@ static uint32_t *this_shmem(void)
 	return addr == SHMEM_NONE ? NULL : (uint32_t *)addr;
 }
 
+uint32_t *mpxy_hart_shmem(void)
+{
+	return this_shmem();
+}
+
 void mpxy_shmem_access(bool begin)
 {
 	unsigned long addr = shmem[this_hart_index()];
