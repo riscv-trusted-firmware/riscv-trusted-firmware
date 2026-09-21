@@ -254,6 +254,33 @@ static struct sse_event *top_event(unsigned long self, unsigned long state)
 	return best;
 }
 
+/*
+ * mstatus.MPV, which RV32 has in mstatush: was the interrupted context a
+ * guest's (the handler's is not), and the way back into one.
+ */
+static bool mpv_take(unsigned long *mstatus)
+{
+#if __RISCV_XLEN__ == 64
+	bool virt = *mstatus & MSTATUS_MPV;
+
+	*mstatus &= ~MSTATUS_MPV;
+#else
+	bool virt = csr_read(CSR_MSTATUSH) & MSTATUSH_MPV;
+
+	csr_clear(CSR_MSTATUSH, MSTATUSH_MPV);
+#endif
+	return virt;
+}
+
+static void mpv_set(unsigned long *mstatus)
+{
+#if __RISCV_XLEN__ == 64
+	*mstatus |= MSTATUS_MPV;
+#else
+	csr_set(CSR_MSTATUSH, MSTATUSH_MPV);
+#endif
+}
+
 static void inject(struct sse_event *e, struct trap_regs *regs)
 {
 	unsigned long mstatus = regs->mstatus, flags = 0;
@@ -263,7 +290,6 @@ static void inject(struct sse_event *e, struct trap_regs *regs)
 		flags |= INT_FLAGS_SPP;
 	if (mstatus & MSTATUS_SPIE)
 		flags |= INT_FLAGS_SPIE;
-#if __RISCV_XLEN__ == 64
 	if (hart_has(HART_FEAT_H)) {
 		unsigned long hstatus = csr_read(CSR_HSTATUS);
 
@@ -273,16 +299,14 @@ static void inject(struct sse_event *e, struct trap_regs *regs)
 			flags |= INT_FLAGS_SPVP;
 		/* The handler runs in HS-mode: note where we came from. */
 		hstatus &= ~HSTATUS_SPV;
-		if (mstatus & MSTATUS_MPV) {
+		if (mpv_take(&mstatus)) {
 			hstatus |= HSTATUS_SPV;
 			hstatus &= ~HSTATUS_SPVP;
 			if (from_s)
 				hstatus |= HSTATUS_SPVP;
 		}
 		csr_write(CSR_HSTATUS, hstatus);
-		mstatus &= ~MSTATUS_MPV;
 	}
-#endif
 	/* Ssdbltrp: the handler starts, like a trap handler, unable to trap. */
 	if (hart_smode_double_trap_enabled()) {
 		if (mstatus & MSTATUS_SDT)
@@ -357,12 +381,11 @@ bool sse_complete(struct trap_regs *regs)
 	mstatus &= ~MSTATUS_MPP;
 	if (mstatus & MSTATUS_SPP)
 		mstatus |= SHIFT_UL(PRV_S, MSTATUS_MPP_SHIFT);
-#if __RISCV_XLEN__ == 64
 	if (hart_has(HART_FEAT_H)) {
 		unsigned long hstatus = csr_read(CSR_HSTATUS);
 
 		if (hstatus & HSTATUS_SPV)
-			mstatus |= MSTATUS_MPV;
+			mpv_set(&mstatus);
 		hstatus &= ~(HSTATUS_SPV | HSTATUS_SPVP);
 		if (flags & INT_FLAGS_SPV)
 			hstatus |= HSTATUS_SPV;
@@ -370,7 +393,6 @@ bool sse_complete(struct trap_regs *regs)
 			hstatus |= HSTATUS_SPVP;
 		csr_write(CSR_HSTATUS, hstatus);
 	}
-#endif
 	if (hart_smode_double_trap_enabled()) {
 		mstatus &= ~MSTATUS_SDT;
 		if (flags & INT_FLAGS_SDT)
