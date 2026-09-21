@@ -567,6 +567,16 @@ void trusted_main(unsigned long hartid, unsigned long arg1)
 	if (trusted_probe(CONFIG_SBITEST_LOAD_ADDR, 0) ||
 	    trusted_probe(DOM_SHARED_PROBE, 1))
 		fail |= BIT(9);
+#ifdef CONFIG_PLAT_QEMU_VIRT
+	/*
+	 * Nor the devices the monitor uses itself, which with Smepmp have
+	 * rules ahead of a domain's: the console, and the test finisher that
+	 * would let a domain without the right to reset anything do it anyway.
+	 */
+	if (trusted_probe(UL(0x10000005), 0) != CAUSE_LOAD_ACCESS ||
+	    trusted_probe(UL(0x100000), 0) != CAUSE_LOAD_ACCESS)
+		fail |= BIT(13);
+#endif
 	/* Nor can it hand the monitor an address that is not its own. */
 	if (sbi_call3(SBI_EXT_DBCN, SBI_DBCN_CONSOLE_WRITE, 1, DOM_IMEM, 0)
 	    .error != SBI_ERR_INVALID_PARAM)

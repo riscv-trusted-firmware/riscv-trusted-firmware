@@ -505,34 +505,54 @@ void pmp_hart_init(void)
 		idx = SMEPMP_WINDOW_ENTRIES;
 	}
 	/*
-	 * Two passes around the switch to MML: a locked rule with execute
-	 * permission can only be written before it, and the shared-region
-	 * encoding (W without R) only means something after it.
+	 * The monitor's own before the switch to MML: a locked rule with
+	 * execute permission can only be written before it. The shared
+	 * regions after it, where their encoding (W without R) means
+	 * something, and with the domain's rules: they go by the domain.
 	 */
-	for (int shared = 0; shared <= 1; shared++) {
-		unsigned int at = idx;
+	for (unsigned int i = 0, at = idx; i < nr_memregions; i++) {
+		const struct memregion *r = &memregions[i];
 
-		for (unsigned int i = 0; i < nr_memregions; i++) {
-			const struct memregion *r = &memregions[i];
-			bool is_shared = r->kind == MEMREGION_SHARED_RW;
-			bool napot = region_is_napot(r);
-
-			if (r->kind == MEMREGION_SHARED_RW &&
-			    !hart_has(HART_FEAT_SMEPMP))
-				continue;
-			if (at + 3 > CONFIG_RISCV_PMP_COUNT)
-				panic("out of PMP entries at region %lx+%lx\n",
-				      r->base, r->size);
-			if (is_shared == shared)
-				pmp_range_set(at, r->base, r->size,
-					      region_cfg(r->kind));
-			at += napot ? 1 : 2;
-		}
-		/* Sticky until reset. */
-		if (!shared && hart_has(HART_FEAT_SMEPMP))
-			csr_set(CSR_MSECCFG, MSECCFG_MML | MSECCFG_MMWP);
+		if (r->kind == MEMREGION_SHARED_RW &&
+		    !hart_has(HART_FEAT_SMEPMP))
+			continue;
+		if (at + 3 > CONFIG_RISCV_PMP_COUNT)
+			panic("out of PMP entries at region %lx+%lx\n", r->base,
+			      r->size);
+		if (r->kind != MEMREGION_SHARED_RW)
+			pmp_range_set(at, r->base, r->size,
+				      region_cfg(r->kind));
+		at += region_is_napot(r) ? 1 : 2;
 	}
+	/* Sticky until reset. */
+	if (hart_has(HART_FEAT_SMEPMP))
+		csr_set(CSR_MSECCFG, MSECCFG_MML | MSECCFG_MMWP);
 	pmp_domain_set();
+}
+
+/*
+ * Under MML a device the monitor uses as well (the console, a reset
+ * device) needs a rule that says so, and that rule comes before the
+ * domain's own. It is S-mode's too only where the running domain's
+ * regions give it the device; for any other domain it is the monitor's
+ * alone. A locked rule is rewritten here, which the rule locking bypass
+ * that stays on for the window's sake allows.
+ */
+static void shared_regions_set(void)
+{
+	if (!hart_has(HART_FEAT_SMEPMP))
+		return;
+	for (unsigned int i = 0, at = SMEPMP_WINDOW_ENTRIES; i < nr_memregions;
+	     i++) {
+		const struct memregion *r = &memregions[i];
+
+		if (r->kind == MEMREGION_SHARED_RW)
+			pmp_range_set(at, r->base, r->size,
+				      smode_range_ok(r->base, r->size) ?
+				      region_cfg(MEMREGION_SHARED_RW) :
+				      region_cfg(MEMREGION_MMODE_RW));
+		at += region_is_napot(r) ? 1 : 2;
+	}
 }
 
 unsigned int pmp_domain_entries(void)
@@ -552,6 +572,7 @@ void pmp_domain_set(void)
 
 	if (!hart_has(HART_FEAT_PMP))
 		return;
+	shared_regions_set();
 #ifdef CONFIG_DOMAINS
 	/*
 	 * S/U-mode permissions only, which is what an unlocked rule is about
