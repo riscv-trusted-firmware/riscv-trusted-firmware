@@ -139,7 +139,8 @@ that were visiting go back where they came from, their enter call failed,
 and the next enter boots the domain again.
 
 What is switched, per domain and hart: the register file; sstatus, sie, sip
-(SSIP), stvec, sscratch, sepc, scause, stval, satp, scounteren, senvcfg; the
+(SSIP), stvec, sscratch, sepc, scause, stval, satp, scounteren, senvcfg,
+sstateen0-3; the
 timer deadline (stimecmp, or the M-mode timer's); the floating-point
 registers and fcsr; the vector registers and CSRs up to
 the boot hart's VLEN, which is what a context has room for (a hart with

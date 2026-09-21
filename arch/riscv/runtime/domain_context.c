@@ -113,7 +113,7 @@ struct domain_context {
 	bool quiet;
 	struct trap_regs regs;
 	unsigned long sie, sip, stvec, sscratch, sepc, scause, stval, satp;
-	unsigned long scounteren, senvcfg;
+	unsigned long scounteren, senvcfg, sstateen[4];
 	unsigned long hyp[HYP_CSR_COUNT];
 	uint64_t htimedelta, henvcfg, hstateen0, vstimecmp;
 	uint64_t timer;
@@ -472,6 +472,8 @@ static void context_save(struct domain_context *ctx,
 	ctx->scounteren = csr_read(scounteren);
 	if (hart_has(HART_FEAT_MENVCFG))
 		ctx->senvcfg = csr_read(CSR_SENVCFG);
+	for (unsigned int i = 0; i < 4 && hart_has(HART_FEAT_SMSTATEEN); i++)
+		ctx->sstateen[i] = hart_sstateen_read(i);
 	ctx->timer = timer_smode_get();
 	/* Nobody's while the hart is between two contexts. */
 	ctx->mpxy_shmem = mpxy_hart_shmem_swap(MPXY_SHMEM_NONE);
@@ -499,6 +501,8 @@ static void context_restore(struct domain_context *ctx, bool fresh)
 	csr_write(scounteren, ctx->scounteren);
 	if (hart_has(HART_FEAT_MENVCFG))
 		csr_write(CSR_SENVCFG, ctx->senvcfg);
+	for (unsigned int i = 0; i < 4 && hart_has(HART_FEAT_SMSTATEEN); i++)
+		hart_sstateen_write(i, ctx->sstateen[i]);
 	hyp_state_restore(ctx);
 	unit_state_restore(ctx);
 
@@ -561,6 +565,8 @@ static void context_fresh(struct domain_context *ctx,
 	ctx->stvec = dom->next_addr;
 	ctx->timer = ~ULL(0);
 	ctx->vstimecmp = ~ULL(0);
+	for (unsigned int i = 0; i < 4; i++)
+		ctx->sstateen[i] = ~UL(0);
 #if __RISCV_XLEN__ == 64
 	/* As out of reset, but for the one field zero may not be a value of. */
 	if (hart_has(HART_FEAT_H))

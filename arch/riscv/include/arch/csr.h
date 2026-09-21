@@ -129,6 +129,25 @@
 #define CSR_SENVCFG 0x10a
 #define CSR_MSTATEEN0 0x30c /* + n, n = 0..3 */
 #define CSR_MSTATEEN0H 0x31c
+#define CSR_SSTATEEN0 0x10c /* + n, n = 0..3 */
+/*
+ * mstateen0: what the ratified extensions have given a meaning to. Bit 0 is
+ * custom state, which is a platform's to open if it knows what it is.
+ */
+#define STATEEN0_FCSR BIT64(1)
+#define STATEEN0_JVT BIT64(2)
+#define STATEEN0_SRMCFG BIT64(55)
+#define STATEEN0_P1P13 BIT64(56)
+#define STATEEN0_CONTEXT BIT64(57)
+#define STATEEN0_IMSIC BIT64(58)
+#define STATEEN0_AIA BIT64(59)
+#define STATEEN0_CSRIND BIT64(60)
+#define STATEEN0_ENVCFG BIT64(62)
+#define STATEEN0_SE0 BIT64(63)
+#define STATEEN0_KNOWN                                                        \
+	(STATEEN0_FCSR | STATEEN0_JVT | STATEEN0_SRMCFG | STATEEN0_P1P13 |    \
+	 STATEEN0_CONTEXT | STATEEN0_IMSIC | STATEEN0_AIA | STATEEN0_CSRIND | \
+	 STATEEN0_ENVCFG | STATEEN0_SE0)
 #define CSR_MENVCFGH 0x31a
 #define CSR_MIEH 0x314
 #define CSR_MSTATUSH 0x310

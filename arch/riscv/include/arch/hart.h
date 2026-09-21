@@ -169,6 +169,10 @@ void hart_runtime_init(void);
  * (counters, triggers, feature bits) is taken out before the change and
  * put back, or set up anew for a domain that has not run here, after it.
  */
+/* sstateen0..3, on harts with Smstateen: S-mode's, and so a domain's. */
+void hart_sstateen_reset(void);
+unsigned long hart_sstateen_read(unsigned int n);
+void hart_sstateen_write(unsigned int n, unsigned long val);
 /*
  * Boot hart, once the domains are known: the services' state, per domain and
  * hart.

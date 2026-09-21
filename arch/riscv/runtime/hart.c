@@ -403,22 +403,25 @@ static void envcfg_init(void)
 
 /*
  * State enables exist to keep state away from a lower privilege level. The
- * monitor has no such policy: S-mode gets what it would have on a hart
- * without Smstateen (WARL, so bits without a meaning stay clear).
+ * monitor keeps nothing of what it knows from S-mode, which gets what it
+ * would have on a hart without Smstateen. What it does not know stays
+ * shut: a bit that gets its meaning after this was written, or custom
+ * state, may be state that has to be kept apart between domains, and the
+ * context switch would not know to.
  */
 static void stateen_init(void)
 {
 	if (!hart_has(HART_FEAT_SMSTATEEN))
 		return;
-	csr_write(CSR_MSTATEEN0, ~UL(0));
-	csr_write(CSR_MSTATEEN0 + 1, ~UL(0));
-	csr_write(CSR_MSTATEEN0 + 2, ~UL(0));
-	csr_write(CSR_MSTATEEN0 + 3, ~UL(0));
+	csr_write(CSR_MSTATEEN0, (unsigned long)STATEEN0_KNOWN);
+	csr_write(CSR_MSTATEEN0 + 1, 0);
+	csr_write(CSR_MSTATEEN0 + 2, 0);
+	csr_write(CSR_MSTATEEN0 + 3, 0);
 #if __RISCV_XLEN__ == 32
-	csr_write(CSR_MSTATEEN0H, ~UL(0));
-	csr_write(CSR_MSTATEEN0H + 1, ~UL(0));
-	csr_write(CSR_MSTATEEN0H + 2, ~UL(0));
-	csr_write(CSR_MSTATEEN0H + 3, ~UL(0));
+	csr_write(CSR_MSTATEEN0H, high32_from_64(STATEEN0_KNOWN));
+	csr_write(CSR_MSTATEEN0H + 1, 0);
+	csr_write(CSR_MSTATEEN0H + 2, 0);
+	csr_write(CSR_MSTATEEN0H + 3, 0);
 #endif
 }
 
@@ -769,8 +772,50 @@ void __noreturn hart_enter_smode(unsigned long entry, unsigned long arg0,
 	csr_write(sscratch, 0);
 	csr_write(sie, 0);
 	csr_write(satp, 0);
+	hart_sstateen_reset();
 
 	_hart_mret(entry, arg0, arg1);
+}
+
+/* U-mode gets from S-mode what S-mode has, until S-mode says otherwise. */
+void hart_sstateen_reset(void)
+{
+	if (!hart_has(HART_FEAT_SMSTATEEN))
+		return;
+	for (unsigned int i = 0; i < 4; i++)
+		hart_sstateen_write(i, ~UL(0));
+}
+
+unsigned long hart_sstateen_read(unsigned int n)
+{
+	switch (n) {
+	case 0:
+		return csr_read(CSR_SSTATEEN0);
+	case 1:
+		return csr_read(CSR_SSTATEEN0 + 1);
+	case 2:
+		return csr_read(CSR_SSTATEEN0 + 2);
+	default:
+		return csr_read(CSR_SSTATEEN0 + 3);
+	}
+}
+
+void hart_sstateen_write(unsigned int n, unsigned long val)
+{
+	switch (n) {
+	case 0:
+		csr_write(CSR_SSTATEEN0, val);
+		break;
+	case 1:
+		csr_write(CSR_SSTATEEN0 + 1, val);
+		break;
+	case 2:
+		csr_write(CSR_SSTATEEN0 + 2, val);
+		break;
+	default:
+		csr_write(CSR_SSTATEEN0 + 3, val);
+		break;
+	}
 }
 
 void __noreturn hart_halt(void)
