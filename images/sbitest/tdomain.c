@@ -445,6 +445,11 @@ static void __noreturn trusted_serve(unsigned long hartid, unsigned long value)
 		case TCMD_UNITS_GET:
 			value = units_get(param);
 			break;
+		case TCMD_MPXY_SHMEM:
+			/* GET_CHANNEL_IDS */
+			value = sbi_call1(SBI_EXT_MPXY, 2, 0).error ==
+				SBI_ERR_NO_SHMEM;
+			break;
 		case TCMD_HYP_SET:
 			value = hyp_set(param);
 			break;

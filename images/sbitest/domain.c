@@ -80,6 +80,22 @@ static void test_trusted(void)
 	CHECK(!ret.error && ret.value == 43, "echo: %ld %ld", ret.error,
 	      ret.value);
 
+	/* The MPXY shared memory is this side's, there or back. */
+	if (sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION, SBI_EXT_MPXY)
+	    .value) {
+		static uint32_t page[1024] __aligned(4096);
+
+		CHECK_RET(sbi_call3(SBI_EXT_MPXY, 1, (unsigned long)page, 0, 0),
+			  SBI_SUCCESS);
+		CHECK(enter(TCMD(TCMD_MPXY_SHMEM, 0)).value == 1,
+		      "the trusted domain came by an MPXY shared memory");
+		CHECK_RET(sbi_call1(SBI_EXT_MPXY, 2, 0), SBI_SUCCESS);
+		CHECK(enter(TCMD(TCMD_MPXY_SHMEM, 0)).value == 1,
+		      "the trusted domain came by an MPXY shared memory, the second time");
+		CHECK_RET(sbi_call3(SBI_EXT_MPXY, 1, ~UL(0), ~UL(0), 0),
+			  SBI_SUCCESS);
+	}
+
 	/* What the hart holds for this side is there again afterwards. */
 	domain_enter_regs(DOM_TRUSTED, TCMD(TCMD_ECHO, 1), regs);
 	for (unsigned int i = 0; i < 12; i++)

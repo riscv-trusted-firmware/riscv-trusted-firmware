@@ -471,6 +471,8 @@ static void context_save(struct domain_context *ctx,
 	if (hart_has(HART_FEAT_MENVCFG))
 		ctx->senvcfg = csr_read(CSR_SENVCFG);
 	ctx->timer = timer_smode_get();
+	/* Nobody's while the hart is between two contexts. */
+	ctx->mpxy_shmem = mpxy_hart_shmem_swap(MPXY_SHMEM_NONE);
 	hyp_state_save(ctx);
 	unit_state_save(ctx);
 	hart_services_switch_out();
@@ -504,7 +506,7 @@ static void context_restore(struct domain_context *ctx, bool fresh)
 	if ((ctx->sip & MIP_SSIP) || ctx->ipi)
 		csr_set(mip, MIP_SSIP);
 	ctx->ipi = false;
-	ctx->mpxy_shmem = mpxy_hart_shmem_swap(ctx->mpxy_shmem);
+	mpxy_hart_shmem_swap(ctx->mpxy_shmem);
 
 	hartmask_clear_atomic(&from->assigned, h->index);
 	hartmask_clear_atomic(&to->parked, h->index);
@@ -519,7 +521,6 @@ static void context_restore(struct domain_context *ctx, bool fresh)
 	hart_services_switch_in(fresh);
 }
 
-/* The context the hart leaves keeps the MPXY memory the next one swaps out. */
 static void context_park(struct domain_context *ctx, enum context_state state,
 			 const struct trap_regs *regs)
 {

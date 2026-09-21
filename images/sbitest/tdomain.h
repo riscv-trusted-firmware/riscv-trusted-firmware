@@ -93,6 +93,7 @@ struct dom_shared {
 #define TCMD_SERVICES_GET 7 /* services_check() */
 #define TCMD_MM_SERVE 9 /* serve param MM requests: count | MM_SAW_* */
 #define TCMD_INSTRET 8 /* instret_coarse() over there */
+#define TCMD_MPXY_SHMEM 13 /* 1: the hart came with no MPXY shared memory set */
 #define TCMD_HYP_SET \
 	10 /* hyp_set(param): bit 0: the CSRs were not as out of reset */
 #define TCMD_HYP_GET 11 /* hyp_holds(param) */
