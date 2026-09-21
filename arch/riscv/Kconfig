@@ -135,8 +135,19 @@ config RISCV_EXT_SVPBMT
 	bool "Svpbmt: page-based memory types"
 
 config RISCV_PMP_COUNT
-	int "Number of implemented PMP entries"
-	range 0 64
+	int "Number of PMP entries to use"
+	range 0 16
 	default 16
+	help
+	  The monitor programs the first 16 entries at most; a hart's other
+	  entries stay off, as out of reset.
+
+config INSECURE_NO_PMP
+	bool "Run on harts without PMP (nothing protects the monitor)"
+	help
+	  A hart without PMP cannot keep S-mode out of the monitor's memory,
+	  and the monitor refuses to start S-mode on it. With this option it
+	  warns and goes on: for bringing up a core that has no PMP yet, and
+	  for nothing else.
 
 endmenu

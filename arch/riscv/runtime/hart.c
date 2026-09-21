@@ -53,6 +53,19 @@ static unsigned int nr_memregions;
 
 void memregion_add(paddr_t base, paddr_size_t size, enum memregion_kind kind)
 {
+	unsigned long image = monitor_base();
+
+	/*
+	 * A device S-mode has too, where the monitor is: a tree that says so
+	 * is wrong, and with Smepmp the rule for it would come before the
+	 * monitor's own and hand the image over.
+	 */
+	if (kind == MEMREGION_SHARED_RW &&
+	    (base + size < base ||
+	     (base < image + CONFIG_MONITOR_SIZE && base + size > image)))
+		panic("region %lx+%lx reaches into the monitor\n",
+		      (unsigned long)base, (unsigned long)size);
+
 	/* Neighbours of a kind share an entry (the CLINT's MSWI and MTIMER). */
 	for (unsigned int i = 0; i < nr_memregions; i++) {
 		struct memregion *r = &memregions[i];
@@ -480,9 +493,14 @@ void pmp_hart_init(void)
 	unsigned int idx = 0;
 
 	if (!hart_has(HART_FEAT_PMP)) {
+#ifdef CONFIG_INSECURE_NO_PMP
 		pr_warn("hart %lu: no PMP, firmware memory is not protected\n",
 			this_hartid());
 		return;
+#else
+		panic("hart %lu: no PMP to keep S-mode out of the monitor with\n",
+		      this_hartid());
+#endif
 	}
 
 	/*

@@ -26,6 +26,7 @@
 static vaddr_t mtime;
 static vaddr_t mtimecmp_base;
 /* Which MTIMECMP belongs to a hart (by hart index), -1: none. */
+#define ACLINT_MAX_HARTS 4095
 static int mtimecmp_of[CONFIG_PLATFORM_HART_COUNT];
 
 /* 0: this hart has none. */
@@ -76,6 +77,7 @@ static int aclint_mtimer_probe(const void *fdt, int node)
 {
 	uint64_t mtime_addr = 0, cmp_addr = 0;
 	unsigned int harts = 0;
+	int registers = 0;
 
 	if (mtime)
 		return 0; /* one time base is all the monitor uses */
@@ -89,11 +91,17 @@ static int aclint_mtimer_probe(const void *fdt, int node)
 		harts = CONFIG_PLATFORM_HART_COUNT;
 		/* Registers in hart id order, from the first hart's on. */
 		for (unsigned int i = 0; i < harts; i++) {
-			mtimecmp_of[i] = -1;
+			unsigned long pos = ~UL(0);
+
 			if (hart_by_index(i))
-				mtimecmp_of[i] =
-					(int)hart_id_of(i) -
-					CONFIG_TIMER_ACLINT_MTIMER_FIRST_HART;
+				pos = hart_id_of(i) -
+				      CONFIG_TIMER_ACLINT_MTIMER_FIRST_HART;
+
+			/*
+			 * A device has 4095 of them at most: no register, no
+			 * timer there.
+			 */
+			mtimecmp_of[i] = pos < ACLINT_MAX_HARTS ? (int)pos : -1;
 		}
 	} else {
 		if (!fdt_node_check_compatible(fdt, node, "andestech,plmt0")) {
@@ -127,8 +135,13 @@ static int aclint_mtimer_probe(const void *fdt, int node)
 	mtime = (vaddr_t)mtime_addr;
 	mtimecmp_base = (vaddr_t)cmp_addr;
 	timer_register(&aclint_mtimer_ops);
-	/* S-mode has the time CSR: these registers are the monitor's. */
-	memregion_add(mtimecmp_base, UL(8) * CONFIG_PLATFORM_HART_COUNT,
+	/*
+	 * S-mode has the time CSR: these registers are the monitor's, every
+	 * one a hart of ours uses, wherever in the array the tree has it.
+	 */
+	for (unsigned int i = 0; i < CONFIG_PLATFORM_HART_COUNT; i++)
+		registers = MAX(registers, mtimecmp_of[i] + 1);
+	memregion_add(mtimecmp_base, UL(8) * (unsigned long)registers,
 		      MEMREGION_MMODE_RW);
 	memregion_add((unsigned long)mtime_addr, 8, MEMREGION_MMODE_RW);
 	return 0;

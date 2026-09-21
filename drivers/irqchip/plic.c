@@ -24,6 +24,8 @@
 #define PLIC_ENABLE(ctx) (UL(0x2000) + UL(0x80) * (ctx))
 #define PLIC_THRESHOLD(ctx) (UL(0x200000) + UL(0x1000) * (ctx))
 #define PLIC_THRESHOLD_MAX 7
+#define PLIC_MAX_SOURCES U(1023)
+#define PLIC_MAX_CONTEXTS 15872
 
 static void plic_init(vaddr_t base, uint32_t sources, unsigned int contexts)
 {
@@ -45,7 +47,12 @@ static int plic_probe(const void *fdt, int node)
 	if (node < 0 || fdt_reg(fdt, node, 0, &base, NULL) ||
 	    !fdt_getprop(fdt, node, "interrupts-extended", &len))
 		return -1;
-	sources = fdt_prop_u32(fdt, node, "riscv,ndev", 0);
+	/*
+	 * What the tree says, within what a PLIC can be: these are loop bounds.
+	 */
+	sources =
+		MIN(fdt_prop_u32(fdt, node, "riscv,ndev", 0), PLIC_MAX_SOURCES);
+	len = MIN(len, 8 * PLIC_MAX_CONTEXTS);
 	/* One context per (hart, interrupt) pair. */
 	plic_init((vaddr_t)base, sources, (unsigned int)len / 8);
 	pr_info("plic: %lx, %u sources, %d contexts\n", (unsigned long)base,

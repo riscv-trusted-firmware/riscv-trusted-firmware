@@ -179,7 +179,8 @@ static int aplic_probe(const void *fdt, int node)
 	memregion_add((unsigned long)base, (unsigned long)size,
 		      MEMREGION_MMODE_RW);
 	aplic_root_init(fdt, node, (vaddr_t)base,
-			fdt_prop_u32(fdt, node, "riscv,num-sources", 0));
+			MIN(fdt_prop_u32(fdt, node, "riscv,num-sources", 0),
+			    U(1023)));
 	return 0;
 }
 

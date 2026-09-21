@@ -23,15 +23,18 @@
 bool irqchip_is_mlevel(const void *fdt, int node)
 {
 	unsigned long hartid = 0;
-	uint32_t irq = 0;
-	int parent = 0;
+	uint32_t irq = 0, parent = 0;
 
-	if (!fdt_hart_irq(fdt, node, 0, &hartid, &irq))
-		return irq == IRQ_M_EXT;
-
-	parent = fdt_node_offset_by_phandle(fdt, fdt_prop_u32(fdt, node,
-							      "msi-parent", 0));
-	return parent >= 0 && parent != node && irqchip_is_mlevel(fdt, parent);
+	/*
+	 * An APLIC, its IMSIC: a chain longer than that is a loop in the tree.
+	 */
+	for (unsigned int depth = 0; node >= 0 && depth < 4; depth++) {
+		if (!fdt_hart_irq(fdt, node, 0, &hartid, &irq))
+			return irq == IRQ_M_EXT;
+		parent = fdt_prop_u32(fdt, node, "msi-parent", 0);
+		node = fdt_node_offset_by_phandle(fdt, parent);
+	}
+	return false;
 }
 
 /* An OS that sees a machine-level APLIC or IMSIC tries to drive it. */
