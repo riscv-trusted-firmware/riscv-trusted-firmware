@@ -19,6 +19,7 @@ srcs-y += misaligned_vector.c
 srcs-y += pmp.c
 srcs-$(CONFIG_SBI_PMU) += pmu.c
 srcs-y += rfence.c
+srcs-$(CONFIG_SBI_SSE) += ras.c
 srcs-$(CONFIG_SBI_SSE) += sse.c
 srcs-y += switch.S
 srcs-y += trap.c

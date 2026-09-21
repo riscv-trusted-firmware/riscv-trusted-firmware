@@ -18,6 +18,7 @@
 #include <arch/hsm.h>
 #include <arch/pmp.h>
 #include <arch/pmu.h>
+#include <arch/ras.h>
 #include <arch/sse.h>
 #include <atomic.h>
 #include <domain.h>
@@ -46,17 +47,24 @@ struct sse_event {
 	 INT_FLAGS_SDT)
 
 static const uint32_t local_ids[] = {
-	SSE_EVENT_LOCAL_DOUBLE_TRAP,
-	SSE_EVENT_LOCAL_PMU_OVERFLOW,
+	SSE_EVENT_LOCAL_HIGH_RAS,     SSE_EVENT_LOCAL_DOUBLE_TRAP,
+	SSE_EVENT_LOCAL_PMU_OVERFLOW, SSE_EVENT_LOCAL_LOW_RAS,
 	SSE_EVENT_LOCAL_SOFTWARE,
 };
 
-#define NR_GLOBAL (1 + SSE_MPXY_EVENTS)
+static const uint32_t global_ids[] = {
+	SSE_EVENT_GLOBAL_HIGH_RAS,
+	SSE_EVENT_GLOBAL_LOW_RAS,
+	SSE_EVENT_GLOBAL_SOFTWARE,
+};
+
+#define NR_GLOBAL (ARRAY_SIZE(global_ids) + SSE_MPXY_EVENTS)
 
 static uint32_t global_id(unsigned int i)
 {
-	return i ? (uint32_t)SSE_EVENT_MPXY(i - 1) :
-		   (uint32_t)SSE_EVENT_GLOBAL_SOFTWARE;
+	return i < ARRAY_SIZE(global_ids) ?
+		       global_ids[i] :
+		       (uint32_t)SSE_EVENT_MPXY(i - ARRAY_SIZE(global_ids));
 }
 
 static unsigned long sse_lock = SPINLOCK_UNLOCK;
@@ -107,6 +115,8 @@ static bool event_available(uint32_t id)
 		return pmu_sse_supported();
 	if (id == SSE_EVENT_LOCAL_DOUBLE_TRAP)
 		return hart_has(HART_FEAT_SSDBLTRP);
+	if (ras_is_event(id))
+		return ras_event_available(id);
 	return true;
 }
 
@@ -122,6 +132,14 @@ static void event_source_update(const struct sse_event *e)
 {
 	if (e->id == SSE_EVENT_LOCAL_PMU_OVERFLOW)
 		pmu_sse_enable(e->attr[SSE_ATTR_STATUS] >= SSE_STATE_ENABLED);
+	/*
+	 * A level interrupt: not while the event it has become is still to be
+	 * handled.
+	 */
+	else if (ras_is_event(e->id))
+		ras_event_arm(e->id,
+			      e->attr[SSE_ATTR_STATUS] == SSE_STATE_ENABLED &&
+			      !e->pending);
 }
 
 /*
@@ -140,22 +158,16 @@ static long event_find(unsigned long event_id, unsigned int hart,
 		}
 	for (unsigned int i = 0; i < NR_GLOBAL; i++)
 		if (event_id == global_id(i)) {
+			if (!event_available(global_id(i)))
+				return SBI_ERR_NOT_SUPPORTED;
 			*e = &this_sse()->global[i];
 			return SBI_SUCCESS;
 		}
 
-	switch (event_id) {
-	case 0x00000000: /* local high priority RAS */
-	case 0x00008000: /* global high priority RAS */
-	case 0x00100000: /* local low priority RAS */
-	case 0x00108000: /* global low priority RAS */
-		return SBI_ERR_NOT_SUPPORTED;
-	default:
-		/* Platform specific events: none. The rest is reserved. */
-		return event_id <= UL(0xffffffff) && (event_id & 0x4000) ?
-			       SBI_ERR_NOT_SUPPORTED :
-			       SBI_ERR_INVALID_PARAM;
-	}
+	/* Platform specific events: no others. The rest is reserved. */
+	return event_id <= UL(0xffffffff) && (event_id & 0x4000) ?
+		       SBI_ERR_NOT_SUPPORTED :
+		       SBI_ERR_INVALID_PARAM;
 }
 
 /* 'hart' is an index; the PREFERRED_HART attribute is S-mode's, a hart id. */
@@ -163,6 +175,18 @@ static void event_reset(struct sse_event *e, uint32_t id, unsigned int hart)
 {
 	*e = (struct sse_event){ .id = id, .hart = hart };
 	e->attr[SSE_ATTR_PREFERRED_HART] = hart_id_of(hart);
+}
+
+/*
+ * The hart's RAS interrupts are the running domain's: enabled as its events
+ * are.
+ */
+static void ras_sources_update(unsigned int self)
+{
+	for (unsigned int i = 0; i < ARRAY_SIZE(local_ids); i++)
+		if (ras_is_event(local_ids[i]))
+			event_source_update(&sse_hart(this_domain_key(),
+						      self)->local[i]);
 }
 
 void sse_hart_init(void)
@@ -179,13 +203,19 @@ void sse_hart_init(void)
 	for (unsigned int i = 0; i < NR_GLOBAL && !d->globals_ready; i++)
 		event_reset(&d->global[i], global_id(i), self);
 	d->globals_ready = true;
+	ras_sources_update(self);
 	spin_unlock(&sse_lock);
 }
 
 void sse_hart_switch_in(bool fresh)
 {
-	if (fresh)
+	if (fresh) {
 		sse_hart_init();
+	} else {
+		spin_lock(&sse_lock);
+		ras_sources_update(this_hart_index());
+		spin_unlock(&sse_lock);
+	}
 	/* What became due for this domain while the hart ran another one. */
 	atomic_store_ulong(&kick[this_hart_index()], 1);
 }
@@ -440,7 +470,11 @@ bool sse_raise_local(uint32_t event_id)
 	spin_lock(&sse_lock);
 	taken = sse_hart(this_domain_key(), self)->unmasked &&
 		e->attr[SSE_ATTR_STATUS] >= SSE_STATE_ENABLED;
-	make_pending(e, this_domain_key());
+	/*
+	 * As for a global one: not kept for whoever registers the event later.
+	 */
+	if (e->attr[SSE_ATTR_STATUS] != SSE_STATE_UNUSED)
+		make_pending(e, this_domain_key());
 	spin_unlock(&sse_lock);
 	return taken;
 }

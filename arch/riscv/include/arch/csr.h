@@ -69,6 +69,9 @@
 #define IRQ_M_EXT 11
 #define IRQ_S_GEXT 12
 #define IRQ_PMU_OVF 13
+/* AIA: local interrupts above the standard ones, in mieh and miph on RV32. */
+#define IRQ_RAS_LOW 35
+#define IRQ_RAS_HIGH 43
 
 #define MIP_SSIP BIT(IRQ_S_SOFT)
 #define MIP_MSIP BIT(IRQ_M_SOFT)
@@ -124,6 +127,7 @@
 #define CSR_MSTATEEN0 0x30c /* + n, n = 0..3 */
 #define CSR_MSTATEEN0H 0x31c
 #define CSR_MENVCFGH 0x31a
+#define CSR_MIEH 0x314
 #define CSR_MSTATUSH 0x310
 #define CSR_HSTATUS 0x600
 #define CSR_TSELECT 0x7a0

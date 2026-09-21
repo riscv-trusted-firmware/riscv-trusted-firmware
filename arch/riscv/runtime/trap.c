@@ -13,6 +13,7 @@
 
 #include <arch/hart.h>
 #include <arch/pmu.h>
+#include <arch/ras.h>
 #include <arch/sse.h>
 #include <arch/trap.h>
 #include <domain.h>
@@ -138,6 +139,8 @@ static void trap_from_below(struct trap_regs *regs)
 			sse_raise_local(SSE_EVENT_LOCAL_PMU_OVERFLOW);
 		else if (irq < __RISCV_XLEN__ && BIT(irq) == ipi_irq())
 			ipi_process();
+		else if (ras_irq(irq))
+			; /* the hart's RAS event, from here on */
 		else
 			trap_fatal(regs, "unhandled interrupt");
 		return;

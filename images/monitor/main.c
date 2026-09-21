@@ -53,6 +53,7 @@ static void print_features(void)
 		[HART_FEAT_SMCNTRPMF] = "smcntrpmf",
 		[HART_FEAT_SMCDELEG] = "smcdeleg",
 		[HART_FEAT_ZKR] = "zkr",
+		[HART_FEAT_RAS_IRQ] = "ras-irq",
 	};
 
 	pr_info("features:");

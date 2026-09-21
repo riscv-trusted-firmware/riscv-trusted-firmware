@@ -81,6 +81,8 @@ enum hart_feature {
 	HART_FEAT_SMCDELEG,
 	/* the entropy source, which S-mode gets (mseccfg.SSEED) */
 	HART_FEAT_ZKR,
+	/* the local RAS interrupts of the AIA, <arch/ras.h> */
+	HART_FEAT_RAS_IRQ,
 	HART_FEAT_COUNT,
 };
 

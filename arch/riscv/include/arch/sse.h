@@ -12,9 +12,9 @@
  * and error codes are those of the SBI specification.
  *
  * Supported events: the software injected local and global events, the
- * local PMU overflow event on harts with Sscofpmf, and the local double
- * trap event on harts with Ssdbltrp. The RAS events have no source in this
- * firmware and are SBI_ERR_NOT_SUPPORTED.
+ * local PMU overflow event on harts with Sscofpmf, the local double trap
+ * event on harts with Ssdbltrp, and the RAS events where something can
+ * raise them (<arch/ras.h>).
  */
 
 #include <arch/trap.h>

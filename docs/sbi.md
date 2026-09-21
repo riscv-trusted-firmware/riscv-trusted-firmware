@@ -17,7 +17,7 @@ and what is still missing.
 | CPPC      | `CPPC` | probe, read, read_hi, write; backend: the RPMI CPPC service group, fast channels included |
 | SUSP      | `SUSP` | suspend to RAM as an M-mode wait with all other harts stopped (`CONFIG_SBI_SUSP`, on for QEMU virt) |
 | FWFT      | `FWFT` | misaligned exception delegation; landing pad, shadow stack, double trap, PTE A/D updating and pointer masking where the hart has them; lock flag |
-| SSE       | `SSE`  | all ten functions; sources: the software injected local and global events, PMU counter overflow (Sscofpmf), double trap (Ssdbltrp) |
+| SSE       | `SSE`  | all ten functions; sources: the software injected local and global events, PMU counter overflow (Sscofpmf), double trap (Ssdbltrp), RAS events from the hart's RAS interrupts (AIA) or a platform's error source |
 | DBTR      | `DBTR` | all eight functions, on harts with Sdtrig; address / data match triggers (mcontrol, mcontrol6) with chains, instruction count, interrupt and exception triggers (icount, itrigger, etrigger) |
 | MPXY      | `MPXY` | all eight functions; channels carry RPMI service groups (see below); notification events signalled by MSI or SSE, or polled |
 | PMU       | `PMU`  | counters 0-31 = mcycle/minstret/mhpmcounterN, 16 firmware counters per hart, `event_get_info`, counter snapshots |
@@ -265,9 +265,23 @@ Events come from a table (`local_ids`, `global_ids` in `sse.c`); a source
 in the monitor raises its event with `sse_raise_local()` and follows the
 event's state through `event_source_update()`. Today: the software injected
 local and global events, the PMU overflow event, and the double trap event.
-Only the software events can be injected by S-mode. The RAS events have no
-source here and are `SBI_ERR_NOT_SUPPORTED`, reserved ids
-`SBI_ERR_INVALID_PARAM`.
+Only the software events can be injected by S-mode. An event nothing can
+raise is `SBI_ERR_NOT_SUPPORTED`, reserved ids `SBI_ERR_INVALID_PARAM`.
+
+**RAS events** (`arch/riscv/runtime/ras.c`). A hart's own errors come as the
+local RAS interrupts the AIA has numbers for: 35, low priority, and 43, high
+priority, which is how a hart's error records (RERI) ask for attention.
+Where a hart has their enable bits, the monitor keeps them to M-mode and
+takes one as the local RAS event of that priority. They are level
+interrupts and stay up until S-mode has dealt with the record, so one is
+enabled only while its event is, and kept off from the moment it is taken
+until the event's handler has completed. Anything else that reports errors
+comes with the platform (an error collector behind an interrupt, a PuC): it
+names the kinds of event it has with `ras_source_register()` and calls
+`ras_report()`; a global event goes to every domain that has registered it.
+The error records are S-mode's to read; with a PuC, RPMI's RAS_AGENT group
+describes them, passed on through MPXY like the other groups. QEMU has no
+such hardware: the virt test platform has a vendor call that reports.
 
 **Double traps.** With Smdbltrp the trap entry clears `mstatus.MDT` once
 the interrupted state is saved, since the monitor takes traps in M-mode on
@@ -512,19 +526,19 @@ with `IMAGE_SBITEST` disabled.
 
 ## Gaps
 
-1. SSE RAS events (no source yet).
-2. **RPMI**: a wired P2A doorbell interrupt (an MSI one is there). Of the
+1. **RPMI**: a wired P2A doorbell interrupt (an MSI one is there). Of the
    groups a firmware can serve itself, request forwarding between domains
    and the management mode built on it are there; the TEE group waits for
    its ratification.
-3. The monitor's size is a build-time constant, and so is the most harts
+2. The monitor's size is a build-time constant, and so is the most harts
    it can manage (a bit in a hart mask each). What there is
    of harts, domains and regions is counted at boot.
-4. Drivers that take an I2C bus (PMIC resets) and boards whose quirks need
+3. Drivers that take an I2C bus (PMIC resets) and boards whose quirks need
    a platform directory of their own; the drivers QEMU cannot run are
    untested.
 
 The H-extension paths (trap redirection from VS/VU-mode, `hfence` on a real
 guest) are written after the specification but have not run under a
-hypervisor yet. The instruction count, interrupt and exception debug
-triggers have nothing in QEMU 8.2 to run against.
+hypervisor yet. The local RAS interrupts and the instruction count,
+interrupt and exception debug triggers have nothing in QEMU 8.2 to run
+against.

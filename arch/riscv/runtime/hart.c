@@ -15,6 +15,7 @@
 #include <arch/isa.h>
 #include <arch/pmp.h>
 #include <arch/pmu.h>
+#include <arch/ras.h>
 #include <arch/rfence.h>
 #include <arch/sse.h>
 #include <atomic.h>
@@ -281,6 +282,8 @@ void hart_detect_features(void)
 		features[HART_FEAT_ZKR] = csr_read(CSR_MSECCFG) & MSECCFG_SSEED;
 		csr_write(CSR_MSECCFG, val);
 	}
+
+	features[HART_FEAT_RAS_IRQ] = ras_irqs_probe();
 
 	monitor_regions_init();
 }

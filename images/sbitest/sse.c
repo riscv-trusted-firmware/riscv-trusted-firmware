@@ -30,6 +30,13 @@
 #define FID_MASK 9
 
 #define LOCAL SSE_EVENT_LOCAL_SOFTWARE
+/*
+ * RAS events; the number is what the test platform's error report call takes.
+ */
+#define RAS_LOCAL_HIGH UL(0x00000000) /* 0 */
+#define RAS_GLOBAL_HIGH UL(0x00008000) /* 1 */
+#define RAS_LOCAL_LOW UL(0x00100000) /* 2 */
+#define RAS_GLOBAL_LOW UL(0x00108000) /* 3: no source, not supported */
 #define GLOBAL SSE_EVENT_GLOBAL_SOFTWARE
 #define SSTATUS_SIE BIT(1)
 #define SEPC_SENTINEL 0x5e9c0
@@ -43,6 +50,7 @@ struct sse_ctx {
 	unsigned long seen_state, seen_sepc, seen_sie;
 	/* What to do from inside the handler. */
 	unsigned long inject_event;
+	unsigned long report_ras; /* kind + 1, see test_ras() */
 	struct sse_ctx *inject_ctx;
 	unsigned long nested_runs_at_exit;
 	unsigned long stack[256];
@@ -88,6 +96,10 @@ void sse_handler(struct sse_ctx *ctx, unsigned long hartid)
 	/* A higher priority event preempts us right here, a lower one waits. */
 	if (ctx->inject_event) {
 		sbi_call2(SBI_EXT_SSE, FID_INJECT, ctx->inject_event, hartid);
+		ctx->nested_runs_at_exit = ctx->inject_ctx->runs;
+	}
+	if (ctx->report_ras) {
+		sbi_call1(SBI_EXT_VENDOR_START, 1, ctx->report_ras - 1);
 		ctx->nested_runs_at_exit = ctx->inject_ctx->runs;
 	}
 	WRITE_ONCE(ctx->runs, ctx->runs + 1);
@@ -140,7 +152,7 @@ static void test_attrs_and_states(struct sse_ctx *ctx)
 	 * not.
 	 */
 	CHECK_RET(sse_call(FID_ENABLE, 0x00000002), SBI_ERR_INVALID_PARAM);
-	CHECK_RET(sse_call(FID_ENABLE, 0x00000000), SBI_ERR_NOT_SUPPORTED);
+	CHECK_RET(sse_call(FID_ENABLE, RAS_GLOBAL_LOW), SBI_ERR_NOT_SUPPORTED);
 	CHECK_RET(sse_call(FID_ENABLE, 0xffff4000), SBI_ERR_NOT_SUPPORTED);
 
 	/* UNUSED -> REGISTERED -> ENABLED and back, and nothing else. */
@@ -253,6 +265,70 @@ static void test_priorities(struct sse_ctx *ctx, unsigned long self)
 	      "local event preempted the higher priority handler");
 	global_ctx.inject_event = 0;
 }
+
+/*
+ * RAS events: QEMU has no hardware that reports errors, the test platform
+ * has a vendor call that does (platform/qemu/virt/plat.c).
+ */
+#ifdef CONFIG_PLAT_QEMU_VIRT
+static struct sse_ctx ras_ctx[2];
+
+static void test_ras(struct sse_ctx *ctx, unsigned long self)
+{
+	printf("sse (ras)\n");
+	/* Nothing is kept for an event nobody has registered. */
+	CHECK_RET(sbi_call1(SBI_EXT_VENDOR_START, 1, 2), SBI_SUCCESS);
+	CHECK_RET(sse_setup(RAS_LOCAL_LOW, &ras_ctx[0]), SBI_SUCCESS);
+	CHECK(!(attr_read(RAS_LOCAL_LOW, SSE_ATTR_STATUS) &
+		(SSE_STATUS_INJECTABLE | SSE_STATUS_PENDING)),
+	      "RAS event injectable, or pending from before it was registered");
+	CHECK_RET(sbi_call2(SBI_EXT_SSE, FID_INJECT, RAS_LOCAL_LOW, self),
+		  SBI_ERR_INVALID_PARAM);
+	CHECK_RET(sse_call(FID_ENABLE, RAS_LOCAL_LOW), SBI_SUCCESS);
+	CHECK_RET(sbi_call1(SBI_EXT_VENDOR_START, 1, 2), SBI_SUCCESS);
+	CHECK(ras_ctx[0].runs == 1 && ras_ctx[0].hartid == self,
+	      "local RAS event: %lu runs, hart %lu", ras_ctx[0].runs,
+	      ras_ctx[0].hartid);
+
+	/* A disabled one waits. */
+	CHECK_RET(sse_call(FID_DISABLE, RAS_LOCAL_LOW), SBI_SUCCESS);
+	CHECK_RET(sbi_call1(SBI_EXT_VENDOR_START, 1, 2), SBI_SUCCESS);
+	CHECK(ras_ctx[0].runs == 1 &&
+	      (attr_read(RAS_LOCAL_LOW, SSE_ATTR_STATUS) &
+	       SSE_STATUS_PENDING),
+	      "disabled RAS event: %lu runs", ras_ctx[0].runs);
+	CHECK_RET(sse_call(FID_ENABLE, RAS_LOCAL_LOW), SBI_SUCCESS);
+	CHECK(ras_ctx[0].runs == 2, "RAS event after enabling: %lu runs",
+	      ras_ctx[0].runs);
+
+	/*
+	 * The global high priority one, reported from the local software
+	 * event's handler.
+	 */
+	CHECK_RET(sse_setup(RAS_GLOBAL_HIGH, &ras_ctx[1]), SBI_SUCCESS);
+	CHECK_RET(attr_write(RAS_GLOBAL_HIGH, SSE_ATTR_PREFERRED_HART, self),
+		  SBI_SUCCESS);
+	CHECK_RET(sse_call(FID_ENABLE, RAS_GLOBAL_HIGH), SBI_SUCCESS);
+	ctx->runs = 0;
+	ctx->report_ras = 1 + 1; /* kind 1: global, high priority */
+	ctx->inject_ctx = &ras_ctx[1];
+	CHECK_RET(sbi_call2(SBI_EXT_SSE, FID_INJECT, LOCAL, self), SBI_SUCCESS);
+	CHECK(ctx->runs == 1 && ras_ctx[1].runs == 1,
+	      "%lu local, %lu global RAS runs", ctx->runs, ras_ctx[1].runs);
+	CHECK(ctx->nested_runs_at_exit == 1,
+	      "RAS event did not preempt the local handler");
+	ctx->report_ras = 0;
+
+	CHECK_RET(sse_call(FID_DISABLE, RAS_GLOBAL_HIGH), SBI_SUCCESS);
+	CHECK_RET(sse_call(FID_UNREGISTER, RAS_GLOBAL_HIGH), SBI_SUCCESS);
+	CHECK_RET(sse_call(FID_DISABLE, RAS_LOCAL_LOW), SBI_SUCCESS);
+	CHECK_RET(sse_call(FID_UNREGISTER, RAS_LOCAL_LOW), SBI_SUCCESS);
+}
+#else
+static void test_ras(struct sse_ctx *ctx, unsigned long self)
+{
+}
+#endif
 
 #ifdef CONFIG_SBI_PMU
 /*
@@ -416,6 +492,7 @@ void test_sse(unsigned long self)
 	test_attrs_and_states(ctx);
 	test_delivery(ctx, self);
 	test_priorities(ctx, self);
+	test_ras(ctx, self);
 	test_pmu_overflow(self);
 
 	CHECK_RET(sse_call(FID_DISABLE, LOCAL), SBI_SUCCESS);

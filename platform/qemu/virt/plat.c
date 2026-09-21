@@ -21,14 +21,22 @@ void plat_early_init(const void *fdt)
 
 #if defined(IMAGE_MONITOR) && defined(CONFIG_IMAGE_SBITEST)
 
+#include <arch/ras.h>
 #include <libfdt.h>
 #include <sbi/sbi.h>
 #include <sbi/vendor.h>
 
-/* For the test payload to call: QEMU's harts are no vendor's (mvendorid 0). */
+/*
+ * For the test payload to call: QEMU's harts are no vendor's (mvendorid 0).
+ * Call 1 stands in for the error reporting hardware QEMU does not have.
+ */
 static struct service_ret test_vendor_ecall(unsigned long fid,
 					    struct trap_regs *regs)
 {
+	if (fid == 1 && regs->a0 < RAS_KINDS) {
+		ras_report((enum ras_kind)regs->a0);
+		return (struct service_ret){ .error = SBI_SUCCESS };
+	}
 	if (fid)
 		return (struct service_ret){ .error = SBI_ERR_NOT_SUPPORTED };
 	return (struct service_ret){ .value = (long)(regs->a0 ^ 0x5a) };
@@ -41,6 +49,12 @@ static const struct sbi_vendor_ops test_vendor_ops = {
 void plat_init(void)
 {
 	sbi_vendor_register(&test_vendor_ops);
+	/*
+	 * All but the global low priority one, for an event that is not there.
+	 */
+	ras_source_register(RAS_LOCAL_HIGH);
+	ras_source_register(RAS_LOCAL_LOW);
+	ras_source_register(RAS_GLOBAL_HIGH);
 }
 
 /*

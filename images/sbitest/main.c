@@ -309,7 +309,7 @@ static void test_vendor(void)
 	ret = sbi_call1(SBI_EXT_VENDOR_START, 0, 0x1234);
 	CHECK(!ret.error && ret.value == (0x1234 ^ 0x5a),
 	      "vendor call: %ld %lx", ret.error, ret.value);
-	CHECK_RET(sbi_call1(SBI_EXT_VENDOR_START, 1, 0), SBI_ERR_NOT_SUPPORTED);
+	CHECK_RET(sbi_call1(SBI_EXT_VENDOR_START, 2, 0), SBI_ERR_NOT_SUPPORTED);
 	ret = sbi_call1(SBI_EXT_BASE, SBI_BASE_PROBE_EXTENSION,
 			SBI_EXT_VENDOR_START + 1);
 	CHECK(!ret.error && ret.value == 0, "another vendor's extension: %ld",

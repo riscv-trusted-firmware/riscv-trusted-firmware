@@ -45,7 +45,9 @@ config SBI_SSE
 	default y
 	help
 	  Events injected into S-mode ahead of anything S-mode can mask.
-	  Sources so far: the software injected local and global events.
+	  Sources: the software injected local and global events, PMU counter
+	  overflow, double traps, and for the RAS events the harts' local RAS
+	  interrupts or whatever the platform reports errors with.
 
 config SBI_DBTR
 	bool "Debug triggers extension (DBTR)"
