@@ -11,6 +11,7 @@
 #include <console.h>
 #include <spinlock.h>
 #include <stddef.h>
+#include <util.h>
 
 static const struct console_ops *console;
 /* Keeps the output of one call in one piece when several harts print. */
@@ -51,10 +52,18 @@ void console_write(const char *buf, size_t len)
 {
 	if (!console)
 		return;
-	spin_lock(&console_lock);
-	while (len--)
-		console->putc(*buf++);
-	spin_unlock(&console_lock);
+	/*
+	 * S-mode says how long this is (DBCN). The harts that wait for the
+	 * console wait in M-mode: for a line's worth, not for all of it.
+	 */
+	while (len) {
+		size_t n = MIN(len, (size_t)128);
+
+		spin_lock(&console_lock);
+		for (len -= n; n--;)
+			console->putc(*buf++);
+		spin_unlock(&console_lock);
+	}
 }
 
 int console_getc(void)

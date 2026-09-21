@@ -248,8 +248,13 @@ int rfence_request(const struct hartmask *targets, const struct rfence_req *req)
 	if (hartmask_test(targets, self))
 		fence_local(req);
 
+	/*
+	 * Its own queue meanwhile, and the word to stop if the monitor has
+	 * panicked.
+	 */
 	while (atomic_load_ulong(&out)) {
 		rfence_process();
+		ipi_process();
 		cpu_relax();
 	}
 	return SBI_SUCCESS;
