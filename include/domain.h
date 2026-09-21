@@ -97,6 +97,11 @@ struct domain {
 	bool next_arg1_given;
 	bool reset_allowed;
 	bool suspend_allowed;
+	/*
+	 * Bit per domain, by index: the ones that may have a hart enter this
+	 * one.
+	 */
+	bitstr_t *entry_from;
 };
 
 /*
@@ -174,6 +179,17 @@ static inline bool domain_suspend_allowed(const struct domain *dom)
  */
 
 /*
+ * Moving a hart is a matter of policy, and the policy is the tree's:
+ * "riscv,entry-allowed-from" in an instance node lists the domains whose
+ * software may have a hart enter it, and nothing may where it is absent.
+ * The root domain has no node, all of memory, and no way in: it runs what
+ * the machine boots into it and the harts it starts itself. Leaving a
+ * domain nobody entered (the boot's hand-over from one domain to the
+ * next) is entering the next one, and goes by the same list.
+ */
+bool domain_may_enter(const struct domain *from, const struct domain *target);
+
+/*
  * Run 'target' on the calling hart until it exits: a new context at the
  * domain's next stage when the hart is its boot hart, stopped for the
  * domain to start it when it is not, or the context that exited before,
@@ -183,8 +199,8 @@ long domain_enter(struct trap_regs *regs, struct domain *target,
 		  unsigned long arg);
 /*
  * Back to the context that entered this one, which sees its enter call
- * return 'value'. Without one: on to the domains that have not run on this
- * hart yet, then to the root domain.
+ * return 'value'. Without one: on to a domain that has not run on this
+ * hart yet and lets this one enter it.
  */
 long domain_exit(struct trap_regs *regs, unsigned long value);
 /*

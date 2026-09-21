@@ -630,6 +630,12 @@ static long enter(struct trap_regs *regs, struct domain *target,
 	to = context_of(target, self);
 	if (target == this_domain() || !hartmask_test(&target->possible, self))
 		rc = SBI_ERR_INVALID_PARAM;
+	/*
+	 * A service that moves the hart has its own say-so: the tree's, in its
+	 * node.
+	 */
+	else if (!quiet && !domain_may_enter(this_domain(), target))
+		rc = SBI_ERR_DENIED;
 	else if (atomic_load_ulong(&target->stopping) ||
 		 atomic_load_ulong(&this_domain()->stopping))
 		rc = SBI_ERR_DENIED;
@@ -719,20 +725,21 @@ static long leave(struct trap_regs *regs, unsigned long value, bool quiet,
 			to->caller = NULL;
 	} else {
 		/*
-		 * Booting: the domains that have not had this hart yet, root
-		 * last.
+		 * Booting: a domain that has not had this hart yet. That is
+		 * entering it, and takes its leave to; never the root domain,
+		 * whose next stage and all of memory are not for a domain to
+		 * bring together when it likes.
 		 */
 		for (unsigned int d = 1; d < domain_count() && !to; d++) {
 			struct domain *dom = domain_by_index(d);
 
 			if (dom != this_domain() &&
 			    hartmask_test(&dom->possible, self) &&
+			    domain_may_enter(this_domain(), dom) &&
 			    !atomic_load_ulong(&dom->stopping) &&
 			    context_of(dom, self)->state == CONTEXT_NONE)
 				to = context_of(dom, self);
 		}
-		if (!to && this_domain()->index)
-			to = context_of(domain_by_index(0), self);
 		if (to)
 			to->caller = NULL;
 	}

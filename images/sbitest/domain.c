@@ -72,6 +72,9 @@ static void test_trusted(void)
 	bool has_fp = false, has_vec = false, vec_kept = false;
 	struct sbiret ret = {};
 
+	/* The root domain is all of memory, and nobody's to enter. */
+	CHECK_RET(dom_call(SBI_FW_DOMAIN_ENTER, 0, 0), SBI_ERR_DENIED);
+
 	/* The first enter boots it; its exit carries what it found wrong. */
 	ret = enter(0);
 	CHECK_RET(ret, SBI_SUCCESS);

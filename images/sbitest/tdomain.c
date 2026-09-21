@@ -577,6 +577,15 @@ void trusted_main(unsigned long hartid, unsigned long arg1)
 		      READ_ONCE(DOM_SHARED->island_hart) - 1)
 			    .error != SBI_ERR_INVALID_PARAM)
 		fail |= BIT(11);
+	/*
+	 * Entering is by leave of the domain entered: nobody has this one's, or
+	 * the root's.
+	 */
+	if (sbi_call2(SBI_EXT_FW_DOMAIN, SBI_FW_DOMAIN_ENTER, DOM_UNTRUSTED, 0)
+	    .error != SBI_ERR_DENIED ||
+	    sbi_call2(SBI_EXT_FW_DOMAIN, SBI_FW_DOMAIN_ENTER, 0, 0).error !=
+		    SBI_ERR_DENIED)
+		fail |= BIT(12);
 	trusted_serve(hartid, fail);
 }
 

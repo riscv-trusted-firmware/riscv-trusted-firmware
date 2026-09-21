@@ -494,6 +494,16 @@ static int domains_fdt_prepare(void *fdt)
 		rc = add_instance(fdt, "trusted", &harts[1], (int)n, regions, 3,
 				  DOM_IMAGE + 4, false, &dom[0]);
 #undef REGION
+	/*
+	 * "untrusted" may take a hart into "trusted", and nobody else anywhere.
+	 */
+	if (!rc) {
+		node = fdt_node_offset_by_phandle(fdt, dom[0]);
+		rc = node < 0 ? node :
+				fdt_setprop_u32(fdt, node,
+						"riscv,entry-allowed-from",
+						dom[1]);
+	}
 
 	for (unsigned int i = 0; !rc && i < n; i++)
 		rc = assign_cpu(fdt, hart_id_of(i),

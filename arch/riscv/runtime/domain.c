@@ -37,6 +37,12 @@ struct domain *domain_by_index(unsigned int index)
 	return index < nr_domains ? &domains[index] : NULL;
 }
 
+bool domain_may_enter(const struct domain *from, const struct domain *target)
+{
+	return target->index && target->entry_from &&
+	       bit_test(target->entry_from, from->index);
+}
+
 struct domain *domain_by_phandle(uint32_t phandle)
 {
 	for (unsigned int d = 1; phandle && d < nr_domains; d++)
@@ -278,7 +284,7 @@ void domains_init(const void *fdt, unsigned long next_addr,
 		  unsigned long next_mode)
 {
 	unsigned int instances = 0;
-	int config = 0, node = 0;
+	int config = 0, node = 0, len = 0;
 
 	/* As many as the tree has. */
 	config = fdt ? fdt_node_offset_by_compatible(fdt, -1,
@@ -303,6 +309,29 @@ void domains_init(const void *fdt, unsigned long next_addr,
 			continue;
 		}
 		dom->index = nr_domains++;
+	}
+	/* Who may enter whom: once every domain has its index. */
+	fdt_for_each_subnode(node, fdt, config) {
+		struct domain *dom =
+			domain_by_phandle(fdt_get_phandle(fdt, node));
+		const fdt32_t *list = fdt_getprop(fdt, node,
+						  "riscv,entry-allowed-from",
+						  &len);
+
+		if (!dom || !dom->index)
+			continue;
+		dom->entry_from = heap_alloc_array(bitstr_size(nr_domains),
+						   sizeof(bitstr_t));
+		for (int i = 0; list && i < len / 4; i++) {
+			const struct domain *from =
+				domain_by_phandle(fdt32_to_cpu(list[i]));
+
+			if (from)
+				bit_set(dom->entry_from, from->index);
+			else
+				pr_warn("domain %s: no such domain to be entered from\n",
+					dom->name);
+		}
 	}
 	assign_harts(fdt);
 

@@ -56,6 +56,7 @@ chosen {
             boot-hart = <&cpu0>;
             next-addr = <0x0 0x8e000000>;
             next-mode = <1>;                /* 1: S-mode (default), 0: U-mode */
+            riscv,entry-allowed-from = <&udomain>;
         };
         udomain: untrusted-domain {
             compatible = "riscv,domain,instance";
@@ -118,16 +119,21 @@ the calling hart:
 | 5 | `domain_stop(domain)` | stop every hart that runs it, forget its contexts |
 | 6 | `domain_state(domain)` | 1 while a hart runs it or is to come back to it |
 
-`domain_enter()` is open to any domain the hart is a possible hart of.
-The first time it boots the domain on this hart: at `next-addr` if the
+Who may enter what is the tree's to say: `riscv,entry-allowed-from` in an
+instance node lists the domains that may take a hart into it, and a domain
+without the property is entered by nobody (`SBI_ERR_DENIED`). The root
+domain has no node and no way in: it has all of memory, and runs what the
+machine boots into it and the harts it starts itself, nothing a domain
+brings there. The hart has to be a possible hart of the domain as well.
+The first time, `domain_enter()` boots the domain on this hart: at `next-addr` if the
 hart is the domain's boot hart; otherwise the hart stops there, for the
 domain to start with `sbi_hart_start()`. From then on enter
 and exit are the two ends of a call: enter resumes the domain where its
 last `domain_exit()` was, which returns `arg`; the exit's `value` is what
-enter returns. `domain_exit()` without anyone to go back to goes on to the
-domains that have not had the hart yet and then to the root domain, which
-is boot-time chaining; `SBI_ERR_DENIED` when there is nowhere to
-go. Starting and stopping a domain other than one's own takes
+enter returns. `domain_exit()` without anyone to go back to goes on to a
+domain that has not had the hart yet, which is boot-time
+chaining; that is entering it, so it takes the same leave, and never ends
+in the root domain. `SBI_ERR_DENIED` when there is nowhere to go. Starting and stopping a domain other than one's own takes
 `system-reset-allowed`. A domain that is stopped loses its contexts: harts
 that were visiting go back where they came from, their enter call failed,
 and the next enter boots the domain again.
