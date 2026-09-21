@@ -40,6 +40,12 @@ void pmp_hart_init(void);
  * changes domain.
  */
 void pmp_domain_set(void);
+/*
+ * The granularity the hart's PMP works at, in bytes: 4, or what a probe of
+ * pmpaddr says.
+ */
+void pmp_grain_set(unsigned long pmpaddr_ones);
+unsigned long pmp_grain(void);
 /* Entries left for a domain's regions. */
 unsigned int pmp_domain_entries(void);
 

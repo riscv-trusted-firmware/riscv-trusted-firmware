@@ -117,6 +117,25 @@ void pmp_entry_set(unsigned int idx, unsigned long pmpaddr, unsigned int cfg)
 	pmpcfg_update(idx, cfg);
 }
 
+/*
+ * The grain: pmpaddr bits below it read as zero (as ones, in a NAPOT
+ * entry), so a NAPOT region smaller than it becomes one grain, which errs
+ * on the side of the rule, and the top of a TOR range is rounded down,
+ * which does not: the tail of the range would be left out.
+ */
+static unsigned long grain = 4;
+
+void pmp_grain_set(unsigned long pmpaddr_ones)
+{
+	for (grain = 4; pmpaddr_ones && !(pmpaddr_ones & 1); pmpaddr_ones >>= 1)
+		grain <<= 1;
+}
+
+unsigned long pmp_grain(void)
+{
+	return grain;
+}
+
 unsigned int pmp_range_set(unsigned int idx, paddr_t base, paddr_size_t size,
 			   unsigned int perm)
 {
@@ -128,7 +147,8 @@ unsigned int pmp_range_set(unsigned int idx, paddr_t base, paddr_size_t size,
 	}
 	/* TOR: from the previous entry's address up to this one's. */
 	pmp_entry_set(idx, base >> 2, 0);
-	pmp_entry_set(idx + 1, (base + size) >> 2, PMP_A_TOR | perm);
+	pmp_entry_set(idx + 1, ROUNDUP2(base + size, grain) >> 2,
+		      PMP_A_TOR | perm);
 	return 2;
 }
 

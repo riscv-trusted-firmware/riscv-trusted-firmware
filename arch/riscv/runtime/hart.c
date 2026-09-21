@@ -234,6 +234,10 @@ void hart_detect_features(void)
 	if (CONFIG_RISCV_PMP_COUNT >= 2 && csr_probe(CSR_PMPADDR0, &val)) {
 		csr_write(CSR_PMPADDR0, ~UL(0));
 		features[HART_FEAT_PMP] = csr_read(CSR_PMPADDR0) != 0;
+		/*
+		 * The bits that do not stick are below the grain PMP works at.
+		 */
+		pmp_grain_set(csr_read(CSR_PMPADDR0));
 		csr_write(CSR_PMPADDR0, val);
 	}
 
@@ -640,11 +644,18 @@ void *smode_access_begin(paddr_t addr, paddr_size_t size)
 	/* The console's is the first, on the boot hart. */
 	if (!windows)
 		windows = heap_alloc_array(_boot_hart_nr, sizeof(*windows));
+	/*
+	 * Every caller has checked the range as S-mode's; the window comes
+	 * before the monitor's own rules, so it is checked here once more.
+	 */
+	if (size && !monitor_range_clear(addr, size))
+		panic("a window on S-mode memory at %lx+%lx, which is the monitor's\n",
+		      (unsigned long)addr, (unsigned long)size);
 	windows[this_hart_index()].addr = addr;
 	windows[this_hart_index()].size = size;
 	if (hart_has(HART_FEAT_SMEPMP) && size) {
 		pmp_entry_set(0, addr >> 2, 0);
-		pmp_entry_set(1, (addr + size + 3) >> 2,
+		pmp_entry_set(1, ROUNDUP2(addr + size, pmp_grain()) >> 2,
 			      PMP_A_TOR | PMP_W | PMP_X);
 	}
 	return (void *)addr;
