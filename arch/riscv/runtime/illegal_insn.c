@@ -67,7 +67,18 @@ static bool mcounter_get(unsigned int n, uint64_t *val)
 	return ok;
 }
 
-static bool emulate_csr_read(struct trap_regs *regs, unsigned long insn)
+static uint64_t htimedelta(void)
+{
+#if __RISCV_XLEN__ == 32
+	return reg_pair_to_64((uint32_t)csr_read(CSR_HTIMEDELTAH),
+			      (uint32_t)csr_read(CSR_HTIMEDELTA));
+#else
+	return csr_read(CSR_HTIMEDELTA);
+#endif
+}
+
+static bool emulate_csr_read(struct trap_regs *regs,
+			     const struct trap_info *info, unsigned long insn)
 {
 	unsigned int f3 = INSN_FUNCT3(insn), csr = INSN_CSR(insn), n = 0;
 	bool from_u = !(regs->mstatus & MSTATUS_MPP);
@@ -92,6 +103,19 @@ static bool emulate_csr_read(struct trap_regs *regs, unsigned long insn)
 		return false;
 	}
 
+	/*
+	 * A guest's access its hypervisor has not opened is a virtual
+	 * instruction exception, the hypervisor's to handle, as it would
+	 * have been had the counter not trapped to M-mode first.
+	 */
+	if (info->virt && !(csr_read(CSR_HCOUNTEREN) & BIT(n))) {
+		struct trap_info virtual = *info;
+
+		virtual.cause = CAUSE_VIRTUAL_INSN;
+		virtual.tval = insn;
+		trap_redirect(regs, &virtual);
+		return true;
+	}
 	/* A U-mode access S-mode has not opened is S-mode's trap to handle. */
 	if (from_u && !(csr_read(CSR_SCOUNTEREN) & BIT(n)))
 		return false;
@@ -100,6 +124,9 @@ static bool emulate_csr_read(struct trap_regs *regs, unsigned long insn)
 		if (!timer_available())
 			return false;
 		val = timer_now();
+		/* A guest's time is what its hypervisor has made of it. */
+		if (info->virt)
+			val += htimedelta();
 	} else if (!mcounter_get(n, &val)) {
 		return false;
 	}
@@ -349,7 +376,7 @@ void trap_illegal_insn(struct trap_regs *regs, const struct trap_info *info)
 
 	if ((insn & 3) == 3) {
 		if (INSN_OPCODE(insn) == OPCODE_SYSTEM &&
-		    emulate_csr_read(regs, insn))
+		    emulate_csr_read(regs, info, insn))
 			return;
 		if (INSN_OPCODE(insn) == OPCODE_AMO && emulate_amo(regs, insn))
 			return;
