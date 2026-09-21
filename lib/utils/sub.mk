@@ -2,5 +2,6 @@
 # Copyright (c) 2026, The RISC-V Trusted Firmware contributors
 
 srcs-$(CONFIG_LIB_UTILS) += panic.c
+srcs-$(CONFIG_STACK_PROTECTOR) += stack_protector.c
 srcs-$(CONFIG_LIBFDT) += fdt_util.c
 srcs-$(CONFIG_IMAGE_MONITOR) += heap.c

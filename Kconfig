@@ -36,6 +36,17 @@ config WERROR
 	bool "Treat warnings as errors"
 	default y
 
+config STACK_PROTECTOR
+	bool "Stack canaries (-fstack-protector-strong)"
+	default y
+	help
+	  A function with an array or an address taken of a local checks a
+	  canary before it returns, and the monitor panics when it is gone:
+	  an overflow of a buffer on the stack stops the machine instead of
+	  choosing the return address. The canary is a constant with a zero
+	  byte in it, the same in every build: it stops the overflow that
+	  runs on from a buffer, not the write that knows where it goes.
+
 config STACK_USAGE
 	bool "Emit per-function stack usage (.su files)"
 

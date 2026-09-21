@@ -21,7 +21,16 @@ CPPFLAGS += -D__RISCV_XLEN__=$(XLEN)
 CFLAGS := $(ARCH_FLAGS)
 CFLAGS += -std=gnu11 -ffreestanding -fno-common -fno-builtin -fno-pie -fno-pic
 CFLAGS += -ffunction-sections -fdata-sections
-CFLAGS += -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables
+CFLAGS += -fno-asynchronous-unwind-tables -fno-unwind-tables
+ifneq ($(CONFIG_STACK_PROTECTOR),)
+CFLAGS += -fstack-protector-strong
+else
+CFLAGS += -fno-stack-protector
+endif
+# No reading what an earlier call left on the stack, no betting on overflow
+# or on what two pointer types cannot both point at.
+CFLAGS += $(call cc-option,-ftrivial-auto-var-init=zero)
+CFLAGS += -fno-strict-aliasing -fwrapv
 CFLAGS += -Wall -Wextra -Wundef -Wshadow -Wstrict-prototypes -Wmissing-prototypes
 CFLAGS += -Wredundant-decls -Wno-unused-parameter
 CFLAGS += $(call cc-option,-Wno-address-of-packed-member)
