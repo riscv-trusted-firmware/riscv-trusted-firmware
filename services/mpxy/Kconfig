@@ -12,6 +12,17 @@ config MPXY
 
 if MPXY
 
+config MPXY_MSG_MAX_LEN
+	int "Longest message data of any channel, in bytes"
+	default 1024
+	range 64 4096
+	help
+	  A message is copied out of the shared memory before its channel
+	  sees it, and the response is copied back: the shared memory is
+	  S-mode's to change at any time, and what a channel has checked has
+	  to be what it goes on to use. The copy takes a buffer of this size
+	  per hart. A channel that asks for more gets this much.
+
 config MPXY_SSE_EVENTS
 	int "Channels that can signal notification events through SSE"
 	range 0 64

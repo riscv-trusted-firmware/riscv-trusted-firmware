@@ -8,7 +8,9 @@
  *
  * The shared memory is S-mode's: another hart can change it while a call
  * is in progress. Everything is therefore read from it once, and nothing
- * read back from it is trusted.
+ * read back from it is trusted. For messages the core sees to that itself:
+ * a channel gets the message in a buffer of the monitor's and leaves the
+ * response there, so that what it has checked is what it goes on to use.
  */
 
 #include <arch/hart.h>
@@ -17,6 +19,7 @@
 #include <atomic.h>
 #include <domain.h>
 #include <fdt_util.h>
+#include <heap.h>
 #include <mpxy.h>
 #include <sbi/sbi.h>
 #include <string.h>
@@ -28,6 +31,9 @@ static struct mpxy_channel *channels;
 static unsigned int nr_channels;
 /* All zero at boot is a valid address: mpxy_hart_init() runs before S-mode. */
 static unsigned long shmem[CONFIG_PLATFORM_HART_COUNT];
+/* A message buffer per hart, by hart index: there with the first channel. */
+#define BOUNCE_SIZE ROUNDUP2(CONFIG_MPXY_MSG_MAX_LEN, 8)
+static uint32_t *bounce;
 
 void mpxy_hart_init(void)
 {
@@ -63,6 +69,10 @@ long mpxy_channel_register(struct mpxy_channel *ch)
 			ch->capability |= MPXY_CAP_SSE;
 		}
 	}
+	if (!bounce)
+		bounce = heap_alloc_array(hart_table_size(), BOUNCE_SIZE);
+	ch->msg_data_max_len =
+		MIN(ch->msg_data_max_len, (uint32_t)CONFIG_MPXY_MSG_MAX_LEN);
 	ch->next = *p;
 	*p = ch;
 	nr_channels++;
@@ -402,10 +412,11 @@ long mpxy_write_attributes(unsigned long channel_id, unsigned long base,
 long mpxy_send_message(unsigned long channel_id, unsigned long msg_id,
 		       unsigned long len, unsigned long *resp_len)
 {
-	uint32_t *mem = this_shmem();
+	uint32_t *mem = this_shmem(), *msg = NULL;
 	struct mpxy_channel *ch = NULL;
 	uint32_t want = resp_len ? MPXY_CAP_SEND_WITH_RESP :
 				   MPXY_CAP_SEND_WITHOUT_RESP;
+	long rc = 0;
 
 	if (!mem)
 		return SBI_ERR_NO_SHMEM;
@@ -415,8 +426,17 @@ long mpxy_send_message(unsigned long channel_id, unsigned long msg_id,
 	if (len > ch->msg_data_max_len || len > MPXY_SHMEM_SIZE)
 		return SBI_ERR_INVALID_PARAM;
 
-	return ch->ops->send(ch, (uint32_t)msg_id, mem, len, MPXY_SHMEM_SIZE,
-			     resp_len);
+	/* Read once, here; the response is the only thing that goes back. */
+	msg = &bounce[this_hart_index() * (BOUNCE_SIZE / 4)];
+	memcpy(msg, mem, len);
+	rc = ch->ops->send(ch, (uint32_t)msg_id, msg, len, BOUNCE_SIZE,
+			   resp_len);
+	if (!rc && resp_len) {
+		if (*resp_len > BOUNCE_SIZE)
+			return SBI_ERR_FAILED;
+		memcpy(mem, msg, *resp_len);
+	}
+	return rc;
 }
 
 long mpxy_get_notifications(unsigned long channel_id, unsigned long *bytes)
