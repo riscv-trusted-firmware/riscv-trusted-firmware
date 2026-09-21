@@ -229,6 +229,8 @@ static void amo_attempt_d(unsigned int funct5, unsigned long addr,
 
 #endif
 
+#define AMO_TRIES 64
+
 /* The operations above, by funct5. */
 static bool amo_op_known(unsigned int funct5)
 {
@@ -248,14 +250,30 @@ static bool amo_op_known(unsigned int funct5)
 	}
 }
 
+/* An AMO is a store as far as faults go. */
+static unsigned long amo_cause(unsigned long cause)
+{
+	switch (cause) {
+	case CAUSE_LOAD_ACCESS:
+		return CAUSE_STORE_ACCESS;
+	case CAUSE_LOAD_PAGE_FAULT:
+		return CAUSE_STORE_PAGE_FAULT;
+	case CAUSE_LOAD_GUEST_PAGE_FAULT:
+		return CAUSE_STORE_GUEST_PAGE_FAULT;
+	default:
+		return cause;
+	}
+}
+
 static bool emulate_amo(struct trap_regs *regs, unsigned long insn)
 {
 	unsigned int funct5 = INSN_FUNCT5(insn), f3 = INSN_FUNCT3(insn);
 	unsigned long addr = *trap_reg(regs, INSN_RS1(insn));
 	unsigned long src = *trap_reg(regs, INSN_RS2(insn));
-	unsigned long old = 0, failed = 1, saved = 0;
-	struct hart *h = this_hart();
+	unsigned long old = 0, failed = 1;
+	struct unpriv_window w = {};
 	struct trap_info fault = {};
+	unsigned int tries = 0;
 
 	/* LR and SC themselves cannot be emulated: nothing else is atomic. */
 	if (!amo_op_known(funct5))
@@ -266,35 +284,36 @@ static bool emulate_amo(struct trap_regs *regs, unsigned long insn)
 	if (f3 == 2 && funct5 >= 0x10)
 		src = (unsigned long)(long)(int32_t)src;
 
+	/*
+	 * An LR that faults is skipped and the SC after it still runs, after a
+	 * trap that has taken the context's MPP and MPV with it. It has no
+	 * reservation and fails on any hart worth the name; all the same, the
+	 * usual faults are found here first, where nothing follows.
+	 */
+	if (!unpriv_read(regs, addr, f3 == 2 ? 4 : 8, &old, &fault)) {
+		fault.cause = amo_cause(fault.cause);
+		fault.tval = addr;
+		trap_redirect(regs, &fault);
+		return true;
+	}
+
 	do {
-		saved = csr_read(mstatus);
-		h->trap_taken = 0;
-		h->trap_expected = 1;
 		/*
-		 * The trapping context's MPP (and MPV); MPRV comes and goes
-		 * below.
+		 * Contended beyond reason: back to where interrupts are taken,
+		 * and again.
 		 */
-		csr_write(mstatus, regs->mstatus & ~MSTATUS_MPRV);
+		if (tries++ == AMO_TRIES)
+			return true;
+		unpriv_begin(regs, 0, &w);
 		if (f3 == 2)
 			amo_attempt_w(funct5, addr, src, &old, &failed);
 #if __RISCV_XLEN__ == 64
 		else
 			amo_attempt_d(funct5, addr, src, &old, &failed);
 #endif
-		csr_write(mstatus, saved);
-		h->trap_expected = 0;
-
-		if (h->trap_taken) {
-			/* An AMO is a store as far as faults go. */
-			fault = (struct trap_info){
-				.cause = h->trap_cause == CAUSE_LOAD_ACCESS ?
-						 CAUSE_STORE_ACCESS :
-					 h->trap_cause ==
-							 CAUSE_LOAD_PAGE_FAULT ?
-						 CAUSE_STORE_PAGE_FAULT :
-						 h->trap_cause,
-				.tval = addr,
-			};
+		if (!unpriv_end(regs, &w, &fault)) {
+			fault.cause = amo_cause(fault.cause);
+			fault.tval = addr;
 			trap_redirect(regs, &fault);
 			return true;
 		}

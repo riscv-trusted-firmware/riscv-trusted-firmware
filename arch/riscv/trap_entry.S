@@ -73,16 +73,19 @@ _trap_entry:
 	REG_S	t4, TRAP_REGS_t4(sp)
 	REG_S	t5, TRAP_REGS_t5(sp)
 	REG_S	t6, TRAP_REGS_t6(sp)
+	/* Emulation reads its operands from here: x0 is one of them. */
+	REG_S	zero, TRAP_REGS_zero(sp)
 	csrr	t0, mepc
 	REG_S	t0, TRAP_REGS_mepc(sp)
-	csrr	t0, mstatus
-	REG_S	t0, TRAP_REGS_mstatus(sp)
 
 	/*
 	 * Smdbltrp: the hart set mstatus.MDT on the way in, and a trap taken
-	 * with MDT set is a fatal double trap. The state is saved now, so
-	 * traps are survivable again, which the expected M-mode traps (CSR
-	 * probing, unprivileged accesses) rely on. mret clears MDT itself.
+	 * with MDT set is a fatal double trap. What a second trap would
+	 * overwrite is saved now, so traps are survivable again, which the
+	 * expected M-mode traps (CSR probing, unprivileged accesses) rely on.
+	 * Before mstatus is saved: the handlers write that value back to
+	 * mstatus around an unprivileged access, and it is the access that
+	 * may trap. mret clears MDT itself.
 	 */
 #if __RISCV_XLEN__ == 64
 	li	t0, BIT(MSTATUS_MDT_SHIFT)
@@ -91,6 +94,8 @@ _trap_entry:
 	li	t0, BIT(MSTATUSH_MDT_SHIFT)
 	csrc	CSR_MSTATUSH, t0
 #endif
+	csrr	t0, mstatus
+	REG_S	t0, TRAP_REGS_mstatus(sp)
 
 .option push
 .option norelax

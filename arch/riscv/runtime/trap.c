@@ -187,6 +187,16 @@ void trap_handler(struct trap_regs *regs)
 			h->trap_taken = 1;
 			h->trap_cause = csr_read(mcause);
 			h->trap_tval = csr_read(mtval);
+			if (hart_has(HART_FEAT_H)) {
+				h->trap_tval2 = csr_read(CSR_MTVAL2);
+				h->trap_tinst = csr_read(CSR_MTINST);
+#if __RISCV_XLEN__ == 64
+				h->trap_gva = regs->mstatus & MSTATUS_GVA;
+#else
+				h->trap_gva = csr_read(CSR_MSTATUSH) &
+					      MSTATUSH_GVA;
+#endif
+			}
 			regs->mepc += 4;
 			return;
 		}

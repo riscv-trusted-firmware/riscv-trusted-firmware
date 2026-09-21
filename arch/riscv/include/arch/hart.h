@@ -53,6 +53,13 @@ struct hart {
 	unsigned long trap_taken;
 	unsigned long trap_cause;
 	unsigned long trap_tval;
+	/*
+	 * With the H extension: whose address trap_tval is, and what goes with
+	 * it.
+	 */
+	unsigned long trap_tval2;
+	unsigned long trap_tinst;
+	bool trap_gva;
 
 	/* Hart state management. */
 	unsigned long hsm_state; /* atomic, SBI_HSM_STATE_* */

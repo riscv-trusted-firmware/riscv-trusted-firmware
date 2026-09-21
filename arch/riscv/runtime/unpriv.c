@@ -27,18 +27,11 @@ static bool __noinline unpriv_load(const struct trap_regs *regs,
 				   bool exec, unsigned long *val,
 				   struct trap_info *fault)
 {
-	struct hart *h = this_hart();
 	const unsigned long mprv = MSTATUS_MPRV;
-	unsigned long saved = csr_read(mstatus);
-	unsigned long mstatus = regs->mstatus & ~MSTATUS_MPRV;
+	struct unpriv_window w = {};
 	unsigned long v = 0;
 
-	if (exec)
-		mstatus |= MSTATUS_MXR;
-
-	h->trap_taken = 0;
-	h->trap_expected = 1;
-	csr_write(mstatus, mstatus);
+	unpriv_begin(regs, exec ? MSTATUS_MXR : 0, &w);
 	switch (width) {
 	case 1:
 		UNPRIV_INSN("lbu %0, 0(%1)",
@@ -74,17 +67,8 @@ static bool __noinline unpriv_load(const struct trap_regs *regs,
 		break;
 #endif
 	}
-	csr_write(mstatus, saved);
-	h->trap_expected = 0;
-
-	if (h->trap_taken) {
-		*fault = (struct trap_info){
-			.cause = h->trap_cause,
-			.tval = h->trap_tval,
-			.virt = false,
-		};
+	if (!unpriv_end(regs, &w, fault))
 		return false;
-	}
 	*val = v;
 	return true;
 }
@@ -99,28 +83,16 @@ bool unpriv_read(const struct trap_regs *regs, unsigned long addr,
 bool unpriv_write_byte(const struct trap_regs *regs, unsigned long addr,
 		       uint8_t val, struct trap_info *fault)
 {
-	struct hart *h = this_hart();
 	const unsigned long mprv = MSTATUS_MPRV;
-	unsigned long saved = csr_read(mstatus), v = val;
+	struct unpriv_window w = {};
+	unsigned long v = val;
 
-	h->trap_taken = 0;
-	h->trap_expected = 1;
-	csr_write(mstatus, regs->mstatus & ~MSTATUS_MPRV);
+	unpriv_begin(regs, 0, &w);
 	UNPRIV_INSN("sb %0, 0(%1)",
 		    :
 		    : "r"(v), "r"(addr), "r"(mprv)
 		    : "memory");
-	csr_write(mstatus, saved);
-	h->trap_expected = 0;
-
-	if (h->trap_taken) {
-		*fault = (struct trap_info){
-			.cause = h->trap_cause,
-			.tval = h->trap_tval,
-		};
-		return false;
-	}
-	return true;
+	return unpriv_end(regs, &w, fault);
 }
 
 bool unpriv_fetch_insn(const struct trap_regs *regs, unsigned long *insn,
