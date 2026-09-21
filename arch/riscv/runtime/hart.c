@@ -283,6 +283,7 @@ void hart_detect_features(void)
 		csr_write(CSR_MSECCFG, val);
 	}
 
+	features[HART_FEAT_AIA] = csr_probe(CSR_MISELECT, &val);
 	features[HART_FEAT_RAS_IRQ] = ras_irqs_probe();
 
 	monitor_regions_init();

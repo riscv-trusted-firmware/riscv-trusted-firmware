@@ -539,6 +539,7 @@ with `IMAGE_SBITEST` disabled.
 
 The H-extension paths (trap redirection from VS/VU-mode, `hfence` on a real
 guest) are written after the specification but have not run under a
-hypervisor yet. The local RAS interrupts and the instruction count,
+hypervisor yet; that a hypervisor's CSRs follow its domain is tested, with
+no guest running. The local RAS interrupts and the instruction count,
 interrupt and exception debug triggers have nothing in QEMU 8.2 to run
 against.

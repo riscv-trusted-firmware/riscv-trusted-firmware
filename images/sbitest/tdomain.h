@@ -6,6 +6,7 @@
 #ifndef SBITEST_TDOMAIN_H
 #define SBITEST_TDOMAIN_H
 
+#include <arch/csr.h>
 #include <util.h>
 
 /*
@@ -92,6 +93,35 @@ struct dom_shared {
 #define TCMD_SERVICES_GET 7 /* services_check() */
 #define TCMD_MM_SERVE 9 /* serve param MM requests: count | MM_SAW_* */
 #define TCMD_INSTRET 8 /* instret_coarse() over there */
+#define TCMD_HYP_SET \
+	10 /* hyp_set(param): bit 0: the CSRs were not as out of reset */
+#define TCMD_HYP_GET 11 /* hyp_holds(param) */
+
+/*
+ * A hypervisor's CSRs (harts with the H extension): some of HS-level and
+ * of VS-level, set to what 'x' makes of them.
+ */
+#define HYP_HEDELEG(x) ((x) & 1 ? BIT(CAUSE_BREAKPOINT) : BIT(CAUSE_USER_ECALL))
+
+static inline unsigned long hyp_set(unsigned long x)
+{
+	unsigned long was = csr_read(CSR_VSSCRATCH) | csr_read(CSR_VSTVEC) |
+			    csr_read(CSR_HEDELEG) | csr_read(CSR_HTIMEDELTA) |
+			    csr_read(CSR_VSATP) | csr_read(CSR_HGATP);
+
+	csr_write(CSR_VSSCRATCH, x);
+	csr_write(CSR_VSTVEC, x << 2);
+	csr_write(CSR_HEDELEG, HYP_HEDELEG(x));
+	csr_write(CSR_HTIMEDELTA, ~x);
+	return was != 0;
+}
+
+static inline bool hyp_holds(unsigned long x)
+{
+	return csr_read(CSR_VSSCRATCH) == x && csr_read(CSR_VSTVEC) == x << 2 &&
+	       csr_read(CSR_HEDELEG) == HYP_HEDELEG(x) &&
+	       csr_read(CSR_HTIMEDELTA) == ~x;
+}
 
 #define TCMD(cmd, param) ((cmd) | SHIFT_UL(param, 8))
 #define TCMD_WAIT_DONE UL(0x3a17)

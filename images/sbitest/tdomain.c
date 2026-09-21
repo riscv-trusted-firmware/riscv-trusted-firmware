@@ -445,6 +445,12 @@ static void __noreturn trusted_serve(unsigned long hartid, unsigned long value)
 		case TCMD_UNITS_GET:
 			value = units_get(param);
 			break;
+		case TCMD_HYP_SET:
+			value = hyp_set(param);
+			break;
+		case TCMD_HYP_GET:
+			value = hyp_holds(param);
+			break;
 		case TCMD_WAIT:
 			WRITE_ONCE(DOM_SHARED->waiting, hartid + 1);
 			while (!READ_ONCE(DOM_SHARED->release))

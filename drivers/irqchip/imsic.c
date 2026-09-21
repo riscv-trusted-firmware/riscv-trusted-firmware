@@ -28,7 +28,6 @@
 
 #include "irqchip_internal.h"
 
-#define CSR_MISELECT 0x350
 #define CSR_MIREG 0x351
 #define CSR_MTOPEI 0x35c
 #define IMSIC_EIDELIVERY 0x70

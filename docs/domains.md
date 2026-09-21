@@ -138,7 +138,12 @@ timer deadline (stimecmp, or the M-mode timer's); the floating-point
 registers and fcsr; the vector registers and CSRs up to
 the boot hart's VLEN, which is what a context has room for (a hart with
 larger ones has them cleared instead: nothing leaks, nothing survives the
-call); the MPXY shared memory. All of the
+call); on a hart with the H extension the hypervisor CSRs (hstatus, hedeleg,
+hideleg, hie, hvip, hcounteren, hgeie, htval, htinst, hgatp, htimedelta,
+henvcfg, hstateen0, and the AIA's hvien, hvictl, hviprio) and the VS-level
+ones of the guest it had set up (vsstatus to vsatp, vstimecmp, vsiselect),
+with the guest address translation caches flushed on the way, since two
+domains' VMIDs are the same numbers; the MPXY shared memory. All of the
 floating-point and vector state is switched whether sstatus says it is in
 use or not, so that a domain never finds another one's values. The address
 translation caches are flushed.
@@ -166,8 +171,10 @@ and `_in()`:
 A context that has not run before, or whose domain was stopped since, finds
 all of it as a started hart does: nothing registered, every feature off.
 
-Not switched, and so shared by the domains that share a hart: the H
-extension's CSRs and external interrupt routing.
+Not switched, and so shared by the domains that share a hart: external
+interrupt routing (the PLIC or APLIC contexts and the IMSIC files of the
+hart, guest interrupt files included, are devices: what keeps domains apart
+there is which of them a domain's regions let it reach).
 
 ## Requests between domains
 

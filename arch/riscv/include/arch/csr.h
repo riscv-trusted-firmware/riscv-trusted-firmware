@@ -53,6 +53,9 @@
 #define PRV_M 3
 
 /* hstatus */
+#if __RISCV_XLEN__ == 64
+#define HSTATUS_VSXL GENMASK_UL(33, 32)
+#endif
 #define HSTATUS_GVA BIT(6)
 #define HSTATUS_SPV BIT(7)
 #define HSTATUS_SPVP BIT(8)
@@ -130,6 +133,42 @@
 #define CSR_MIEH 0x314
 #define CSR_MSTATUSH 0x310
 #define CSR_HSTATUS 0x600
+#define CSR_HEDELEG 0x602
+#define CSR_HIDELEG 0x603
+#define CSR_HIE 0x604
+#define CSR_HTIMEDELTA 0x605
+#define CSR_HTIMEDELTAH 0x615
+#define CSR_HCOUNTEREN 0x606
+#define CSR_HGEIE 0x607
+#define CSR_HENVCFG 0x60a
+#define CSR_HENVCFGH 0x61a
+#define CSR_HVIP 0x645
+#define CSR_HSTATEEN0 0x60c
+#define CSR_HSTATEEN0H 0x61c
+/* AIA */
+#define CSR_MISELECT 0x350
+#define CSR_HVIEN 0x608
+#define CSR_HVICTL 0x609
+#define CSR_HVIPRIO1 0x646
+#define CSR_HVIPRIO2 0x647
+#define CSR_VSISELECT 0x250
+#define CSR_HIDELEGH 0x613
+#define CSR_HVIENH 0x618
+#define CSR_HVIPH 0x655
+#define CSR_HVIPRIO1H 0x656
+#define CSR_HVIPRIO2H 0x657
+#define CSR_VSIEH 0x214
+#define CSR_HGATP 0x680
+#define CSR_VSSTATUS 0x200
+#define CSR_VSIE 0x204
+#define CSR_VSTVEC 0x205
+#define CSR_VSSCRATCH 0x240
+#define CSR_VSEPC 0x241
+#define CSR_VSCAUSE 0x242
+#define CSR_VSTVAL 0x243
+#define CSR_VSATP 0x280
+#define CSR_VSTIMECMP 0x24d
+#define CSR_VSTIMECMPH 0x25d
 #define CSR_TSELECT 0x7a0
 #define CSR_TDATA1 0x7a1
 #define CSR_TDATA2 0x7a2

@@ -119,6 +119,28 @@ static void test_trusted(void)
 	       "none");
 	csr_clear(sstatus, SSTATUS_FS | SSTATUS_VS);
 
+	/* A hypervisor's CSRs are its domain's. */
+	WRITE_ONCE(trap_cause, 0);
+	WRITE_ONCE(trap_expected, true);
+	PROBE_INSN("csrr t0, 0x600", ::: "t0"); /* hstatus */
+	WRITE_ONCE(trap_expected, false);
+	if (!trap_cause) {
+		hyp_set(0x1111);
+		ret = enter(TCMD(TCMD_HYP_SET, 0x2222));
+		CHECK(ret.value == 0,
+		      "the trusted domain saw foreign hypervisor CSRs");
+		CHECK(hyp_holds(0x1111),
+		      "vsscratch %lx, hedeleg %lx after the trusted domain ran",
+		      csr_read(CSR_VSSCRATCH), csr_read(CSR_HEDELEG));
+		CHECK(enter(TCMD(TCMD_HYP_GET, 0x2222)).value == 1,
+		      "the trusted domain's hypervisor CSRs were not kept");
+		csr_write(CSR_VSSCRATCH, 0);
+		csr_write(CSR_VSTVEC, 0);
+		csr_write(CSR_HEDELEG, 0);
+		csr_write(CSR_HTIMEDELTA, 0);
+	}
+	printf("  hypervisor CSRs: %s\n", trap_cause ? "none" : "switched");
+
 	/*
 	 * The S-mode timer is this side's: not lost, not delivered over there.
 	 */
