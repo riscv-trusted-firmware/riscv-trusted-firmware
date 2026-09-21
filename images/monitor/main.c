@@ -64,6 +64,26 @@ static void print_features(void)
 	pr_info("\n");
 }
 
+/*
+ * What a build can have that no machine with anything to protect should
+ * run: said at every boot, where it cannot be overlooked in a .config.
+ */
+static void print_insecure(void)
+{
+#if defined(CONFIG_RPMI) && !defined(CONFIG_RPMI_SHMEM_PROTECT)
+	pr_warn("INSECURE: S-mode can write the RPMI queues, and play the PuC\n");
+#endif
+#if defined(CONFIG_IRQCHIP_IMSIC) && !defined(CONFIG_IRQCHIP_IMSIC_PROTECT)
+	pr_warn("INSECURE: S-mode can write the machine-level interrupt files\n");
+#endif
+#ifdef CONFIG_INSECURE_NO_PMP
+	pr_warn("INSECURE: harts without PMP are allowed to run S-mode\n");
+#endif
+#if defined(CONFIG_PLAT_QEMU_VIRT) && defined(CONFIG_IMAGE_SBITEST)
+	pr_warn("INSECURE: test platform, with SBI calls of its own for the test payload\n");
+#endif
+}
+
 static void print_services(void)
 {
 	const struct service *s = NULL;
@@ -167,6 +187,7 @@ void image_main(unsigned long hartid, unsigned long fdt,
 	pr_info("mpxy: %u channel(s)\n", mpxy_channel_count());
 #endif
 	print_services();
+	print_insecure();
 	pr_info("memory: %lu KiB of %lu free\n",
 		(unsigned long)heap_free_bytes() >> 10,
 		(unsigned long)CONFIG_MONITOR_SIZE >> 10);
