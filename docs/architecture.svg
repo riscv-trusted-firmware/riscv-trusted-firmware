@@ -1,0 +1,134 @@
+<svg width='100%' viewBox='0 0 680 992' role='img' xmlns='http://www.w3.org/2000/svg' font-family='-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'>
+<title>RISC-V Trusted Firmware: the monitor between the hardware and the S-mode stages it hosts</title>
+<rect width='680' height='992' fill='white'/>
+<rect x='24' y='16' width='632' height='118' rx='10' fill='#fafaf7' stroke='#d8d8d2' stroke-width='1'/>
+<text x='40' y='40' font-size='14' font-weight='600' fill='#222'>S-mode next stages, one per domain</text>
+<rect x='40' y='54' width='192' height='64' rx='8' fill='#e6f4ec' stroke='#4a9a6e' stroke-width='1.2'/>
+<text x='136' y='75' text-anchor='middle' font-size='13' font-weight='600' fill='#1f6b45'>Root domain</text>
+<text x='136' y='89' text-anchor='middle' font-size='10' fill='#1f6b45'>Linux, a hypervisor and its</text>
+<text x='136' y='103' text-anchor='middle' font-size='10' fill='#1f6b45'>guests, or the test payload</text>
+<rect x='244' y='54' width='192' height='64' rx='8' fill='#e6f4ec' stroke='#4a9a6e' stroke-width='1.2'/>
+<text x='340' y='75' text-anchor='middle' font-size='13' font-weight='600' fill='#1f6b45'>Other domains</text>
+<text x='340' y='89' text-anchor='middle' font-size='10' fill='#1f6b45'>own harts and memory; entered</text>
+<text x='340' y='103' text-anchor='middle' font-size='10' fill='#1f6b45'>by ecall, or harts of their own</text>
+<rect x='448' y='54' width='192' height='64' rx='8' fill='#e6f4ec' stroke='#4a9a6e' stroke-width='1.2'/>
+<text x='544' y='75' text-anchor='middle' font-size='13' font-weight='600' fill='#1f6b45'>Between them</text>
+<text x='544' y='89' text-anchor='middle' font-size='10' fill='#1f6b45'>REQUEST_FORWARD channels,</text>
+<text x='544' y='103' text-anchor='middle' font-size='10' fill='#1f6b45'>the bridge, management mode</text>
+<line x1='136' y1='140' x2='136' y2='174' stroke='#555' stroke-width='1.2'/>
+<polygon points='136,174 132,167 140,167' fill='#555'/>
+<line x1='340' y1='140' x2='340' y2='174' stroke='#555' stroke-width='1.2'/>
+<polygon points='340,174 336,167 344,167' fill='#555'/>
+<line x1='544' y1='140' x2='544' y2='174' stroke='#555' stroke-width='1.2'/>
+<polygon points='544,174 540,167 548,167' fill='#555'/>
+<text x='640' y='160' text-anchor='end' font-size='10' fill='#555'>ecall, traps, interrupts</text>
+<rect x='24' y='180' width='632' height='488' rx='10' fill='#fafaf7' stroke='#d8d8d2' stroke-width='1'/>
+<text x='40' y='204' font-size='14' font-weight='600' fill='#222'>M-mode runtime monitor</text>
+<rect x='40' y='218' width='600' height='60' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='340' y='239' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>Trap entry and dispatch</text>
+<text x='340' y='253' text-anchor='middle' font-size='10' fill='#3b34a3'>ecalls to the service table by EID; interrupts; redirection to S-mode or a hypervisor;</text>
+<text x='340' y='267' text-anchor='middle' font-size='10' fill='#3b34a3'>emulation of misaligned accesses, counter CSRs and atomics</text>
+<rect x='40' y='292' width='192' height='76' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='136' y='313' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>SBI extensions</text>
+<text x='136' y='327' text-anchor='middle' font-size='10' fill='#3b34a3'>Base, TIME, IPI, RFENCE, HSM,</text>
+<text x='136' y='341' text-anchor='middle' font-size='10' fill='#3b34a3'>SRST, SUSP, CPPC, FWFT, PMU, SSE,</text>
+<text x='136' y='355' text-anchor='middle' font-size='10' fill='#3b34a3'>DBTR, DBCN, MPXY, legacy, vendor</text>
+<rect x='244' y='292' width='192' height='76' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='340' y='313' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>Domains</text>
+<text x='340' y='327' text-anchor='middle' font-size='10' fill='#3b34a3'>harts and memory partitioned by</text>
+<text x='340' y='341' text-anchor='middle' font-size='10' fill='#3b34a3'>the device tree; contexts; enter,</text>
+<text x='340' y='355' text-anchor='middle' font-size='10' fill='#3b34a3'>exit, entry policy; state per domain</text>
+<rect x='448' y='292' width='192' height='76' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='544' y='313' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>MPXY and RPMI</text>
+<text x='544' y='327' text-anchor='middle' font-size='10' fill='#3b34a3'>channels to the platform controller;</text>
+<text x='544' y='341' text-anchor='middle' font-size='10' fill='#3b34a3'>groups the monitor serves itself:</text>
+<text x='544' y='355' text-anchor='middle' font-size='10' fill='#3b34a3'>REQUEST_FORWARD, MM, the bridge</text>
+<rect x='40' y='382' width='192' height='76' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='136' y='403' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>Hart runtime</text>
+<text x='136' y='417' text-anchor='middle' font-size='10' fill='#3b34a3'>hart table, PMP with Smepmp,</text>
+<text x='136' y='431' text-anchor='middle' font-size='10' fill='#3b34a3'>HSM states, remote fences,</text>
+<text x='136' y='445' text-anchor='middle' font-size='10' fill='#3b34a3'>timer, heap, hand-over block</text>
+<rect x='244' y='382' width='192' height='76' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='340' y='403' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>Per-hart service state</text>
+<text x='340' y='417' text-anchor='middle' font-size='10' fill='#3b34a3'>PMU counters, SSE events, triggers,</text>
+<text x='340' y='431' text-anchor='middle' font-size='10' fill='#3b34a3'>FWFT settings, hypervisor CSRs:</text>
+<text x='340' y='445' text-anchor='middle' font-size='10' fill='#3b34a3'>switched with the domain</text>
+<rect x='448' y='382' width='192' height='76' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='544' y='403' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>Boot and device tree</text>
+<text x='544' y='417' text-anchor='middle' font-size='10' fill='#3b34a3'>reserves the monitor, hides its</text>
+<text x='544' y='431' text-anchor='middle' font-size='10' fill='#3b34a3'>devices, cuts a tree per domain,</text>
+<text x='544' y='445' text-anchor='middle' font-size='10' fill='#3b34a3'>starts each domain on its boot hart</text>
+<rect x='40' y='472' width='600' height='46' rx='8' fill='#fbfbfa' stroke='#b3add9' stroke-width='1.2' stroke-dasharray='5 4'/>
+<text x='340' y='493' text-anchor='middle' font-size='13' font-weight='600' fill='#6a64a8'>Planned: trusted execution, confidential computing, attestation</text>
+<text x='340' y='507' text-anchor='middle' font-size='10' fill='#6a64a8'>hosted next to the SBI on the same trap entry, domains and channels, as their specifications are ratified</text>
+<rect x='40' y='532' width='600' height='120' rx='8' fill='none' stroke='#8a8578' stroke-width='1' stroke-dasharray='5 4'/>
+<text x='56' y='554' font-size='13' font-weight='600' fill='#222'>Platform layer: the device tree decides</text>
+<rect x='56' y='566' width='133' height='72' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='122' y='587' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>Platforms</text>
+<text x='122' y='601' text-anchor='middle' font-size='10' fill='#3b34a3'>QEMU virt; generic,</text>
+<text x='122' y='615' text-anchor='middle' font-size='10' fill='#3b34a3'>no board in it</text>
+<rect x='201' y='566' width='133' height='72' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='267' y='587' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>Drivers</text>
+<text x='267' y='601' text-anchor='middle' font-size='10' fill='#3b34a3'>serial, timer, IPI, irqchip,</text>
+<text x='267' y='615' text-anchor='middle' font-size='10' fill='#3b34a3'>reset, suspend, HSM,</text>
+<text x='267' y='629' text-anchor='middle' font-size='10' fill='#3b34a3'>CPPC, GPIO, RPMI</text>
+<rect x='346' y='566' width='133' height='72' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='412' y='587' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>Libraries</text>
+<text x='412' y='601' text-anchor='middle' font-size='10' fill='#3b34a3'>libc subset, libutils,</text>
+<text x='412' y='615' text-anchor='middle' font-size='10' fill='#3b34a3'>libfdt, builtins</text>
+<rect x='491' y='566' width='133' height='72' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='557' y='587' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>ISA support</text>
+<text x='557' y='601' text-anchor='middle' font-size='10' fill='#3b34a3'>Sstc, Smepmp, Sscofpmf,</text>
+<text x='557' y='615' text-anchor='middle' font-size='10' fill='#3b34a3'>Smstateen, Sdtrig, AIA, H,</text>
+<text x='557' y='629' text-anchor='middle' font-size='10' fill='#3b34a3'>Zkr, Ssdbltrp, Smcntrpmf</text>
+<rect x='24' y='694' width='632' height='108' rx='10' fill='#fafaf7' stroke='#d8d8d2' stroke-width='1'/>
+<text x='40' y='718' font-size='14' font-weight='600' fill='#222'>Hardware</text>
+<rect x='40' y='732' width='141' height='56' rx='8' fill='#f0ede6' stroke='#8a8578' stroke-width='1.2'/>
+<text x='110' y='753' text-anchor='middle' font-size='13' font-weight='600' fill='#4f4a42'>PMP, Smepmp</text>
+<text x='110' y='767' text-anchor='middle' font-size='10' fill='#4f4a42'>domains and the monitor</text>
+<text x='110' y='781' text-anchor='middle' font-size='10' fill='#4f4a42'>kept apart</text>
+<rect x='193' y='732' width='141' height='56' rx='8' fill='#f0ede6' stroke='#8a8578' stroke-width='1.2'/>
+<text x='263' y='753' text-anchor='middle' font-size='13' font-weight='600' fill='#4f4a42'>ACLINT, CLINT</text>
+<text x='263' y='767' text-anchor='middle' font-size='10' fill='#4f4a42'>machine timer,</text>
+<text x='263' y='781' text-anchor='middle' font-size='10' fill='#4f4a42'>IPIs</text>
+<rect x='346' y='732' width='141' height='56' rx='8' fill='#f0ede6' stroke='#8a8578' stroke-width='1.2'/>
+<text x='416' y='753' text-anchor='middle' font-size='13' font-weight='600' fill='#4f4a42'>PLIC, AIA</text>
+<text x='416' y='767' text-anchor='middle' font-size='10' fill='#4f4a42'>APLIC, IMSIC,</text>
+<text x='416' y='781' text-anchor='middle' font-size='10' fill='#4f4a42'>MSIs</text>
+<rect x='499' y='732' width='141' height='56' rx='8' fill='#f0ede6' stroke='#8a8578' stroke-width='1.2'/>
+<text x='569' y='753' text-anchor='middle' font-size='13' font-weight='600' fill='#4f4a42'>Platform controller</text>
+<text x='569' y='767' text-anchor='middle' font-size='10' fill='#4f4a42'>RPMI shared memory</text>
+<text x='569' y='781' text-anchor='middle' font-size='10' fill='#4f4a42'>and doorbells</text>
+<rect x='24' y='828' width='632' height='116' rx='10' fill='#fafaf7' stroke='#d8d8d2' stroke-width='1'/>
+<text x='40' y='852' font-size='14' font-weight='600' fill='#222'>Boot chain</text>
+<rect x='40' y='866' width='129' height='64' rx='8' fill='#f0ede6' stroke='#8a8578' stroke-width='1.2'/>
+<text x='104' y='887' text-anchor='middle' font-size='13' font-weight='600' fill='#4f4a42'>Previous stage</text>
+<text x='104' y='901' text-anchor='middle' font-size='10' fill='#4f4a42'>boot ROM, U-Boot SPL,</text>
+<text x='104' y='915' text-anchor='middle' font-size='10' fill='#4f4a42'>EDK2, coreboot, QEMU</text>
+<rect x='197' y='866' width='129' height='64' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='261' y='887' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>Loader</text>
+<text x='261' y='901' text-anchor='middle' font-size='10' fill='#3b34a3'>optional first image;</text>
+<text x='261' y='915' text-anchor='middle' font-size='10' fill='#3b34a3'>two-stage builds</text>
+<rect x='354' y='866' width='129' height='64' rx='8' fill='#eceaf9' stroke='#6b63c8' stroke-width='1.2'/>
+<text x='418' y='887' text-anchor='middle' font-size='13' font-weight='600' fill='#3b34a3'>Monitor</text>
+<text x='418' y='901' text-anchor='middle' font-size='10' fill='#3b34a3'>M-mode resident;</text>
+<text x='418' y='915' text-anchor='middle' font-size='10' fill='#3b34a3'>position-independent</text>
+<rect x='511' y='866' width='129' height='64' rx='8' fill='#e6f4ec' stroke='#4a9a6e' stroke-width='1.2'/>
+<text x='575' y='887' text-anchor='middle' font-size='13' font-weight='600' fill='#1f6b45'>Next stages</text>
+<text x='575' y='901' text-anchor='middle' font-size='10' fill='#1f6b45'>one per domain, where</text>
+<text x='575' y='915' text-anchor='middle' font-size='10' fill='#1f6b45'>the hand-over block says</text>
+<line x1='174' y1='898' x2='192' y2='898' stroke='#555' stroke-width='1.2'/>
+<polygon points='192,898 185,894 185,902' fill='#555'/>
+<line x1='331' y1='898' x2='349' y2='898' stroke='#555' stroke-width='1.2'/>
+<polygon points='349,898 342,894 342,902' fill='#555'/>
+<line x1='488' y1='898' x2='506' y2='898' stroke='#555' stroke-width='1.2'/>
+<polygon points='506,898 499,894 499,902' fill='#555'/>
+<rect x='40' y='962' width='12' height='12' rx='2' fill='#e6f4ec' stroke='#4a9a6e'/>
+<text x='58' y='972' font-size='11' fill='#444'>S-mode next stages</text>
+<rect x='212' y='962' width='12' height='12' rx='2' fill='#eceaf9' stroke='#6b63c8'/>
+<text x='230' y='972' font-size='11' fill='#444'>M-mode firmware</text>
+<rect x='363' y='962' width='12' height='12' rx='2' fill='#fbfbfa' stroke='#b3add9'/>
+<text x='381' y='972' font-size='11' fill='#444'>planned</text>
+<rect x='458' y='962' width='12' height='12' rx='2' fill='#f0ede6' stroke='#8a8578'/>
+<text x='476' y='972' font-size='11' fill='#444'>hardware, earlier stages</text>
+</svg>

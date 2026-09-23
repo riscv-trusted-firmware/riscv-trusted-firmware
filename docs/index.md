@@ -34,6 +34,7 @@ prints its report and powers off.
 
 ## The pages
 
+* [Architecture](architecture.md): the map, with a figure.
 * [Booting the monitor](boot.md): how it is started, and told where the
   next stage is.
 * [Build system](build-system.md): the tree, the configuration flow, and

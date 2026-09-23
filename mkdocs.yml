@@ -45,6 +45,7 @@ markdown_extensions:
 
 nav:
   - Overview: index.md
+  - Architecture: architecture.md
   - Using it:
       - Booting the monitor: boot.md
       - Build system: build-system.md
