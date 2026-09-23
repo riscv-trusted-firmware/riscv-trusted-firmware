@@ -34,9 +34,10 @@ scripts/checkpatch.sh HEAD~3..   # commits, as the CI checks them
 the checks this tree does without. `typedefs.checkpatch` names the typedefs of
 this tree. `scripts/checkpatch_inc.sh` leaves out what is not this
 project's to style: `lib/libfdt`, the compiler runtime in `lib/builtins`,
-the linker script, and `lib/libutils`, which has ways of its own (the
-`for_each` macros and the `volatile` accesses that checkpatch objects to
-live there, and nowhere else).
+the linker script, `stdint.h` (a standard header is made of typedefs), and
+`lib/libutils`, which has ways of its own (the `for_each` macros and the
+`volatile` accesses that checkpatch objects to live there, and nowhere
+else).
 
 Every commit has to pass: CI runs `checkpatch.sh` on each commit of a pull
 request, and on the tip of a push. A `CHECK` counts as much as an error.

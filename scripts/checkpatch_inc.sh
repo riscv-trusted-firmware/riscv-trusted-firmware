@@ -6,6 +6,7 @@ CHECKPATCH_OPT="${CHECKPATCH_OPT:-}"
 # checkpatch.pl will ignore the following paths
 CHECKPATCH_IGNORE=$(echo \
 		lib/libfdt lib/libutils lib/builtins \
+		lib/libc/include/stdint.h \
 		arch/riscv/include/arch/image.lds.h )
 _CP_EXCL=$(for p in $CHECKPATCH_IGNORE; do echo ":(exclude)$p" ; done)
 
