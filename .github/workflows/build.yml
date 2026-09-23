@@ -12,39 +12,41 @@ jobs:
         toolchain: [gcc, llvm]
     steps:
       - uses: actions/checkout@v4
+      # The bare-metal binutils cannot link a PIE: the GCC builds link with
+      # the Linux target's ld, which can.
       - name: Install toolchains and QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-riscv64-unknown-elf clang lld llvm qemu-system-misc
+          sudo apt-get install -y gcc-riscv64-unknown-elf binutils-riscv64-linux-gnu clang lld llvm qemu-system-misc
           pip install kconfiglib
       - name: Configure
         run: make ${{ matrix.defconfig }}
       - name: Build
-        run: make -j"$(nproc)" W=1 ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}
+        run: make -j"$(nproc)" W=1 ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || 'LD=riscv64-linux-gnu-ld' }}
       # The defconfigs build the S-mode SBI test payload: the boot test is
       # its verdict ("sbitest: PASS").
       - name: Boot test
-        run: MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+        run: MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || 'LD=riscv64-linux-gnu-ld' }}" sh scripts/boot-test.sh build
       - name: Boot test, other device tree (ACLINT nodes, APLIC + IMSIC)
-        run: MAKEARGS="QEMU_MACHINE=virt,aclint=on,aia=aplic-imsic ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+        run: MAKEARGS="QEMU_MACHINE=virt,aclint=on,aia=aplic-imsic ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || 'LD=riscv64-linux-gnu-ld' }}" sh scripts/boot-test.sh build
       - name: Boot test, Smepmp and Sscofpmf (M-mode confined; counter overflow events)
         run: |
           xlen=$(sed -n 's/^CONFIG_RISCV_XLEN=//p' build/.config)
           QEMU_EXTRA_ARGS="-cpu rv$xlen,smepmp=on,sscofpmf=on" \
-          MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+          MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || 'LD=riscv64-linux-gnu-ld' }}" sh scripts/boot-test.sh build
       - name: Boot test, hart without Sstc (M-mode timer path)
         run: |
           xlen=$(sed -n 's/^CONFIG_RISCV_XLEN=//p' build/.config)
           QEMU_EXTRA_ARGS="-cpu rv$xlen,sstc=off" \
-          MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+          MAKEARGS="${{ matrix.toolchain == 'llvm' && 'LLVM=1' || 'LD=riscv64-linux-gnu-ld' }}" sh scripts/boot-test.sh build
       - name: Boot test, domains (the payload next to two other domains; vector state switching)
         run: |
           xlen=$(sed -n 's/^CONFIG_RISCV_XLEN=//p' build/.config)
           echo CONFIG_QEMU_VIRT_DOMAINS=y >> build/.config
           make olddefconfig
-          MAKEARGS="W=1 ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+          MAKEARGS="W=1 ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || 'LD=riscv64-linux-gnu-ld' }}" sh scripts/boot-test.sh build
           QEMU_EXTRA_ARGS="-cpu rv$xlen,smepmp=on,v=true" \
-          MAKEARGS="W=1 ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+          MAKEARGS="W=1 ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || 'LD=riscv64-linux-gnu-ld' }}" sh scripts/boot-test.sh build
       # QEMU's -kernel puts the payload where the single-stage monitor sits in
       # the two-stage build: not there.
       - name: Boot test, next stage named by the previous stage (hand-over block)
@@ -52,7 +54,7 @@ jobs:
         run: |
           sed -i 's/^CONFIG_MONITOR_NEXT_STAGE_ADDR=.*/CONFIG_MONITOR_NEXT_STAGE_ADDR=0x80e00000/' build/.config
           make olddefconfig
-          MAKEARGS="W=1 QEMU_KERNEL=build/images/sbitest/sbitest.bin ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || '' }}" sh scripts/boot-test.sh build
+          MAKEARGS="W=1 QEMU_KERNEL=build/images/sbitest/sbitest.bin ${{ matrix.toolchain == 'llvm' && 'LLVM=1' || 'LD=riscv64-linux-gnu-ld' }}" sh scripts/boot-test.sh build
 
   # One image, no board in it: the device tree of three QEMU machines.
   generic:
@@ -66,19 +68,19 @@ jobs:
       - name: Install toolchains and QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-riscv64-unknown-elf qemu-system-misc
+          sudo apt-get install -y gcc-riscv64-unknown-elf binutils-riscv64-linux-gnu qemu-system-misc
           pip install kconfiglib
       - name: Configure
         run: make ${{ matrix.defconfig }}
       - name: Build
-        run: make -j"$(nproc)" W=1
+        run: make -j"$(nproc)" W=1 LD=riscv64-linux-gnu-ld
       - name: Boot test, virt (8250, PLIC, SiFive test finisher)
-        run: MAKEARGS="QEMU_MACHINE=virt" sh scripts/boot-test.sh build
+        run: MAKEARGS="LD=riscv64-linux-gnu-ld QEMU_MACHINE=virt" sh scripts/boot-test.sh build
       - name: Boot test, spike (HTIF console and power-off)
-        run: MAKEARGS="QEMU_MACHINE=spike" sh scripts/boot-test.sh build
+        run: MAKEARGS="LD=riscv64-linux-gnu-ld QEMU_MACHINE=spike" sh scripts/boot-test.sh build
       - name: Boot test, sifive_u (SiFive UART; the boot hart may have no S-mode)
         if: matrix.defconfig == 'generic_rv64_defconfig'
-        run: MAKEARGS="QEMU_MACHINE=sifive_u" sh scripts/boot-test.sh build
+        run: MAKEARGS="LD=riscv64-linux-gnu-ld QEMU_MACHINE=sifive_u" sh scripts/boot-test.sh build
 
   checkpatch:
     runs-on: ubuntu-24.04

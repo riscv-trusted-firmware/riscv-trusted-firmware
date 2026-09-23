@@ -50,6 +50,13 @@ make V=1 / W=1 / dump / check-toolchain / clean / distclean / help
 The toolchain choice (`LLVM=1`, `CROSS_COMPILE`) is a command-line property,
 not stored in the build directory, exactly like the Linux kernel.
 
+The position-independent monitor (`MONITOR_PIE`, the default) needs a
+linker that can make a PIE: `ld.lld`, or GNU ld built with shared library
+support. The bare-metal binutils of a distribution often are not, and a
+GCC build then takes the Linux target's linker, `LD=riscv64-linux-gnu-ld`,
+which links the same objects. Without either, the build says so and links
+the monitor for `MONITOR_LOAD_ADDR` alone.
+
 ## Configuration flow
 
 1. `scripts/kconfig.py` loads `Kconfig`, applies a defconfig or the existing
