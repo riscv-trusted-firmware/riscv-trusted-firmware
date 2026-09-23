@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+#
+# The documentation site: the pages under docs/, as Read the Docs builds
+# them (.readthedocs.yaml). "mkdocs serve" shows it locally.
+
+site_name: RISC-V Trusted Firmware
+site_description: Machine-mode firmware for RISC-V, structured as a monitor that hosts services
+site_url: https://riscv-trusted-firmware.readthedocs.io/
+repo_url: https://github.com/riscv-trusted-firmware/riscv-trusted-firmware
+repo_name: riscv-trusted-firmware
+edit_uri: edit/main/docs/
+copyright: Copyright (c) 2026, The RISC-V Trusted Firmware contributors
+docs_dir: docs
+exclude_docs: requirements.txt
+strict: true
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.footer
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Dark
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Light
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+nav:
+  - Overview: index.md
+  - Using it:
+      - Booting the monitor: boot.md
+      - Build system: build-system.md
+  - What it does:
+      - SBI implementation: sbi.md
+      - Domains: domains.md
+      - Threat model: threat-model.md
+  - Working on it:
+      - Contributing: CONTRIBUTING.md
+      - Coding style: coding-style.md

@@ -12,7 +12,7 @@ kernel's wherever the kernel has one.
   configuration, the commit and what was observed. A suspected
   vulnerability is not: report it in private through GitHub's security
   advisory of the repository, or to a maintainer listed in
-  [MAINTAINERS](MAINTAINERS), as [docs/threat-model.md](docs/threat-model.md)
+  [MAINTAINERS](https://github.com/riscv-trusted-firmware/riscv-trusted-firmware/blob/main/MAINTAINERS), as [threat-model.md](threat-model.md)
   says.
 
 ## Commits
@@ -25,7 +25,7 @@ kernel's wherever the kernel has one.
   every warning is an error), `sh scripts/boot-test.sh build`.
 * **Every commit passes checkpatch**: `make checkpatch` on the working
   tree, `scripts/checkpatch.sh <base>..` on the series. The CI runs it on
-  each commit of a pull request. [docs/coding-style.md](docs/coding-style.md)
+  each commit of a pull request. [coding-style.md](coding-style.md)
   says what checkpatch does not.
 * **The subject line** names the area first, then what the commit does, in
   the imperative: `drivers/irqchip: take the APLIC's delegation from the
@@ -87,7 +87,7 @@ until it is ratified; what is implemented is written against the text of
 the specification, and the pull request says which version. Code is
 written with the threat model in mind: every new path that takes
 something from S-mode says what it trusts and checks what it does not
-([docs/threat-model.md](docs/threat-model.md)).
+([threat-model.md](threat-model.md)).
 
 A new platform or driver comes with a way to test it, in the CI where
 QEMU can run it, and with a note in the pull request of what it was run
@@ -95,9 +95,9 @@ on where QEMU cannot.
 
 ## Where things are
 
-* [README.md](README.md): what the project is and how to build and run it.
-* [docs/build-system.md](docs/build-system.md): the tree, and how to add a
+* [README.md](https://github.com/riscv-trusted-firmware/riscv-trusted-firmware/blob/main/README.md): what the project is and how to build and run it.
+* [build-system.md](build-system.md): the tree, and how to add a
   platform, a driver, a service or an image.
-* [docs/coding-style.md](docs/coding-style.md): how the code is written.
-* [docs/threat-model.md](docs/threat-model.md): what the monitor protects.
-* [MAINTAINERS](MAINTAINERS): who reviews what.
+* [coding-style.md](coding-style.md): how the code is written.
+* [threat-model.md](threat-model.md): what the monitor protects.
+* [MAINTAINERS](https://github.com/riscv-trusted-firmware/riscv-trusted-firmware/blob/main/MAINTAINERS): who reviews what.

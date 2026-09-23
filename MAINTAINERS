@@ -1,7 +1,7 @@
 List of maintainers and how to submit changes
 =============================================
 
-How to submit a change: CONTRIBUTING.md. A pull request is reviewed by
+How to submit a change: docs/CONTRIBUTING.md. A pull request is reviewed by
 the maintainer of the area it touches and merged by a maintainer once it
 has the tags it needs.
 
