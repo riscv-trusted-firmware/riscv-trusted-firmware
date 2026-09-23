@@ -1,0 +1,13 @@
+List of maintainers and how to submit changes
+=============================================
+
+How to submit a change: CONTRIBUTING.md. A pull request is reviewed by
+the maintainer of the area it touches and merged by a maintainer once it
+has the tags it needs.
+
+The entries have the kernel's form: M: maintainer, F: files.
+
+RISC-V TRUSTED FIRMWARE (everything not listed below)
+M:	Marouene Boubakri <maroueneboubakri@gmail.com>
+F:	*
+F:	*/

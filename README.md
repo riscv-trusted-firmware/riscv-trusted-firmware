@@ -19,6 +19,7 @@ How it is started, and told where the next stage is: [docs/boot.md](docs/boot.md
 What is implemented and what is next: [docs/sbi.md](docs/sbi.md).
 What it protects, from whom, and what it does not: [docs/threat-model.md](docs/threat-model.md).
 How the code is written: [docs/coding-style.md](docs/coding-style.md).
+How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Quick start
 
